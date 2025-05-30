@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kyle's Extensions</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <header class="popup-header">
+        <h1>Kyle's Extensions</h1>
+        <div class="global-toggle-container setting">
+            <label for="globalMasterSwitchToggle">Extension Power (All):</label>
+            <label class="switch">
+                <input type="checkbox" id="globalMasterSwitchToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </header>
+
+    <div class="tab-container">
+        <nav class="tab-nav">
+            <button class="tab-button active" data-tab="fab-controls">FAB Helper</button>
+            <button class="tab-button" data-tab="general-settings">General</button>
+            </nav>
+
+        <div id="fab-controls" class="tab-content active">
+            <h5 class="tab-description">Settings and live status for FAB website automation.</h5>
+            <h2>FAB Helper</h2>
+
+            <div class="setting fab-module-toggle-container">
+                <label for="fabModulePowerToggle">FAB Helper Power:</label>
+                <label class="switch">
+                    <input type="checkbox" id="fabModulePowerToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <h3 class="sub-heading">Automation Controls</h3>
+            <div class="setting">
+                <label for="fabFilterToggle">Hide Owned (Browse Pages):</label>
+                <label class="switch">
+                    <input type="checkbox" id="fabFilterToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting">
+                <label for="fabAutoAddToggle">Auto-Add Free License (Product Pages):</label>
+                <label class="switch">
+                    <input type="checkbox" id="fabAutoAddToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting">
+                <label for="fabAutoOpenFreeToggle">Auto-Open Free Items (Browse Pages):</label>
+                <label class="switch">
+                    <input type="checkbox" id="fabAutoOpenFreeToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <h3 class="sub-heading">Live Status</h3>
+            <div class="stats-section operational-status-section">
+                <p>
+                    <span>Overall Status:</span>
+                    <span class="status-indicator-container">
+                        <span id="operationalStatusIndicator"></span>
+                        <strong id="operationalStatusText">Checking...</strong>
+                    </span>
+                </p>
+            </div>
+
+            <div class="stats-section">
+                <p><span>Items in Processing Queue:</span> <strong id="fabQueueSize">N/A</strong></p>
+                <p><span>Owned Hidden (Active Page):</span> <strong id="fabHiddenOwnedCount">N/A</strong></p>
+            </div>
+        </div>
+
+        <div id="general-settings" class="tab-content">
+            <h5 class="tab-description">General extension-wide settings and information.</h5>
+            <h2>General Info</h2>
+            <p class="placeholder-text">The "Extension Power (All)" switch in the header controls all functionalities of this extension, including all website-specific helpers.</p>
+            <p class="placeholder-text" style="margin-top: 15px;">Future global settings will appear here.</p>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>

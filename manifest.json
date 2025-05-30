@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Kyles Chrome Extensions",
+  "version": "1.5",
+  "description": "A collection of Chrome Extensions created by Kyle.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "alarms",
+    "notifications",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "*://*.fab.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": "icons/default_icon.png"
+  },
+  "content_scripts": [
+    {
+      "run_at": "document_end",
+      "js": ["fab_extension/content_scripts/fabBrowsePage.js"],
+      "matches": [
+        "https://www.fab.com/*"
+      ]
+    },
+    {
+      "run_at": "document_idle",
+      "js": ["fab_extension/content_scripts/fabProductPage.js"],
+      "matches": [
+        "https://www.fab.com/listings/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  },
+  "icons": {
+    "48": "icons/default_icon.png",
+    "128": "icons/default_icon.png"
+  },
+  "options_page": "options/options.html"
+}

@@ -1,0 +1,254 @@
+/* KylesChromeExtensions/popup.css */
+:root {
+    /* New Red Accent Colors */
+    --accent-red: #E53935; /* Material Design Red 600 */
+    --accent-red-dark: #a81e1e; /* Material Design Red 800 */
+
+    /* New Dark Theme Palette */
+    --dark-bg-primary: #212121; /* Main background */
+    --dark-bg-secondary: #303030; /* Slightly lighter bg for elements */
+    --dark-bg-tertiary: #424242;  /* For hover states or distinct sections */
+    --dark-border-color: #525252; /* Borders */
+    --dark-text-primary: #FFFFFF; /* Primary text (white) */
+    --dark-text-secondary: #E0E0E0; /* Secondary text (light gray) */
+    --dark-text-tertiary: #BDBDBD; /* Tertiary/placeholder text */
+    --dark-slider-off-bg: #555555; /* Toggle switch off state */
+
+    /* Original color variables updated for the new theme */
+    --primary-color: var(--accent-red);
+    --primary-color-dark: var(--accent-red-dark);
+    
+    --light-gray: var(--dark-bg-secondary); /* Was light, now dark for bg elements */
+    --medium-gray: var(--dark-border-color); /* Was medium, now for borders/hover */
+    --dark-gray: var(--dark-text-tertiary);   /* Was dark text, now light for placeholders */
+    --text-color: var(--dark-text-primary);
+
+    /* Status Colors (mostly kept, adjusted idle status gray) */
+    --status-green: #28a745;       /* OK_ACTIVE */
+    --status-gray: #9E9E9E;        /* OK_IDLE (Adjusted for dark theme visibility) */
+    --status-red: #dc3545;         /* SUSPENDED / ERROR */
+    --status-yellow: #ffc107;      /* RATE_LIMITED */
+    --status-purple-dark: #4B0082; /* EXTENSION_DISABLED */
+    --status-purple-light: #9370DB;/* FAB_DISABLED */
+
+    --border-radius: 5px;
+    --box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Slightly adjusted shadow for dark theme */
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    width: 340px; 
+    padding: 0;
+    margin: 0;
+    color: var(--text-color);
+    background-color: var(--dark-bg-primary); /* Dark background */
+    font-size: 14px;
+}
+
+.popup-header {
+    background-color: var(--dark-bg-primary); /* Dark background */
+    color: var(--dark-text-primary); /* Ensure white text on dark background */
+    padding: 10px 15px;
+    text-align: center;
+}
+.popup-header h1 {
+    margin: 0 0 8px 0;
+    font-weight: 500;
+    font-size: 1.2em;
+}
+
+.global-toggle-container {
+    background-color: var(--primary-color-dark); /* Will be accent-red-dark */
+    padding: 8px 10px;
+    margin: 0 -15px -10px -15px; /* Extend to edges of header */
+    border-top: 1px solid rgba(255,255,255,0.1); /* Lighter border for dark theme */
+}
+.global-toggle-container label {
+    color: var(--dark-text-primary);
+    font-weight: bold; 
+}
+
+.tab-nav {
+    display: flex;
+    background-color: var(--light-gray); /* dark-bg-secondary */
+    border-bottom: 1px solid var(--medium-gray); /* dark-border-color */
+}
+
+.tab-button {
+    flex-grow: 1;
+    padding: 10px 15px;
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    font-size: 0.95em;
+    color: var(--dark-gray); /* dark-text-tertiary for inactive */
+    transition: background-color 0.2s ease, color 0.2s ease;
+    border-bottom: 3px solid transparent;
+}
+.tab-button:hover {
+    background-color: var(--dark-bg-tertiary); /* Lighter dark for hover */
+    color: var(--primary-color); /* accent-red */
+}
+.tab-button.active {
+    color: var(--primary-color); /* accent-red */
+    font-weight: 500;
+    border-bottom-color: var(--primary-color); /* accent-red */
+}
+
+.tab-content {
+    display: none;
+    padding: 15px;
+}
+.tab-content.active {
+    display: block;
+}
+
+.tab-description {
+    font-size: 0.85em;
+    color: var(--dark-gray); /* dark-text-tertiary */
+    font-weight: normal;
+    margin-top: -8px; 
+    margin-bottom: 12px;
+    font-style: italic;
+    text-align: center;
+    padding: 0 5px;
+}
+
+.tab-content h2 {
+    font-size: 1.15em;
+    color: var(--primary-color); /* accent-red */
+    margin-top: 0;
+    margin-bottom: 10px; 
+    text-align: center;
+}
+
+.sub-heading {
+    font-size: 1em;
+    color: var(--primary-color-dark); /* accent-red-dark */
+    margin-top: 15px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--medium-gray); /* dark-border-color */
+    padding-bottom: 5px;
+}
+.tab-content .sub-heading:first-of-type {
+    margin-top: 5px;
+}
+
+
+.setting {
+    margin-bottom: 10px; 
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px; 
+    background-color: var(--light-gray); /* dark-bg-secondary */
+    border-radius: var(--border-radius);
+}
+.setting label:not(.switch) {
+    margin-right: 10px;
+    flex-grow: 1;
+    font-size: 0.9em; 
+    color: var(--text-color); /* Primary text color for labels */
+}
+
+.fab-module-toggle-container {
+    margin-bottom: 15px !important;
+    background-color: var(--dark-bg-tertiary); /* A slightly different dark shade */
+    border: 1px solid var(--primary-color); /* accent-red */
+}
+.fab-module-toggle-container label {
+    font-weight: bold;
+    color: var(--primary-color-dark); /* accent-red-dark */
+}
+
+
+.switch { position: relative; display: inline-block; width: 40px; height: 20px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--dark-slider-off-bg); -webkit-transition: .4s; transition: .4s; border-radius: 20px; }
+.slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; -webkit-transition: .4s; transition: .4s; border-radius: 50%; }
+input:checked + .slider { background-color: var(--primary-color); /* accent-red */ }
+input:focus + .slider { box-shadow: 0 0 1px var(--primary-color); /* accent-red */ }
+input:checked + .slider:before { -webkit-transform: translateX(20px); -ms-transform: translateX(20px); transform: translateX(20px); }
+
+.stats-section {
+    margin-top: 10px; 
+    padding-top: 10px; 
+    border-top: 1px solid var(--medium-gray); /* dark-border-color */
+}
+.stats-section:first-of-type {
+    margin-top: 10px;
+    padding-top: 0;
+    border-top: none;
+}
+.operational-status-section p { 
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.95em; 
+    padding: 5px 0;
+    color: var(--text-color); /* Primary text color */
+}
+.stats-section p {
+    margin: 6px 0; 
+    font-size: 0.9em;
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-color); /* Primary text color */
+}
+.stats-section strong {
+    color: var(--primary-color-dark); /* accent-red-dark */
+    font-weight: 500;
+}
+
+.status-indicator-container {
+    display: flex;
+    align-items: center;
+}
+#operationalStatusIndicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #757575; /* Neutral dark gray for default dot */
+    margin-right: 8px;
+    display: inline-block;
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.1); /* Light border for dark theme */
+}
+#operationalStatusText {
+    font-weight: bold; 
+    color: var(--text-color); /* Primary text color */
+}
+
+#operationalStatusIndicator.status-extension-disabled { background-color: var(--status-purple-dark); }
+#operationalStatusIndicator.status-fab-disabled { background-color: var(--status-purple-light); }
+#operationalStatusIndicator.status-ok-active { background-color: var(--status-green); }
+#operationalStatusIndicator.status-ok-idle { background-color: var(--status-gray); }
+#operationalStatusIndicator.status-suspended { background-color: var(--status-red); }
+#operationalStatusIndicator.status-rate-limited { background-color: var(--status-yellow); }
+#operationalStatusIndicator.status-error { background-color: var(--status-red); }
+
+
+.placeholder-text {
+    color: var(--dark-gray); /* dark-text-tertiary */
+    font-style: italic;
+    font-size: 0.9em;
+}
+
+/* Style for disabled toggles in dark mode */
+.effectively-disabled, 
+.setting input[type="checkbox"]:disabled + .slider {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.effectively-disabled .setting label,
+.setting input[type="checkbox"]:disabled ~ span /* May need to target specific label if slider is sibling */
+ {
+    color: var(--dark-text-tertiary) !important; /* Make label text look disabled */
+}
+
+.setting label.switch input[type="checkbox"]:disabled + .slider {
+    background-color: #424242 !important; /* Darker, distinct disabled slider background */
+}
+.setting label.switch input[type="checkbox"]:disabled + .slider:before {
+    background-color: #757575 !important; /* Darker circle for disabled slider */
+}
