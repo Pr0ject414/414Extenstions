@@ -1,8 +1,13 @@
 // KylesChromeExtensions/shared_modules/fetchUtils.js
-import * as AppState from './appState.js'; // For setRateLimitCoolDown
-import * as CoreConstants from './coreConstants.js'; // For retry params, MAX_DELAY_MS
+import * as AppState from './appState.js'; // For setRateLimitCoolDown and dynamic settings
 
-export async function fetchWithBackoff(url, options, attempt = 1, maxRetries = CoreConstants.DEFAULT_MAX_RETRIES, currentDelay = CoreConstants.DEFAULT_INITIAL_DELAY_MS) {
+export async function fetchWithBackoff(url, options, attempt = 1) {
+    // Get dynamic values from AppState
+    const maxRetries = AppState.globalMaxRetries;
+    const initialDelay = AppState.globalInitialDelayMs;
+    const maxDelay = AppState.globalMaxDelayMs;
+    let currentDelay = initialDelay; // Start with initial delay for the first retry
+
     try {
         const response = await fetch(url, options);
 
@@ -11,9 +16,8 @@ export async function fetchWithBackoff(url, options, attempt = 1, maxRetries = C
 
             if (attempt >= maxRetries) {
                 console.error(`fetchWithBackoff: Max retries reached for ${url} after 429. Applying global cool-down.`);
-                const coolDownDuration = currentDelay * 2 > CoreConstants.MAX_DELAY_MS ? CoreConstants.MAX_DELAY_MS : currentDelay * 2;
+                const coolDownDuration = currentDelay * 2 > maxDelay ? maxDelay : currentDelay * 2;
                 AppState.setRateLimitCoolDown(Date.now() + coolDownDuration);
-                // No need to explicitly save here, the caller or a periodic save should handle it or state manager itself
                 return response;
             }
 
@@ -34,13 +38,13 @@ export async function fetchWithBackoff(url, options, attempt = 1, maxRetries = C
                 }
             }
 
-            delay = Math.min(delay, CoreConstants.MAX_DELAY_MS);
+            delay = Math.min(delay, maxDelay);
             delay = Math.max(delay, 1000); // Ensure at least 1s delay
 
             console.warn(`fetchWithBackoff: Retrying ${url} in ${Math.round(delay / 1000)}s.`);
             await new Promise(resolve => setTimeout(resolve, delay));
 
-            return fetchWithBackoff(url, options, attempt + 1, maxRetries, currentDelay * 2);
+            return fetchWithBackoff(url, options, attempt + 1); // Pass only `attempt + 1`
         }
         return response;
     } catch (error) {
@@ -51,6 +55,6 @@ export async function fetchWithBackoff(url, options, attempt = 1, maxRetries = C
         }
         console.warn(`fetchWithBackoff: Retrying ${url} due to error in ${Math.round(currentDelay / 1000)}s.`);
         await new Promise(resolve => setTimeout(resolve, currentDelay));
-        return fetchWithBackoff(url, options, attempt + 1, maxRetries, currentDelay * 2);
+        return fetchWithBackoff(url, options, attempt + 1); // Pass only `attempt + 1`
     }
 }

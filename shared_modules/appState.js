@@ -6,6 +6,11 @@ export let rateLimitCoolDownUntil = 0; // Timestamp for global cool-down
 export let globalMasterSwitchEnabled = true; // Default to ON for the entire extension
 export let fabModuleEnabled = true; // Default to ON for the FAB module (managed globally)
 
+// Configurable global network settings (loaded from storage)
+export let globalMaxRetries = 5; // Default value
+export let globalInitialDelayMs = 30000; // Default value (30 seconds)
+export let globalMaxDelayMs = 300000; // Default value (5 minutes)
+
 // --- Global State Modifiers ---
 
 /**
@@ -58,6 +63,10 @@ export async function saveGlobalState() {
             [CoreConstants.RATE_LIMIT_COOL_DOWN_UNTIL_KEY]: rateLimitCoolDownUntil,
             [CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY]: globalMasterSwitchEnabled,
             [CoreConstants.FAB_MODULE_ENABLED_KEY]: fabModuleEnabled,
+            // Save configurable global network settings
+            [CoreConstants.GLOBAL_MAX_RETRIES_KEY]: globalMaxRetries,
+            [CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY]: globalInitialDelayMs,
+            [CoreConstants.GLOBAL_MAX_DELAY_MS_KEY]: globalMaxDelayMs,
         };
         chrome.storage.local.set(stateToSave, () => {
             if (chrome.runtime.lastError) {
@@ -76,7 +85,10 @@ export async function loadGlobalState() {
         chrome.storage.local.get([
             CoreConstants.RATE_LIMIT_COOL_DOWN_UNTIL_KEY,
             CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY,
-            CoreConstants.FAB_MODULE_ENABLED_KEY
+            CoreConstants.FAB_MODULE_ENABLED_KEY,
+            CoreConstants.GLOBAL_MAX_RETRIES_KEY,
+            CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY,
+            CoreConstants.GLOBAL_MAX_DELAY_MS_KEY
         ], (result) => {
             if (chrome.runtime.lastError) {
                 console.error("AppState: Error loading global state:", chrome.runtime.lastError.message);
@@ -88,10 +100,18 @@ export async function loadGlobalState() {
             globalMasterSwitchEnabled = result[CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY] === undefined ? true : result[CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY];
             fabModuleEnabled = result[CoreConstants.FAB_MODULE_ENABLED_KEY] === undefined ? true : result[CoreConstants.FAB_MODULE_ENABLED_KEY];
 
+            // Load configurable global network settings with defaults
+            globalMaxRetries = result[CoreConstants.GLOBAL_MAX_RETRIES_KEY] === undefined ? 5 : result[CoreConstants.GLOBAL_MAX_RETRIES_KEY]; //
+            globalInitialDelayMs = result[CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY] === undefined ? 30000 : result[CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY]; //
+            globalMaxDelayMs = result[CoreConstants.GLOBAL_MAX_DELAY_MS_KEY] === undefined ? 300000 : result[CoreConstants.GLOBAL_MAX_DELAY_MS_KEY]; //
+
             console.log("AppState: Global state loaded.", {
                 globalMasterSwitchEnabled,
                 fabModuleEnabled,
-                rateLimitCoolDownUntil: rateLimitCoolDownUntil > 0 ? new Date(rateLimitCoolDownUntil).toISOString() : "Not set"
+                rateLimitCoolDownUntil: rateLimitCoolDownUntil > 0 ? new Date(rateLimitCoolDownUntil).toISOString() : "Not set",
+                globalMaxRetries,
+                globalInitialDelayMs,
+                globalMaxDelayMs
             });
             resolve();
         });

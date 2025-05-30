@@ -1,0 +1,192 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    padding: 20px;
+    background-color: #212121; /* Dark background */
+    color: #FFFFFF; /* White text */
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    /* Add flex properties to center the wrapper */
+    display: flex;
+    flex-direction: column; /* Stack children vertically */
+    align-items: center; /* Center children horizontally */
+    min-height: 100vh; /* Ensure body takes at least full viewport height */
+    box-sizing: border-box; /* Include padding in width/height calculations */
+}
+
+/* New style for the wrapper */
+.settings-content-wrapper {
+    width: 100%; /* Take full width of its flex container (body) */
+    max-width: 800px; /* Or your preferred max width, e.g., 700px, 900px */
+    padding: 0 20px; /* Optional: adds some horizontal padding inside the wrapper */
+    box-sizing: border-box;
+}
+
+
+h1, h2 {
+    color: #E53935; /* Accent Red */
+    border-bottom: 1px solid #525252; /* Dark border */
+    padding-bottom: 8px;
+    margin-top: 25px;
+    margin-bottom: 15px;
+    font-weight: 500;
+}
+
+h1 {
+    text-align: center;
+    font-size: 1.8em;
+    margin-bottom: 30px;
+}
+
+h2 {
+    font-size: 1.3em;
+}
+
+.setting-group {
+    background-color: #303030; /* Lighter dark background for groups */
+    border: 1px solid #525252; /* Dark border */
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+}
+
+.setting {
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+}
+
+.setting label {
+    flex-basis: 65%;
+    margin-right: 15px;
+    color: #E0E0E0;
+    font-size: 0.95em;
+}
+
+.setting input[type="number"],
+.setting input[type="text"] {
+    flex-basis: 30%;
+    padding: 10px;
+    border: 1px solid #525252;
+    border-radius: 5px;
+    background-color: #424242;
+    color: #FFFFFF;
+    font-size: 0.95em;
+    box-sizing: border-box;
+}
+
+.setting input[type="number"]:focus,
+.setting input[type="text"]:focus {
+    outline: none;
+    border-color: #E53935;
+    box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.25);
+}
+
+.button-group { /* This class wasn't explicitly used for save buttons, but can be kept for general use */
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-start;
+}
+
+/* Style for individual save/action buttons directly within setting-group */
+.setting-group > button {
+    padding: 10px 20px;
+    background-color: #E53935;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+    margin-top: 10px; /* Add some space above the button if it follows settings directly */
+}
+
+.setting-group > button:hover {
+    background-color: #a81e1e;
+}
+
+.status-message {
+    margin-top: 10px;
+    font-weight: 500;
+    font-size: 0.9em;
+    display: block;
+    min-height: 1.5em;
+}
+
+.status-message.success {
+    color: #28a745;
+}
+.status-message.error {
+    color: #dc3545;
+}
+.status-message.warning {
+    color: #ffc107;
+}
+
+p { /* General paragraph styling, e.g., the description for Queue Item */
+    color: #BDBDBD;
+    font-size: 0.9em;
+    line-height: 1.5;
+    margin-bottom: 15px; /* Space below paragraph */
+}
+
+/* Tab System Styles */
+.tab-container {
+    width: 100%;
+    margin-top: 20px;
+}
+
+.tab-nav {
+    display: flex;
+    background-color: #303030;
+    border-bottom: 2px solid #525252;
+    margin-bottom: 20px;
+}
+
+.tab-button {
+    flex-grow: 1;
+    padding: 12px 15px;
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    font-size: 1em;
+    color: #BDBDBD;
+    transition: background-color 0.2s ease, color 0.2s ease, border-bottom-color 0.2s ease;
+    border-bottom: 3px solid transparent;
+    text-align: center;
+    font-weight: 500;
+}
+
+.tab-button:hover {
+    background-color: #424242;
+    color: #FFFFFF;
+}
+
+.tab-button.active {
+    color: #E53935;
+    border-bottom-color: #E53935;
+    font-weight: 600;
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease-in-out; /* Adjusted animation */
+}
+
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); } /* Slight upward animation */
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.tab-content .setting-group:last-child {
+    margin-bottom: 0;
+}

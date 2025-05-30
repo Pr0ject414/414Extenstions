@@ -15,8 +15,7 @@ export async function init() {
     await FabState.loadFabState();
     FabVerification.setupVerificationAlarm(); // Sets up the main verification alarm
 
-    // Initial queue processing if conditions allow
-    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && !AppState.isRateLimited()) {
+    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
         FabQueueManager.processFabTabQueue();
     }
     console.log("FabBackground: Initialized.");
@@ -24,21 +23,16 @@ export async function init() {
 
 export async function onStartup() {
     console.log("FabBackground: onStartup sequence.");
-    // Most initialization is covered by init(), which should be called after AppState is loaded.
-    // If there's anything specific to startup beyond the initial load, add it here.
-    // For now, init() covers load, alarm setup, and initial queue processing.
-    // Ensure init is called if not already by the main background.js onStartup logic.
-    // Typically, the main background.js calls init() after loading AppState.
+    // Covered by init() in main background.js
 }
 
 export async function onInstalled(details) {
     console.log("FabBackground: onInstalled sequence. Reason:", details.reason);
-    // Load state and set up alarms (init() might cover this, or call parts of it)
-    await FabState.loadFabState(); // Ensure state is loaded
-    FabVerification.setupVerificationAlarm(); // Ensure alarm is set
+    await FabState.loadFabState(); 
+    FabVerification.setupVerificationAlarm(); 
 
     if (details.reason === "install" || details.reason === "update") {
-        FabState.resetActiveTabs(); // Reset runtime counter
+        FabState.resetActiveTabs(); 
         console.log("FabBackground: Active FAB processing tabs reset due to install/update.");
     }
 }
@@ -49,12 +43,13 @@ export function handleMessage(request, sender, sendResponse) {
     console.log("FabBackground: Received message", request.action);
 
     if (request.action === "getFabGlobalStats") {
-        // Construct response using FabState and AppState (read-only for AppState here)
         let operationalStatus;
         if (!AppState.globalMasterSwitchEnabled) {
             operationalStatus = "EXTENSION_DISABLED";
         } else if (!AppState.fabModuleEnabled) {
             operationalStatus = "FAB_DISABLED";
+        } else if (!FabState.fabQueueProcessingEnabled) {
+            operationalStatus = "QUEUE_DISABLED";
         } else if (FabState.autoProcessingSuspended) {
             operationalStatus = "SUSPENDED";
         } else if (AppState.isRateLimited()) {
@@ -67,23 +62,22 @@ export function handleMessage(request, sender, sendResponse) {
 
         let responseData = {
             queueSize: FabState.getFabUrlQueueSize(),
-            hiddenOwnedCount: "N/A", // This part needs to message the active content script
+            hiddenOwnedCount: "N/A", 
             operationalStatus: operationalStatus,
-            // These global states are for the popup to reflect the coordinator's state
             globalMasterSwitchEnabled: AppState.globalMasterSwitchEnabled,
-            fabModuleEnabled: AppState.fabModuleEnabled
+            fabModuleEnabled: AppState.fabModuleEnabled,
+            fabQueueProcessingEnabled: FabState.fabQueueProcessingEnabled,
         };
 
-        // Query active tab for hiddenOwnedCount (similar to original background.js)
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (chrome.runtime.lastError) {
                 console.warn("FabBackground (getFabGlobalStats): Error querying active tab:", chrome.runtime.lastError.message);
-                sendResponse(responseData); // Send with default hiddenOwnedCount
+                sendResponse(responseData);
                 return;
             }
             if (tabs.length > 0 && tabs[0].id) {
                 const activeTab = tabs[0];
-                if (activeTab.url && activeTab.url.includes("fab.com")) { // Check if it's a FAB page
+                if (activeTab.url && activeTab.url.includes("fab.com")) { 
                     chrome.tabs.sendMessage(activeTab.id, { action: "getHiddenOwnedItemCount" }, (contentResponse) => {
                         if (chrome.runtime.lastError) {
                             // console.warn("FabBackground: Error getting hiddenOwnedCount:", chrome.runtime.lastError.message);
@@ -92,15 +86,15 @@ export function handleMessage(request, sender, sendResponse) {
                         }
                         sendResponse(responseData);
                     });
-                    return; // Keep channel open for async response
+                    return; 
                 } else {
-                    sendResponse(responseData); // Not on a FAB page or no URL
+                    sendResponse(responseData); 
                 }
             } else {
-                sendResponse(responseData); // No active tab found
+                sendResponse(responseData); 
             }
         });
-        return true; // Crucial for asynchronous sendResponse
+        return true; 
 
     } else if (request.action === "openTabInBackground" && request.url) {
         if (!AppState.globalMasterSwitchEnabled) {
@@ -109,30 +103,39 @@ export function handleMessage(request, sender, sendResponse) {
         if (!AppState.fabModuleEnabled) {
             sendResponse({ status: "fab_module_disabled" }); return true;
         }
-        if (FabState.autoProcessingSuspended) {
-            sendResponse({ status: "suspended" }); return true;
-        }
-        // Rate limit check is done by FabQueueManager.processFabTabQueue via AppState.isRateLimited()
 
-        if (FabQueueManager.addUrlToQueue(request.url)) { // addUrlToQueue now uses FabState
-            FabState.saveFabState();
-            if (!AppState.isRateLimited()) { // Check global rate limit before processing
+        let successfullyQueued = FabQueueManager.addUrlToQueue(request.url); 
+
+        if (successfullyQueued) {
+            FabState.saveFabState(); 
+
+            if (!FabState.fabQueueProcessingEnabled) {
+                console.log("FabBackground: Item queued but queue processing is disabled. URL:", request.url);
+                sendResponse({ status: "queued_processing_disabled" }); 
+                return true;
+            }
+            if (FabState.autoProcessingSuspended) { 
+                sendResponse({ status: "suspended" }); return true;
+            }
+            
+            if (!AppState.isRateLimited()) {
                 FabQueueManager.processFabTabQueue();
             }
-            sendResponse({ status: "queued" });
+            // If processing is enabled and not suspended, the sendResponse from processFabTabQueue might be more relevant
+            // or we can assume processing will start if conditions allow.
+            sendResponse({ status: "queued_and_processing_attempted" }); // Status indicating queuing and attempt to process
         } else {
             sendResponse({ status: "already_queued_or_invalid" });
         }
-        return true;
+        return true; 
 
     } else if (request.action === "closeFabTab") {
         if (sender.tab && sender.tab.id) {
             const tabIdToClose = sender.tab.id;
-            FabVerification.markItemForVerificationOnTabClose(tabIdToClose); // Uses FabState
-            if (FabState.activeFabProcessingTabs > 0) { // Check before decrement
+            FabVerification.markItemForVerificationOnTabClose(tabIdToClose); 
+            if (FabState.activeFabProcessingTabs > 0) { 
                  FabState.decrementActiveTabs();
             }
-            // Retry logic for closing tab
             const MAX_RETRIES = 3;
             let retryCount = 0;
 
@@ -143,15 +146,14 @@ export function handleMessage(request, sender, sendResponse) {
                         if (errorMessage.includes("Tabs cannot be edited right now") && retryCount < MAX_RETRIES) {
                             retryCount++;
                             console.warn(`FabBackground: Retrying tab close for ${tabIdToClose} (Attempt ${retryCount}/${MAX_RETRIES}):`, errorMessage);
-                            setTimeout(attemptTabClose, 500); // Retry after 500ms
+                            setTimeout(attemptTabClose, 500); 
                         } else {
                             console.error(`FabBackground: Error closing tab ${tabIdToClose} after ${retryCount} retries:`, errorMessage);
                         }
                     } else {
                         console.log(`FabBackground: Tab ${tabIdToClose} closed successfully.`);
                     }
-                    // This block runs after the final attempt (success or max retries reached)
-                    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && !AppState.isRateLimited()) {
+                    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
                         FabQueueManager.processFabTabQueue();
                     }
                 });
@@ -170,57 +172,90 @@ export function handleMessage(request, sender, sendResponse) {
         console.log(`FabBackground: item_add_rate_limited from content script for Listing: ${request.listingId}, URL: ${request.url}.`);
         let needsGlobalBroadcast = false;
         if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled) {
-            if (FabQueueManager.addUrlToQueue(request.url)) { // Uses FabState
+            // Re-queue the item if queue processing is off, or if it's on and we want to retry later
+            if (FabQueueManager.addUrlToQueue(request.url)) { 
                 console.log(`FabBackground: Re-queued ${request.url} due to content script reported rate limit.`);
             }
-            // This message implies a 429 was hit by a content script; update global cooldown.
-            if (AppState.setRateLimitCoolDown(Date.now() + CoreConstants.MAX_DELAY_MS)) {
-                AppState.saveGlobalState(); // Save the AppState with the new cooldown
+            
+            if (AppState.setRateLimitCoolDown(Date.now() + AppState.globalMaxDelayMs)) {
+                AppState.saveGlobalState(); 
                 console.log(`FabBackground: Global cooldown set due to item_add_rate_limited.`);
-                needsGlobalBroadcast = true; // Signal coordinator to broadcast
+                needsGlobalBroadcast = true; 
             }
-            FabState.saveFabState(); // Save FabState as queue might have changed
+            FabState.saveFabState(); 
         }
-        // The coordinator (main background.js) will be responsible for broadcasting the new global state.
-        // We signal it if a broadcast is immediately warranted due to this action changing the global cooldown.
         sendResponse({ status: "rate_limit_acknowledged_by_fab", needsGlobalBroadcast: needsGlobalBroadcast });
+        return true;
+    } else if (request.action === "setFabQueueProcessingEnabled") {
+        if (typeof request.enabled === 'boolean') {
+            FabState.setFabQueueProcessingEnabled(request.enabled);
+            FabState.saveFabState();
+            console.log(`FabBackground: FAB Queue Processing set to ${request.enabled}.`);
+            if (request.enabled && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && !AppState.isRateLimited()) {
+                FabQueueManager.processFabTabQueue();
+            }
+            sendResponse({ success: true });
+        } else {
+            sendResponse({ success: false, error: "Invalid 'enabled' value for FabQueueProcessingEnabled." });
+        }
+        return true;
+    } else if (request.action === "queueFabItemOnly" && request.url) { 
+        if (!AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled) {
+            sendResponse({ success: false, error: "Extension or FAB module is disabled." });
+            return true;
+        }
+        if (FabQueueManager.addUrlToQueue(request.url)) { 
+            FabState.saveFabState(); 
+            console.log(`FabBackground: Successfully queued item for manual addition: ${request.url}`);
+            sendResponse({ success: true, message: "Item queued successfully." });
+        } else {
+            sendResponse({ success: false, error: "Failed to queue item or already in queue." });
+        }
         return true;
     }
 
-    // Default for unhandled FAB actions
     console.warn(`FabBackground: Unhandled message action: ${request.action}`);
     sendResponse({ success: false, error: "Unknown FAB action" });
-    return false; // Or true if there's a possibility of async handling later
+    return false; 
 }
 
 export async function handleAlarm(alarm) {
     console.log("FabBackground: Handling alarm", alarm.name);
-    // Assumes main background.js has already checked globalMasterSwitchEnabled and fabModuleEnabled before routing here.
 
-    const wasRateLimitedBeforeAlarm = AppState.isRateLimited(); // Check global rate limit
-
+    if (!AppState.globalMasterSwitchEnabled) {
+        console.log(`FabBackground: Global Master switch OFF. Skipping alarm: ${alarm.name}`);
+        return;
+    }
+    if (!AppState.fabModuleEnabled) {
+        console.log(`FabBackground: FAB Module switch OFF. Skipping FAB alarm: ${alarm.name}`);
+        return;
+    }
+    
+    // Verification alarms should run regardless of fabQueueProcessingEnabled
     if (alarm.name === FabConstants.FAB_VERIFICATION_ALARM_NAME ||
         alarm.name.startsWith(FabConstants.FAB_VERIFICATION_ALARM_NAME + FabConstants.FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX)) {
-        await FabVerification.handleVerificationAlarm(); // This function internally checks AppState.isRateLimited
-    } else if (alarm.name === FabConstants.FAB_QUEUE_PROCESS_RETRY_ALARM_NAME) {
-        // FabQueueManager.processFabTabQueue also internally checks AppState.isRateLimited
+        await FabVerification.handleVerificationAlarm();
+    } 
+    // Queue processing alarms should only run if queue processing is enabled
+    else if (alarm.name === FabConstants.FAB_QUEUE_PROCESS_RETRY_ALARM_NAME) {
+        if (!FabState.fabQueueProcessingEnabled) {
+            console.log(`FabBackground: FAB Queue Processing DISABLED. Skipping queue-related alarm: ${alarm.name}`);
+            return;
+        }
         FabQueueManager.processFabTabQueue();
     }
-
-    // The main background.js coordinator will handle broadcasting changes in rate limit status after this handler.
 }
 
 export async function handleTabRemoved(tabId, removeInfo) {
     console.log(`FabBackground: Handling tab removal for tabId: ${tabId}`);
-    // Assumes main background.js has checked globalMasterSwitchEnabled and fabModuleEnabled.
 
-    const wasProcessing = FabVerification.markItemForVerificationOnTabClose(tabId); // Uses FabState
+    const wasProcessing = FabVerification.markItemForVerificationOnTabClose(tabId); 
     if (wasProcessing) {
-        if (FabState.activeFabProcessingTabs > 0) { // Check before decrement
+        if (FabState.activeFabProcessingTabs > 0) { 
             FabState.decrementActiveTabs();
         }
         await FabState.saveFabState();
-        if (!AppState.isRateLimited()) { // Check global rate limit before processing queue
+        if (FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
             FabQueueManager.processFabTabQueue();
         }
     }

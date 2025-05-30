@@ -2,16 +2,13 @@
 import * as CoreConstants from './shared_modules/coreConstants.js';
 import * as AppState from './shared_modules/appState.js';
 import * as LanguageManager from './shared_modules/languageManager.js';
-// FetchUtils might be imported if used directly by the coordinator, otherwise, it's used by other modules.
 
-// Import feature-specific background handlers & their constants if needed for routing/setup
 import * as FabBackground from './fab_extension/fabBackground.js';
-import * as FabConstants from './fab_extension/background_modules/fabConstants.js'; // For alarm name checks, etc.
+import * as FabConstants from './fab_extension/background_modules/fabConstants.js';
+import * as FabState from './fab_extension/background_modules/fabState.js';
 
-let lastBroadcastedRateLimitState = null; // Initialize with null to force first broadcast
+let lastBroadcastedRateLimitState = null;
 
-// --- Utility to broadcast FAB content script status ---
-// This remains global as it depends on global AppState (master switch, fab module switch, rate limit)
 function broadcastFabContentScriptStatus() {
     const effectivelyPaused = !AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || AppState.isRateLimited();
 
@@ -30,30 +27,27 @@ function broadcastFabContentScriptStatus() {
             if (tab.id) {
                 chrome.tabs.sendMessage(tab.id, {
                     action: "fab_content_scripts_status",
-                    rateLimited: effectivelyPaused // Content script uses 'rateLimited' key for this status
+                    rateLimited: effectivelyPaused
                 }).catch(error => {
-                    // Optional: console.log(`Error sending message to tab ${tab.id}: ${error.message}`)
+                    // console.log(`Error sending message to tab ${tab.id}: ${error.message}`)
                 });
             }
         });
     });
 }
 
-
-// --- Message Listener (Router) ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    // Global actions handled by the coordinator
     if (request.action === "setGlobalMasterSwitch") {
         if (typeof request.enabled === 'boolean') {
             AppState.setGlobalMasterSwitchEnabled(request.enabled);
             AppState.saveGlobalState();
             console.log(`Background Coordinator: Global Master switch set to ${request.enabled}.`);
-            broadcastFabContentScriptStatus(); // Update content scripts based on new global state
+            broadcastFabContentScriptStatus();
             sendResponse({ success: true, globalMasterSwitchEnabled: AppState.globalMasterSwitchEnabled });
         } else {
             sendResponse({ success: false, error: "Invalid 'enabled' value for GlobalMasterSwitch." });
         }
-        return true; // Indicate async response or if further processing might occur
+        return true;
     }
 
     if (request.action === "setFabModuleEnabled") {
@@ -61,7 +55,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             AppState.setFabModuleEnabled(request.enabled);
             AppState.saveGlobalState();
             console.log(`Background Coordinator: FAB Module Enabled set to ${request.enabled}.`);
-            broadcastFabContentScriptStatus(); // Update content scripts based on new module state
+            broadcastFabContentScriptStatus();
             sendResponse({ success: true, fabModuleEnabled: AppState.fabModuleEnabled });
         } else {
             sendResponse({ success: false, error: "Invalid 'enabled' value for FabModuleEnabled." });
@@ -71,72 +65,61 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'getLanguages') {
         sendResponse({ languages: LanguageManager.getLanguagesArray() });
-        return false; // Synchronous response
+        return false;
     }
 
-    if (request.action === "getFabRateLimitStatus") { // Content scripts query this on startup
+    if (request.action === "getFabRateLimitStatus") {
         sendResponse({ rateLimited: AppState.isRateLimited() });
-        // Also inform based on module enabled status for initial content script setup
-        // broadcastFabContentScriptStatus(); // Let content script decide based on the message it receives
-        return false; // Synchronous response
+        return false;
+    }
+    
+    if (request.action === "settingsUpdated") {
+        console.log(`Background Coordinator: Settings of type '${request.type}' updated from options page. Reloading relevant states.`);
+        (async () => {
+            await AppState.loadGlobalState(); // Always reload global state
+            if (request.type === "fab" || request.type === "global") { // FAB settings might depend on global, or be FAB specific
+                await FabState.loadFabState(); // Reload FAB specific settings
+                // If fabBrowsePage settings changed, content scripts will pick them up via storage.onChanged
+            }
+            // Potentially re-initialize or notify modules if needed after settings load
+            // For now, assuming modules pick up changes from their state objects or storage listeners
+            console.log("Background Coordinator: Relevant states reloaded after settings update.");
+        })();
+        sendResponse({ success: true, message: "States are being reloaded." });
+        return true; // Indicate async potential if further actions were taken
     }
 
-    // Route FAB-specific actions to FabBackground handler
-    // A more robust routing might use a prefix or a dedicated 'module' field in the request
     const fabActions = [
-        "getFabGlobalStats", "openTabInBackground", "closeFabTab", "item_add_rate_limited"
-        // Add other FAB-specific action names here
+        "getFabGlobalStats", "openTabInBackground", "closeFabTab", "item_add_rate_limited",
+        "setFabQueueProcessingEnabled", "queueFabItemOnly"
     ];
 
-    if (fabActions.includes(request.action) || (request.action && request.action.toLowerCase().includes('fab'))) { // Example heuristic
+    if (fabActions.includes(request.action)) {
         return FabBackground.handleMessage(request, sender, sendResponse);
     }
 
     console.warn(`Background Coordinator: Unhandled message action: ${request.action}`);
-    // sendResponse({ success: false, error: "Unknown action" }); // Optional: default response
-    return false; // Or true if you want to keep the channel open by default
+    return false;
 });
 
-// --- Lifecycle Event Listeners ---
 chrome.runtime.onStartup.addListener(async () => {
     console.log("Background Coordinator: Extension startup.");
     await AppState.loadGlobalState();
-    LanguageManager.loadLanguages(); // Assuming this is synchronous or handles its own async
-    await FabBackground.onStartup(); // Delegate to FAB handler
-    broadcastFabContentScriptStatus(); // Initial status broadcast
+    LanguageManager.loadLanguages();
+    await FabBackground.onStartup();
+    broadcastFabContentScriptStatus();
 });
 
 chrome.runtime.onInstalled.addListener(async (details) => {
     console.log("Background Coordinator: Extension installed/updated:", details.reason);
-    await AppState.loadGlobalState(); // Load existing global state first
+    await AppState.loadGlobalState();
     LanguageManager.loadLanguages();
 
-    // Initialize default global settings if not present
-    const defaultGlobalSettings = {
-        [CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY]: AppState.globalMasterSwitchEnabled, // Use loaded or default from AppState
-        [CoreConstants.FAB_MODULE_ENABLED_KEY]: AppState.fabModuleEnabled, // Use loaded or default from AppState
-    };
-    let updateGlobalStateInStorage = false;
-    if (AppState.globalMasterSwitchEnabled === undefined) { // Check if AppState had to use its hardcoded default
-        defaultGlobalSettings[CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY] = true; // Explicit default
-        AppState.setGlobalMasterSwitchEnabled(true);
-        updateGlobalStateInStorage = true;
-    }
-    if (AppState.fabModuleEnabled === undefined) {
-        defaultGlobalSettings[CoreConstants.FAB_MODULE_ENABLED_KEY] = true; // Explicit default
-        AppState.setFabModuleEnabled(true);
-        updateGlobalStateInStorage = true;
-    }
-    if (updateGlobalStateInStorage) {
-        await AppState.saveGlobalState();
-    }
-    
-    // Handle default settings for FAB module (these are simple storage flags, not part of fabState.js persisted objects)
-    // These are typically toggled by the popup and read by content scripts.
     const fabDefaultUiSettingsKeys = {
         [FabConstants.FAB_FILTER_ENABLED_KEY]: false,
         [FabConstants.FAB_AUTO_OPEN_FREE_ENABLED_KEY]: false,
         [FabConstants.FAB_AUTO_ADD_ENABLED_KEY]: false,
+        [FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY]: false,
     };
     chrome.storage.local.get(Object.keys(fabDefaultUiSettingsKeys), (result) => {
         let newFabUiSettingsToStore = {};
@@ -146,33 +129,59 @@ chrome.runtime.onInstalled.addListener(async (details) => {
             }
         }
         if (Object.keys(newFabUiSettingsToStore).length > 0) {
-            chrome.storage.local.set(newFabUiSettingsToStore, () => {
-                if (chrome.runtime.lastError) {
-                    console.warn("Background Coordinator (onInstalled): Error setting default FAB UI settings:", chrome.runtime.lastError.message);
-                } else {
-                    console.log("Background Coordinator (onInstalled): Default FAB UI settings initialized.", newFabUiSettingsToStore);
-                }
-            });
+            chrome.storage.local.set(newFabUiSettingsToStore);
         }
     });
 
-    await FabBackground.onInstalled(details); // Delegate to FAB handler for its specific setup
+    const defaultGlobalConfigurableSettings = {
+        [CoreConstants.GLOBAL_MAX_RETRIES_KEY]: 5,
+        [CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY]: 30000,
+        [CoreConstants.GLOBAL_MAX_DELAY_MS_KEY]: 300000
+    };
+    chrome.storage.local.get(Object.keys(defaultGlobalConfigurableSettings), (result) => {
+        let newGlobalConfigSettingsToStore = {};
+        for (const key in defaultGlobalConfigurableSettings) {
+            if (result[key] === undefined) {
+                newGlobalConfigSettingsToStore[key] = defaultGlobalConfigurableSettings[key];
+            }
+        }
+        if (Object.keys(newGlobalConfigSettingsToStore).length > 0) {
+            chrome.storage.local.set(newGlobalConfigSettingsToStore);
+        }
+    });
 
-    lastBroadcastedRateLimitState = null; // Reset to ensure broadcast
+    const defaultFabConfigurableSettings = {
+        [FabConstants.FAB_MAX_CONCURRENT_TABS_KEY]: 2,
+        [FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY]: 5000,
+        [FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY]: 2000,
+        // Add new defaults
+        [FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY]: 5000,
+        [FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY]: 4
+    };
+    chrome.storage.local.get(Object.keys(defaultFabConfigurableSettings), (result) => {
+        let newFabConfigSettingsToStore = {};
+        for (const key in defaultFabConfigurableSettings) {
+            if (result[key] === undefined) {
+                newFabConfigSettingsToStore[key] = defaultFabConfigurableSettings[key];
+            }
+        }
+        if (Object.keys(newFabConfigSettingsToStore).length > 0) {
+            chrome.storage.local.set(newFabConfigSettingsToStore);
+        }
+    });
+
+    await FabBackground.onInstalled(details);
+
+    lastBroadcastedRateLimitState = null;
     broadcastFabContentScriptStatus();
 });
 
-
-// --- Tab Event Listeners ---
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
-    // This is FAB-specific, delegate to FabBackground
-    // It needs to know if global switches allow it to act
     if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled) {
         FabBackground.handleTabRemoved(tabId, removeInfo);
     }
 });
 
-// --- Alarm Event Listeners ---
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     console.log("Background Coordinator: Alarm triggered - ", alarm.name);
 
@@ -183,40 +192,34 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
     const wasRateLimitedBeforeAlarm = AppState.isRateLimited();
 
-    // Route FAB-specific alarms
-    // Assuming FabConstants are available or alarm names are prefixed like "fab_"
-    if (alarm.name.startsWith("fab")) { // Example routing
+    if (alarm.name.startsWith("fab")) {
         if (!AppState.fabModuleEnabled) {
             console.log(`Background Coordinator: FAB Module switch OFF. Skipping FAB alarm: ${alarm.name}`);
             return;
         }
         await FabBackground.handleAlarm(alarm);
     }
-    // Add routes for other module alarms here if any (e.g., else if (alarm.name.startsWith("youtube_")))
 
-    // After alarm processing, check if rate limit status might have changed
     if (wasRateLimitedBeforeAlarm && !AppState.isRateLimited() && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled) {
         console.log("Background Coordinator: Rate limit lifted after alarm. Broadcasting RESUME to FAB content scripts.");
-        broadcastFabContentScriptStatus(); // Will broadcast false (resume)
+        broadcastFabContentScriptStatus();
     } else if (!wasRateLimitedBeforeAlarm && AppState.isRateLimited() && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled) {
         console.log("Background Coordinator: Rate limit started during alarm. Broadcasting PAUSE to FAB content scripts.");
-        broadcastFabContentScriptStatus(); // Will broadcast true (pause)
+        broadcastFabContentScriptStatus();
     }
 });
 
-// --- WebRequest Listener for 429 on Main Frame & XHR ---
 chrome.webRequest.onHeadersReceived.addListener(
     (details) => {
         if ((details.type === "main_frame" || details.type === "xmlhttprequest") && details.statusCode === 429) {
             let coolDownSuccessfullySet = false;
-            if (AppState.globalMasterSwitchEnabled) { // Global rate limit detection active if master switch is on
-                const newCoolDownTarget = Date.now() + CoreConstants.MAX_DELAY_MS;
+            if (AppState.globalMasterSwitchEnabled) {
+                const newCoolDownTarget = Date.now() + AppState.globalMaxDelayMs;
                 if (AppState.setRateLimitCoolDown(newCoolDownTarget)) {
                     console.log(`Background Coordinator: Detected 429 on ${details.type} request to ${details.url}. Global cool-down state updated.`);
                     AppState.saveGlobalState();
                     coolDownSuccessfullySet = true;
 
-                    // Clear FAB alarms if they would fire too soon
                     const verificationResumeAlarmName = FabConstants.FAB_VERIFICATION_ALARM_NAME + FabConstants.FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX;
                     chrome.alarms.get(FabConstants.FAB_QUEUE_PROCESS_RETRY_ALARM_NAME, (alarm) => {
                         if (alarm && alarm.scheduledTime < newCoolDownTarget) {
@@ -233,7 +236,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 
             if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && coolDownSuccessfullySet) {
                 console.log(`Background Coordinator: FAB module is ON and rate limit activated/extended. Broadcasting PAUSE.`);
-                broadcastFabContentScriptStatus(); // Will broadcast true (pause)
+                broadcastFabContentScriptStatus();
             }
         }
     },
@@ -241,17 +244,13 @@ chrome.webRequest.onHeadersReceived.addListener(
     ["responseHeaders"]
 );
 
-// --- Initial Load Logic ---
 (async () => {
     console.log("Background Coordinator: Script evaluating. Loading initial state...");
     await AppState.loadGlobalState();
-    LanguageManager.loadLanguages(); // Assuming synchronous or self-managing async
-
-    await FabBackground.init(); // Initialize FAB module
-
-    lastBroadcastedRateLimitState = null; // Force initial broadcast
-    broadcastFabContentScriptStatus(); // Broadcast initial effective status
-
+    LanguageManager.loadLanguages();
+    await FabBackground.init();
+    lastBroadcastedRateLimitState = null;
+    broadcastFabContentScriptStatus();
     console.log("Background Coordinator: Initial global state and modules loaded.");
 })();
 

@@ -87,7 +87,8 @@ export async function handleVerificationAlarm() {
         }
 
         if (i > 0) { // Delay between checks if processing multiple items
-            await new Promise(resolve => setTimeout(resolve, FabConstants.DELAY_BETWEEN_VERIFICATION_CHECKS_MS));
+            // Use configurable delay from FabState
+            await new Promise(resolve => setTimeout(resolve, FabState.fabDelayBetweenVerificationChecksMs));
         }
 
         // Correctly use AppState for rate limiting check and state

@@ -46,5 +46,5 @@
     "48": "icons/default_icon.png",
     "128": "icons/default_icon.png"
   },
-  "options_page": "options/options.html"
+  "options_page": "settings/settings.html"
 }

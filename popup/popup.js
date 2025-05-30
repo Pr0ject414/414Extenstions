@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fabFilterToggle = document.getElementById('fabFilterToggle');
     const fabAutoAddToggle = document.getElementById('fabAutoAddToggle');
     const fabAutoOpenFreeToggle = document.getElementById('fabAutoOpenFreeToggle');
+    const fabQueueProcessingToggle = document.getElementById('fabQueueProcessingToggle'); // New toggle
     
     // Stats display elements
     const fabQueueSizeElement = document.getElementById('fabQueueSize');
@@ -16,11 +17,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const operationalStatusText = document.getElementById('operationalStatusText');
     
     // Storage Keys - ensure these match constants.js
-    const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled';
-    const FAB_MODULE_ENABLED_KEY = 'isFabModuleEnabled';
-    const FAB_FILTER_ENABLED_KEY = 'isFabFilterEnabled'; // Note: In constants, these have _BG suffix
-    const FAB_AUTO_ADD_ENABLED_KEY = 'isFabAutoAddFreeLicenseEnabled';
-    const FAB_AUTO_OPEN_FREE_ENABLED_KEY = 'isFabAutoOpenFreeEnabled';
+    const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled'; //
+    const FAB_MODULE_ENABLED_KEY = 'isFabModuleEnabled'; //
+    const FAB_FILTER_ENABLED_KEY = 'isFabFilterEnabled'; //
+    const FAB_AUTO_ADD_ENABLED_KEY = 'isFabAutoAddFreeLicenseEnabled'; //
+    const FAB_AUTO_OPEN_FREE_ENABLED_KEY = 'isFabAutoOpenFreeEnabled'; //
+    const FAB_QUEUE_PROCESSING_ENABLED_KEY = 'isFabQueueProcessingEnabled'; //
 
     // Function to set toggle states based on other toggles
     function setDependentTogglesState() {
@@ -32,13 +34,13 @@ document.addEventListener('DOMContentLoaded', () => {
         fabFilterToggle.disabled = !enableFabSpecific;
         fabAutoAddToggle.disabled = !enableFabSpecific;
         fabAutoOpenFreeToggle.disabled = !enableFabSpecific;
+        fabQueueProcessingToggle.disabled = !enableFabSpecific; // Disable new toggle based on dependencies
 
         // FAB Module toggle depends on Global switch
         fabModulePowerToggle.disabled = !isGlobalOn;
 
         // If Global is off, visually indicate FAB module is also effectively off (but retain its stored checked state)
         if (!isGlobalOn) {
-            // You might add a class to grey out the FAB module section or its toggle specifically
             document.getElementById('fab-controls').classList.add('effectively-disabled');
         } else {
             document.getElementById('fab-controls').classList.remove('effectively-disabled');
@@ -48,9 +50,23 @@ document.addEventListener('DOMContentLoaded', () => {
              fabFilterToggle.disabled = true;
              fabAutoAddToggle.disabled = true;
              fabAutoOpenFreeToggle.disabled = true;
+             fabQueueProcessingToggle.disabled = true; // Disable new toggle if FAB module is off
         }
     }
 
+    // Handle opening the options page
+    const openOptionsPageLink = document.getElementById('openOptionsPageLink'); //
+    if (openOptionsPageLink) {
+        openOptionsPageLink.addEventListener('click', (event) => {
+            event.preventDefault(); // Prevent the default link behavior
+            if (chrome.runtime.openOptionsPage) {
+                chrome.runtime.openOptionsPage();
+            } else {
+                // Fallback for older Chrome versions or if the method is not available
+                chrome.tabs.create({ url: chrome.runtime.getURL('settings/settings.html') }); //
+            }
+        });
+    }
 
     // Load initial states for all toggles
     chrome.storage.local.get([
@@ -58,7 +74,8 @@ document.addEventListener('DOMContentLoaded', () => {
         FAB_MODULE_ENABLED_KEY,
         FAB_FILTER_ENABLED_KEY,
         FAB_AUTO_ADD_ENABLED_KEY,
-        FAB_AUTO_OPEN_FREE_ENABLED_KEY
+        FAB_AUTO_OPEN_FREE_ENABLED_KEY,
+        FAB_QUEUE_PROCESSING_ENABLED_KEY // Load new toggle state
     ], (result) => {
         globalMasterSwitchToggle.checked = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] === undefined ? true : result[GLOBAL_MASTER_SWITCH_ENABLED_KEY];
         fabModulePowerToggle.checked = result[FAB_MODULE_ENABLED_KEY] === undefined ? true : result[FAB_MODULE_ENABLED_KEY];
@@ -66,7 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
         fabFilterToggle.checked = result[FAB_FILTER_ENABLED_KEY] === undefined ? false : result[FAB_FILTER_ENABLED_KEY];
         fabAutoAddToggle.checked = result[FAB_AUTO_ADD_ENABLED_KEY] === undefined ? false : result[FAB_AUTO_ADD_ENABLED_KEY];
         fabAutoOpenFreeToggle.checked = result[FAB_AUTO_OPEN_FREE_ENABLED_KEY] === undefined ? false : result[FAB_AUTO_OPEN_FREE_ENABLED_KEY];
-        
+        fabQueueProcessingToggle.checked = result[FAB_QUEUE_PROCESSING_ENABLED_KEY] === undefined ? false : result[FAB_QUEUE_PROCESSING_ENABLED_KEY]; // Initialize new toggle
+
         setDependentTogglesState(); // Initial disable/enable state
         updateStatsDisplay(); // Initial stats fetch
     });
@@ -95,6 +113,18 @@ document.addEventListener('DOMContentLoaded', () => {
     fabFilterToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_FILTER_ENABLED_KEY]: fabFilterToggle.checked }));
     fabAutoAddToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_AUTO_ADD_ENABLED_KEY]: fabAutoAddToggle.checked }));
     fabAutoOpenFreeToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_AUTO_OPEN_FREE_ENABLED_KEY]: fabAutoOpenFreeToggle.checked }));
+    
+    // New event listener for fabQueueProcessingToggle
+    fabQueueProcessingToggle.addEventListener('change', () => {
+        const isEnabled = fabQueueProcessingToggle.checked;
+        chrome.storage.local.set({ [FAB_QUEUE_PROCESSING_ENABLED_KEY]: isEnabled }); // Save to storage
+        chrome.runtime.sendMessage({ action: "setFabQueueProcessingEnabled", enabled: isEnabled }, (response) => { // Send message to background
+            if (chrome.runtime.lastError || !response || !response.success) { 
+                console.error("Error sending setFabQueueProcessingEnabled message:", chrome.runtime.lastError ? chrome.runtime.lastError.message : "Unknown error");
+            }
+            updateStatsDisplay(); // Refresh stats display
+        });
+    });
 
 
     function updateStatsDisplay() {
@@ -127,6 +157,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (response.fabModuleEnabled !== undefined && fabModulePowerToggle.checked !== response.fabModuleEnabled) {
                     fabModulePowerToggle.checked = response.fabModuleEnabled;
                 }
+                // Update new toggle state from background's perspective
+                if (response.fabQueueProcessingEnabled !== undefined && fabQueueProcessingToggle.checked !== response.fabQueueProcessingEnabled) {
+                    fabQueueProcessingToggle.checked = response.fabQueueProcessingEnabled;
+                }
+
                 setDependentTogglesState(); // After updating main toggles, ensure sub-toggles are correctly enabled/disabled.
 
                 operationalStatusIndicator.className = ''; // Clear previous status classes
@@ -155,6 +190,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     case "RATE_LIMITED":
                         operationalStatusIndicator.classList.add('status-rate-limited');
                         statusTextValue = "Rate Limited";
+                        break;
+                    case "QUEUE_DISABLED": // New status for queue disabled
+                        operationalStatusIndicator.classList.add('status-fab-disabled'); // Can reuse fab-disabled style or create new
+                        statusTextValue = "Queue Disabled";
                         break;
                     default:
                         operationalStatusIndicator.classList.add('status-error'); // Default to error appearance

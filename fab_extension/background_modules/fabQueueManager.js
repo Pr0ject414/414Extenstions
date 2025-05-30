@@ -26,6 +26,11 @@ export async function processFabTabQueue() {
         console.log(`FabQueueManager: FAB Module switch is OFF. FAB queue processing paused. Queue length: ${FabState.getFabUrlQueueSize()}`);
         return;
     }
+    // New check for queue processing being enabled
+    if (!FabState.fabQueueProcessingEnabled) {
+        console.log(`FabQueueManager: FAB Queue Processing is DISABLED. Queue processing paused. Queue length: ${FabState.getFabUrlQueueSize()}`);
+        return;
+    }
 
     // autoProcessingSuspended is a FAB-specific state
     if (FabState.autoProcessingSuspended) {
@@ -41,13 +46,17 @@ export async function processFabTabQueue() {
     }
 
     let stateChangedInLoop = false; // To track if any URL was actually processed from the queue
-    while (FabState.activeFabProcessingTabs < FabConstants.MAX_CONCURRENT_FAB_TABS && FabState.getFabUrlQueueSize() > 0) {
+    while (FabState.activeFabProcessingTabs < FabState.fabMaxConcurrentTabs && FabState.getFabUrlQueueSize() > 0) { // Use dynamic max concurrent tabs
         if (!AppState.globalMasterSwitchEnabled) {
             console.log(`FabQueueManager: Global Master switch turned OFF mid-batch. Pausing.`);
             break;
         }
         if (!AppState.fabModuleEnabled) {
             console.log(`FabQueueManager: FAB Module switch turned OFF mid-batch. Pausing FAB queue.`);
+            break;
+        }
+        if (!FabState.fabQueueProcessingEnabled) { // Re-check if it got disabled mid-batch
+            console.log(`FabQueueManager: FAB Queue Processing turned DISABLED mid-batch. Pausing.`);
             break;
         }
 
@@ -74,7 +83,7 @@ export async function processFabTabQueue() {
             FabState.incrementActiveTabs();
 
             // Retry logic for creating tab
-            const MAX_RETRIES = 3;
+            const MAX_RETRIES = 3; // Keep this hardcoded for tab creation for now, or make configurable later.
             let retryCount = 0;
 
             const attemptTabCreate = (url, tabId) => {
@@ -107,9 +116,9 @@ export async function processFabTabQueue() {
             };
             attemptTabCreate(urlToOpen, null); // Start initial attempt
 
-            if (FabState.getFabUrlQueueSize() > 0 && (FabState.activeFabProcessingTabs) < FabConstants.MAX_CONCURRENT_FAB_TABS) {
-                console.log(`FabQueueManager: Delaying ${FabConstants.DELAY_BETWEEN_TAB_OPEN_MS / 1000}s before next tab open.`);
-                await new Promise(resolve => setTimeout(resolve, FabConstants.DELAY_BETWEEN_TAB_OPEN_MS));
+            if (FabState.getFabUrlQueueSize() > 0 && (FabState.activeFabProcessingTabs) < FabState.fabMaxConcurrentTabs) { // Use dynamic max concurrent tabs
+                console.log(`FabQueueManager: Delaying ${FabState.fabDelayBetweenTabOpenMs / 1000}s before next tab open.`); // Use dynamic delay
+                await new Promise(resolve => setTimeout(resolve, FabState.fabDelayBetweenTabOpenMs)); // Use dynamic delay
             }
         } else {
             // No URL was returned from the queue, so break the loop.
