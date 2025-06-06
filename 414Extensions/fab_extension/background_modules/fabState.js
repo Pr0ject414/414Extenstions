@@ -1,5 +1,6 @@
 // KylesChromeExtensions/fab_extension/background_modules/fabState.js
 import * as FabConstants from './fabConstants.js';
+import { loadStateFromStorage, saveStateToStorage } from '../../../shared_modules/storageUtils.js';
 
 // --- FAB Specific State ---
 export let fabUrlQueue = [];
@@ -7,15 +8,26 @@ export let queuedUrlSet = new Set();
 export let verificationQueue = [];
 export let autoProcessingSuspended = false;
 export let activeFabProcessingTabs = 0;
-
-// Configurable FAB settings (loaded from storage)
 export let fabQueueProcessingEnabled = false;
 export let fabMaxConcurrentTabs = 2;
 export let fabDelayBetweenVerificationChecksMs = 5000;
 export let fabDelayBetweenTabOpenMs = 2000;
-// New configurable settings for browse page behavior
-export let fabBrowsePageScanIntervalMs = 5000; // Default
-export let fabFreeItemGraceCycles = 4;      // Default
+export let fabBrowsePageScanIntervalMs = 5000;
+export let fabFreeItemGraceCycles = 4;
+
+// Object defining the state keys and their default values for storage.
+const FAB_STATE_DEFAULTS = {
+    [FabConstants.FAB_URL_QUEUE_KEY]: [],
+    [FabConstants.FAB_QUEUED_URL_SET_KEY]: [], // Set is not directly storable, will be handled in load/save
+    [FabConstants.FAB_VERIFICATION_QUEUE_KEY]: [],
+    [FabConstants.FAB_AUTO_PROCESSING_SUSPENDED_KEY]: false,
+    [FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY]: false,
+    [FabConstants.FAB_MAX_CONCURRENT_TABS_KEY]: 2,
+    [FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY]: 5000,
+    [FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY]: 2000,
+    [FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY]: 5000,
+    [FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY]: 4,
+};
 
 
 // --- FAB State Modifiers ---
@@ -36,130 +48,63 @@ export function getNextUrlFromFabQueue() {
     return url;
 }
 
-export function getFabUrlQueueSize() {
-    return fabUrlQueue.length;
-}
+export function getFabUrlQueueSize() { return fabUrlQueue.length; }
+export function isUrlInFabQueue(url) { return queuedUrlSet.has(url); }
+export function setVerificationQueue(newQueue) { if (Array.isArray(newQueue)) verificationQueue = newQueue; }
+export function incrementActiveTabs() { activeFabProcessingTabs++; }
+export function decrementActiveTabs() { if (activeFabProcessingTabs > 0) activeFabProcessingTabs--; }
+export function resetActiveTabs() { activeFabProcessingTabs = 0; }
+export function setSuspended(value) { autoProcessingSuspended = !!value; }
+export function setFabQueueProcessingEnabled(value) { fabQueueProcessingEnabled = !!value; }
 
-export function isUrlInFabQueue(url) {
-    return queuedUrlSet.has(url);
-}
-
-export function addOpenedItemToVerificationQueue(itemDetails) {
-    verificationQueue.push(itemDetails);
-}
-
-export function setVerificationQueue(newQueue) {
-    if (Array.isArray(newQueue)) {
-        verificationQueue = newQueue;
-    } else {
-        console.warn('FabState: Invalid value for setVerificationQueue. Expected array.');
-    }
-}
-
-export function incrementActiveTabs() {
-    activeFabProcessingTabs++;
-}
-
-export function decrementActiveTabs() {
-    if (activeFabProcessingTabs > 0) {
-        activeFabProcessingTabs--;
-    }
-}
-
-export function resetActiveTabs() {
-    activeFabProcessingTabs = 0;
-}
-
-export function setSuspended(value) {
-    if (typeof value === 'boolean') {
-        autoProcessingSuspended = value;
-    } else {
-        console.warn('FabState: Invalid value for setSuspended. Expected boolean.');
-    }
-}
-
-export function setFabQueueProcessingEnabled(value) {
-    if (typeof value === 'boolean') {
-        fabQueueProcessingEnabled = value;
-    } else {
-        console.warn('FabState: Invalid value for setFabQueueProcessingEnabled. Expected boolean.');
-    }
-}
 
 // --- Persistence Functions for FAB State ---
 export async function saveFabState() {
-    return new Promise(resolve => {
+    try {
         const stateToSave = {
             [FabConstants.FAB_URL_QUEUE_KEY]: fabUrlQueue,
-            [FabConstants.FAB_QUEUED_URL_SET_KEY]: Array.from(queuedUrlSet),
+            [FabConstants.FAB_QUEUED_URL_SET_KEY]: Array.from(queuedUrlSet), // Convert Set to Array for storage
             [FabConstants.FAB_VERIFICATION_QUEUE_KEY]: verificationQueue,
             [FabConstants.FAB_AUTO_PROCESSING_SUSPENDED_KEY]: autoProcessingSuspended,
             [FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY]: fabQueueProcessingEnabled,
             [FabConstants.FAB_MAX_CONCURRENT_TABS_KEY]: fabMaxConcurrentTabs,
             [FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY]: fabDelayBetweenVerificationChecksMs,
             [FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY]: fabDelayBetweenTabOpenMs,
-            // Save new settings
             [FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY]: fabBrowsePageScanIntervalMs,
             [FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY]: fabFreeItemGraceCycles,
         };
-        chrome.storage.local.set(stateToSave, () => {
-            if (chrome.runtime.lastError) {
-                console.error("FabState: Error saving FAB state:", chrome.runtime.lastError.message, stateToSave);
-            }
-            resolve();
-        });
-    });
+        await saveStateToStorage(stateToSave);
+    } catch (error) {
+        console.error("FabState: Error saving FAB state:", error);
+    }
 }
 
 export async function loadFabState() {
-    console.log("FabState: Attempting to load FAB state...");
-    return new Promise((resolve) => {
-        chrome.storage.local.get([
-            FabConstants.FAB_URL_QUEUE_KEY,
-            FabConstants.FAB_QUEUED_URL_SET_KEY,
-            FabConstants.FAB_VERIFICATION_QUEUE_KEY,
-            FabConstants.FAB_AUTO_PROCESSING_SUSPENDED_KEY,
-            FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY,
-            FabConstants.FAB_MAX_CONCURRENT_TABS_KEY,
-            FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY,
-            FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY,
-            // Add new keys to load
-            FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY,
-            FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY
-        ], (result) => {
-            if (chrome.runtime.lastError) {
-                console.error("FabState: Error loading FAB state:", chrome.runtime.lastError.message);
-            }
+    try {
+        console.log("FabState: Attempting to load FAB state...");
+        const loadedState = await loadStateFromStorage(FAB_STATE_DEFAULTS);
+        
+        fabUrlQueue = loadedState[FabConstants.FAB_URL_QUEUE_KEY];
+        queuedUrlSet = new Set(loadedState[FabConstants.FAB_QUEUED_URL_SET_KEY]); // Convert Array back to Set
+        verificationQueue = loadedState[FabConstants.FAB_VERIFICATION_QUEUE_KEY];
+        autoProcessingSuspended = loadedState[FabConstants.FAB_AUTO_PROCESSING_SUSPENDED_KEY];
+        fabQueueProcessingEnabled = loadedState[FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY];
+        fabMaxConcurrentTabs = loadedState[FabConstants.FAB_MAX_CONCURRENT_TABS_KEY];
+        fabDelayBetweenVerificationChecksMs = loadedState[FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY];
+        fabDelayBetweenTabOpenMs = loadedState[FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY];
+        fabBrowsePageScanIntervalMs = loadedState[FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY];
+        fabFreeItemGraceCycles = loadedState[FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY];
+        
+        activeFabProcessingTabs = 0; // Always reset on load
 
-            fabUrlQueue = result[FabConstants.FAB_URL_QUEUE_KEY] || [];
-            queuedUrlSet = new Set(result[FabConstants.FAB_QUEUED_URL_SET_KEY] || []);
-            verificationQueue = result[FabConstants.FAB_VERIFICATION_QUEUE_KEY] || [];
-            autoProcessingSuspended = result[FabConstants.FAB_AUTO_PROCESSING_SUSPENDED_KEY] || false;
-            
-            fabQueueProcessingEnabled = result[FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY] === undefined ? false : result[FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY];
-            fabMaxConcurrentTabs = result[FabConstants.FAB_MAX_CONCURRENT_TABS_KEY] === undefined ? 2 : result[FabConstants.FAB_MAX_CONCURRENT_TABS_KEY];
-            fabDelayBetweenVerificationChecksMs = result[FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY] === undefined ? 5000 : result[FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY];
-            fabDelayBetweenTabOpenMs = result[FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY] === undefined ? 2000 : result[FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY];
-            
-            // Load new configurable FAB settings with defaults
-            fabBrowsePageScanIntervalMs = result[FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY] === undefined ? 5000 : result[FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY];
-            fabFreeItemGraceCycles = result[FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY] === undefined ? 4 : result[FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY];
-
-            activeFabProcessingTabs = 0;
-
-            console.log("FabState: FAB state loaded.", {
-                fabUrlQueueSize: fabUrlQueue.length,
-                queuedUrlSetSize: queuedUrlSet.size,
-                verificationQueueSize: verificationQueue.length,
-                autoProcessingSuspended,
-                fabQueueProcessingEnabled,
-                fabMaxConcurrentTabs,
-                fabDelayBetweenVerificationChecksMs,
-                fabDelayBetweenTabOpenMs,
-                fabBrowsePageScanIntervalMs, // Log new settings
-                fabFreeItemGraceCycles       // Log new settings
-            });
-            resolve();
+        console.log("FabState: FAB state loaded.", {
+            fabUrlQueueSize: fabUrlQueue.length,
+            verificationQueueSize: verificationQueue.length,
+            autoProcessingSuspended,
+            fabQueueProcessingEnabled,
+            fabMaxConcurrentTabs
         });
-    });
+    } catch (error) {
+        console.error("FabState: Error loading FAB state:", error);
+    }
 }

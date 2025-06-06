@@ -1,16 +1,27 @@
 // KylesChromeExtensions/background.js
-import * as CoreConstants from './shared_modules/coreConstants.js';
+import { moduleManager } from './shared_modules/moduleManager.js';
 import * as AppState from './shared_modules/appState.js';
 import * as LanguageManager from './shared_modules/languageManager.js';
 
+// Import Module Handlers
 import * as FabBackground from './fab_extension/fabBackground.js';
-import * as FabConstants from './fab_extension/background_modules/fabConstants.js';
-import * as FabState from './fab_extension/background_modules/fabState.js';
-
 import * as YouTubeBackground from './youtube_extension/youtubeBackground.js';
-import * as YouTubeConstants from './youtube_extension/background_modules/youtubeConstants.js';
-import * as YouTubeState from './youtube_extension/background_modules/youtubeState.js';
 
+// --- Module Registration ---
+
+moduleManager.register(FabBackground, {
+    actions: [
+        "getFabGlobalStats", "openTabInBackground", "closeFabTab", "item_add_rate_limited",
+        "setFabQueueProcessingEnabled", "queueFabItemOnly"
+    ]
+});
+
+moduleManager.register(YouTubeBackground, {
+    actions: ["getYouTubeGlobalStats", "setYouTubeNoSuggestionsEnabled"]
+});
+
+
+// --- Global Event Listeners ---
 
 let lastBroadcastedRateLimitState = null;
 
@@ -24,117 +35,59 @@ function broadcastFabContentScriptStatus() {
 
     console.log(`Background Coordinator: Broadcasting FAB content script status. EffectivelyPaused: ${effectivelyPaused}`);
     chrome.tabs.query({ url: "*://*.fab.com/*" }, (tabs) => {
-        if (chrome.runtime.lastError) {
-            console.warn("Background Coordinator: Error querying tabs for broadcast:", chrome.runtime.lastError.message);
-            return;
-        }
         tabs.forEach(tab => {
             if (tab.id) {
                 chrome.tabs.sendMessage(tab.id, {
                     action: "fab_content_scripts_status",
                     rateLimited: effectivelyPaused
-                }).catch(error => {
-                    // console.log(`Error sending message to tab ${tab.id}: ${error.message}`)
-                });
+                }).catch(error => { /* Suppress errors from closed tabs */ });
             }
         });
     });
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    // --- Global Actions ---
     if (request.action === "setGlobalMasterSwitch") {
-        if (typeof request.enabled === 'boolean') {
-            AppState.setGlobalMasterSwitchEnabled(request.enabled);
-            AppState.saveGlobalState();
-            console.log(`Background Coordinator: Global Master switch set to ${request.enabled}.`);
-            broadcastFabContentScriptStatus();
-            sendResponse({ success: true, globalMasterSwitchEnabled: AppState.globalMasterSwitchEnabled });
-        } else {
-            sendResponse({ success: false, error: "Invalid 'enabled' value for GlobalMasterSwitch." });
-        }
+        AppState.setGlobalMasterSwitchEnabled(request.enabled);
+        AppState.saveGlobalState();
+        broadcastFabContentScriptStatus(); // FAB is affected by global switch
+        sendResponse({ success: true });
         return true;
     }
-
-    if (request.action === "setFabModuleEnabled") {
-        if (typeof request.enabled === 'boolean') {
-            AppState.setFabModuleEnabled(request.enabled);
-            AppState.saveGlobalState();
-            console.log(`Background Coordinator: FAB Module Enabled set to ${request.enabled}.`);
-            broadcastFabContentScriptStatus();
-            sendResponse({ success: true, fabModuleEnabled: AppState.fabModuleEnabled });
-        } else {
-            sendResponse({ success: false, error: "Invalid 'enabled' value for FabModuleEnabled." });
-        }
-        return true;
-    }
-    
-    if (request.action === "setYouTubeModuleEnabled") {
-        if (typeof request.enabled === 'boolean') {
-            AppState.setYouTubeModuleEnabled(request.enabled);
-            AppState.saveGlobalState();
-            console.log(`Background Coordinator: YouTube Module Enabled set to ${request.enabled}.`);
-            // Add a broadcast for YouTube content scripts if they need it in the future
-            sendResponse({ success: true, youTubeModuleEnabled: AppState.youTubeModuleEnabled });
-        } else {
-            sendResponse({ success: false, error: "Invalid 'enabled' value for YouTubeModuleEnabled." });
-        }
-        return true;
-    }
-
     if (request.action === 'getLanguages') {
         sendResponse({ languages: LanguageManager.getLanguagesArray() });
-        return false;
+        return true;
     }
-
-    if (request.action === "getFabRateLimitStatus") {
+     if (request.action === "getFabRateLimitStatus") {
         sendResponse({ rateLimited: AppState.isRateLimited() });
-        return false;
+        return true;
     }
-    
     if (request.action === "settingsUpdated") {
-        console.log(`Background Coordinator: Settings of type '${request.type}' updated from options page. Reloading relevant states.`);
         (async () => {
-            await AppState.loadGlobalState(); // Always reload global state
-            if (request.type === "fab" || request.type === "global") { 
-                await FabState.loadFabState(); 
-            }
-            if (request.type === "youtube" || request.type === "global") {
-                await YouTubeState.loadYouTubeState();
-            }
-            console.log("Background Coordinator: Relevant states reloaded after settings update.");
+            await AppState.loadGlobalState();
+            await moduleManager.initializeAll(); // Re-initialize all modules to pick up changes
+            console.log("Background Coordinator: All states reloaded after settings update.");
         })();
-        sendResponse({ success: true, message: "States are being reloaded." });
-        return true; 
-    }
-
-    const fabActions = [
-        "getFabGlobalStats", "openTabInBackground", "closeFabTab", "item_add_rate_limited",
-        "setFabQueueProcessingEnabled", "queueFabItemOnly"
-    ];
-
-    if (fabActions.includes(request.action)) {
-        return FabBackground.handleMessage(request, sender, sendResponse);
+        sendResponse({ success: true });
+        return true;
     }
     
-    const youtubeActions = [
-        "getYouTubeGlobalStats", "setYouTubeNoSuggestionsEnabled"
-    ];
-
-    if (youtubeActions.includes(request.action)) {
-        return YouTubeBackground.handleMessage(request, sender, sendResponse);
+    // --- Delegated Actions ---
+    // Let the module manager route the message to the correct module
+    const handled = moduleManager.routeMessage(request, sender, sendResponse);
+    if (request.action === 'setFabModuleEnabled') {
+        broadcastFabContentScriptStatus(); // Also broadcast on FAB module state change
     }
-
-
-    console.warn(`Background Coordinator: Unhandled message action: ${request.action}`);
-    return false;
+    // Return true if the message is being handled asynchronously, otherwise false.
+    return handled;
 });
 
 chrome.runtime.onStartup.addListener(async () => {
     console.log("Background Coordinator: Extension startup.");
     await AppState.loadGlobalState();
     LanguageManager.loadLanguages();
-    await FabBackground.onStartup();
-    await YouTubeBackground.onStartup();
+    await moduleManager.handleOnStartup();
     broadcastFabContentScriptStatus();
 });
 
@@ -142,130 +95,49 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     console.log("Background Coordinator: Extension installed/updated:", details.reason);
     await AppState.loadGlobalState();
     LanguageManager.loadLanguages();
-
-    const defaultUiSettingsKeys = {
-        [FabConstants.FAB_FILTER_ENABLED_KEY]: false,
-        [FabConstants.FAB_AUTO_OPEN_FREE_ENABLED_KEY]: false,
-        [FabConstants.FAB_AUTO_ADD_ENABLED_KEY]: false,
-        [FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY]: false,
-        [YouTubeConstants.YOUTUBE_NO_SUGGESTIONS_ENABLED_KEY]: false,
-    };
-    chrome.storage.local.get(Object.keys(defaultUiSettingsKeys), (result) => {
-        let newSettingsToStore = {};
-        for (const key in defaultUiSettingsKeys) {
-            if (result[key] === undefined) {
-                newSettingsToStore[key] = defaultUiSettingsKeys[key];
-            }
-        }
-        if (Object.keys(newSettingsToStore).length > 0) {
-            chrome.storage.local.set(newSettingsToStore);
-        }
-    });
-
-    const defaultGlobalConfigurableSettings = {
-        [CoreConstants.GLOBAL_MAX_RETRIES_KEY]: 5,
-        [CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY]: 30000,
-        [CoreConstants.GLOBAL_MAX_DELAY_MS_KEY]: 300000
-    };
-    chrome.storage.local.get(Object.keys(defaultGlobalConfigurableSettings), (result) => {
-        let newGlobalConfigSettingsToStore = {};
-        for (const key in defaultGlobalConfigurableSettings) {
-            if (result[key] === undefined) {
-                newGlobalConfigSettingsToStore[key] = defaultGlobalConfigurableSettings[key];
-            }
-        }
-        if (Object.keys(newGlobalConfigSettingsToStore).length > 0) {
-            chrome.storage.local.set(newGlobalConfigSettingsToStore);
-        }
-    });
-
-    const defaultFabConfigurableSettings = {
-        [FabConstants.FAB_MAX_CONCURRENT_TABS_KEY]: 2,
-        [FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY]: 5000,
-        [FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY]: 2000,
-        [FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY]: 5000,
-        [FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY]: 4
-    };
-    chrome.storage.local.get(Object.keys(defaultFabConfigurableSettings), (result) => {
-        let newFabConfigSettingsToStore = {};
-        for (const key in defaultFabConfigurableSettings) {
-            if (result[key] === undefined) {
-                newFabConfigSettingsToStore[key] = defaultFabConfigurableSettings[key];
-            }
-        }
-        if (Object.keys(newFabConfigSettingsToStore).length > 0) {
-            chrome.storage.local.set(newFabConfigSettingsToStore);
-        }
-    });
-
-    await FabBackground.onInstalled(details);
-    await YouTubeBackground.onInstalled(details);
-
+    await moduleManager.handleOnInstalled(details);
     lastBroadcastedRateLimitState = null;
     broadcastFabContentScriptStatus();
 });
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    // This is FAB-specific, so we can call it directly for now.
+    // If other modules need it, this could be integrated into the module manager.
     if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled) {
         FabBackground.handleTabRemoved(tabId, removeInfo);
     }
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-    console.log("Background Coordinator: Alarm triggered - ", alarm.name);
-
-    if (!AppState.globalMasterSwitchEnabled) {
-        console.log(`Background Coordinator: Global Master switch OFF. Skipping alarm: ${alarm.name}`);
-        return;
-    }
+    if (!AppState.globalMasterSwitchEnabled) return;
 
     const wasRateLimitedBeforeAlarm = AppState.isRateLimited();
 
     if (alarm.name.startsWith("fab")) {
-        if (!AppState.fabModuleEnabled) {
-            console.log(`Background Coordinator: FAB Module switch OFF. Skipping FAB alarm: ${alarm.name}`);
-            return;
+        if (AppState.fabModuleEnabled) {
+            await FabBackground.handleAlarm(alarm);
         }
-        await FabBackground.handleAlarm(alarm);
     }
+    // Add other module alarm handling here, e.g., if (alarm.name.startsWith("youtube"))
 
-    if (wasRateLimitedBeforeAlarm && !AppState.isRateLimited() && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled) {
-        console.log("Background Coordinator: Rate limit lifted after alarm. Broadcasting RESUME to FAB content scripts.");
-        broadcastFabContentScriptStatus();
-    } else if (!wasRateLimitedBeforeAlarm && AppState.isRateLimited() && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled) {
-        console.log("Background Coordinator: Rate limit started during alarm. Broadcasting PAUSE to FAB content scripts.");
-        broadcastFabContentScriptStatus();
+    // Check if rate limit status changed and broadcast if needed
+    if (wasRateLimitedBeforeAlarm !== AppState.isRateLimited()) {
+         console.log("Background Coordinator: Rate limit status changed during alarm processing. Broadcasting.");
+         broadcastFabContentScriptStatus();
     }
 });
 
+// This listener is highly specific to FAB, so it can remain here.
 chrome.webRequest.onHeadersReceived.addListener(
     (details) => {
-        if ((details.type === "main_frame" || details.type === "xmlhttprequest") && details.statusCode === 429) {
-            let coolDownSuccessfullySet = false;
-            if (AppState.globalMasterSwitchEnabled) {
-                const newCoolDownTarget = Date.now() + AppState.globalMaxDelayMs;
-                if (AppState.setRateLimitCoolDown(newCoolDownTarget)) {
-                    console.log(`Background Coordinator: Detected 429 on ${details.type} request to ${details.url}. Global cool-down state updated.`);
+        if (details.statusCode === 429) {
+             if (AppState.globalMasterSwitchEnabled) {
+                if (AppState.setRateLimitCoolDown(Date.now() + AppState.globalMaxDelayMs)) {
                     AppState.saveGlobalState();
-                    coolDownSuccessfullySet = true;
-
-                    const verificationResumeAlarmName = FabConstants.FAB_VERIFICATION_ALARM_NAME + FabConstants.FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX;
-                    chrome.alarms.get(FabConstants.FAB_QUEUE_PROCESS_RETRY_ALARM_NAME, (alarm) => {
-                        if (alarm && alarm.scheduledTime < newCoolDownTarget) {
-                            chrome.alarms.clear(FabConstants.FAB_QUEUE_PROCESS_RETRY_ALARM_NAME);
-                        }
-                    });
-                    chrome.alarms.get(verificationResumeAlarmName, (alarm) => {
-                        if (alarm && alarm.scheduledTime < newCoolDownTarget) {
-                            chrome.alarms.clear(verificationResumeAlarmName);
-                        }
-                    });
+                    if (AppState.fabModuleEnabled) {
+                         broadcastFabContentScriptStatus();
+                    }
                 }
-            }
-
-            if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && coolDownSuccessfullySet) {
-                console.log(`Background Coordinator: FAB module is ON and rate limit activated/extended. Broadcasting PAUSE.`);
-                broadcastFabContentScriptStatus();
             }
         }
     },
@@ -273,15 +145,14 @@ chrome.webRequest.onHeadersReceived.addListener(
     ["responseHeaders"]
 );
 
+
+// --- Initial Load ---
 (async () => {
     console.log("Background Coordinator: Script evaluating. Loading initial state...");
     await AppState.loadGlobalState();
     LanguageManager.loadLanguages();
-    await FabBackground.init();
-    await YouTubeBackground.init();
+    await moduleManager.initializeAll(); // Initialize all registered modules
     lastBroadcastedRateLimitState = null;
     broadcastFabContentScriptStatus();
     console.log("Background Coordinator: Initial global state and modules loaded.");
 })();
-
-console.log("Background Coordinator: Script loaded and event listeners attached.");
