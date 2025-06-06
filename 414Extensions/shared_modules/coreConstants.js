@@ -6,6 +6,9 @@ export const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled';
 // Master On/Off Switch for the FAB Module (managed globally as it affects global listeners)
 export const FAB_MODULE_ENABLED_KEY = 'isFabModuleEnabled';
 
+// Master On/Off Switch for the YouTube Module
+export const YOUTUBE_MODULE_ENABLED_KEY = 'isYouTubeModuleEnabled';
+
 // Global rate limiting
 export const RATE_LIMIT_COOL_DOWN_UNTIL_KEY = 'rateLimitCoolDownUntil';
 

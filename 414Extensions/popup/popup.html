@@ -21,8 +21,9 @@
     <div class="tab-container">
         <nav class="tab-nav">
             <button class="tab-button active" data-tab="fab-controls">FAB Helper</button>
+            <button class="tab-button" data-tab="youtube-controls">YouTube Helper</button>
             <button class="tab-button" data-tab="general-settings">General</button>
-            </nav>
+        </nav>
 
         <div id="fab-controls" class="tab-content active">
             <h5 class="tab-description">Settings and live status for FAB website automation.</h5>
@@ -71,8 +72,8 @@
                 <p>
                     <span>Overall Status:</span>
                     <span class="status-indicator-container">
-                        <span id="operationalStatusIndicator"></span>
-                        <strong id="operationalStatusText">Checking...</strong>
+                        <span id="fabOperationalStatusIndicator"></span>
+                        <strong id="fabOperationalStatusText">Checking...</strong>
                     </span>
                 </p>
             </div>
@@ -80,6 +81,36 @@
             <div class="stats-section">
                 <p><span>Items in Processing Queue:</span> <strong id="fabQueueSize">N/A</strong></p>
                 <p><span>Owned Hidden (Active Page):</span> <strong id="fabHiddenOwnedCount">N/A</strong></p>
+            </div>
+        </div>
+        
+        <div id="youtube-controls" class="tab-content">
+            <h5 class="tab-description">Settings for the YouTube experience.</h5>
+            <h2>YouTube Helper</h2>
+            <div class="setting youtube-module-toggle-container">
+                <label for="youTubeModulePowerToggle">YouTube Helper Power:</label>
+                <label class="switch">
+                    <input type="checkbox" id="youTubeModulePowerToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <h3 class="sub-heading">Player Settings</h3>
+            <div class="setting">
+                <label for="youTubeNoSuggestionsToggle">Remove End-of-Video Suggestions:</label>
+                <label class="switch">
+                    <input type="checkbox" id="youTubeNoSuggestionsToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+             <h3 class="sub-heading">Live Status</h3>
+            <div class="stats-section operational-status-section">
+                <p>
+                    <span>Overall Status:</span>
+                    <span class="status-indicator-container">
+                        <span id="youTubeOperationalStatusIndicator"></span>
+                        <strong id="youTubeOperationalStatusText">Checking...</strong>
+                    </span>
+                </p>
             </div>
         </div>
 

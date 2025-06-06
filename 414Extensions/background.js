@@ -7,6 +7,11 @@ import * as FabBackground from './fab_extension/fabBackground.js';
 import * as FabConstants from './fab_extension/background_modules/fabConstants.js';
 import * as FabState from './fab_extension/background_modules/fabState.js';
 
+import * as YouTubeBackground from './youtube_extension/youtubeBackground.js';
+import * as YouTubeConstants from './youtube_extension/background_modules/youtubeConstants.js';
+import * as YouTubeState from './youtube_extension/background_modules/youtubeState.js';
+
+
 let lastBroadcastedRateLimitState = null;
 
 function broadcastFabContentScriptStatus() {
@@ -62,6 +67,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         return true;
     }
+    
+    if (request.action === "setYouTubeModuleEnabled") {
+        if (typeof request.enabled === 'boolean') {
+            AppState.setYouTubeModuleEnabled(request.enabled);
+            AppState.saveGlobalState();
+            console.log(`Background Coordinator: YouTube Module Enabled set to ${request.enabled}.`);
+            // Add a broadcast for YouTube content scripts if they need it in the future
+            sendResponse({ success: true, youTubeModuleEnabled: AppState.youTubeModuleEnabled });
+        } else {
+            sendResponse({ success: false, error: "Invalid 'enabled' value for YouTubeModuleEnabled." });
+        }
+        return true;
+    }
 
     if (request.action === 'getLanguages') {
         sendResponse({ languages: LanguageManager.getLanguagesArray() });
@@ -77,16 +95,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log(`Background Coordinator: Settings of type '${request.type}' updated from options page. Reloading relevant states.`);
         (async () => {
             await AppState.loadGlobalState(); // Always reload global state
-            if (request.type === "fab" || request.type === "global") { // FAB settings might depend on global, or be FAB specific
-                await FabState.loadFabState(); // Reload FAB specific settings
-                // If fabBrowsePage settings changed, content scripts will pick them up via storage.onChanged
+            if (request.type === "fab" || request.type === "global") { 
+                await FabState.loadFabState(); 
             }
-            // Potentially re-initialize or notify modules if needed after settings load
-            // For now, assuming modules pick up changes from their state objects or storage listeners
+            if (request.type === "youtube" || request.type === "global") {
+                await YouTubeState.loadYouTubeState();
+            }
             console.log("Background Coordinator: Relevant states reloaded after settings update.");
         })();
         sendResponse({ success: true, message: "States are being reloaded." });
-        return true; // Indicate async potential if further actions were taken
+        return true; 
     }
 
     const fabActions = [
@@ -97,6 +115,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (fabActions.includes(request.action)) {
         return FabBackground.handleMessage(request, sender, sendResponse);
     }
+    
+    const youtubeActions = [
+        "getYouTubeGlobalStats", "setYouTubeNoSuggestionsEnabled"
+    ];
+
+    if (youtubeActions.includes(request.action)) {
+        return YouTubeBackground.handleMessage(request, sender, sendResponse);
+    }
+
 
     console.warn(`Background Coordinator: Unhandled message action: ${request.action}`);
     return false;
@@ -107,6 +134,7 @@ chrome.runtime.onStartup.addListener(async () => {
     await AppState.loadGlobalState();
     LanguageManager.loadLanguages();
     await FabBackground.onStartup();
+    await YouTubeBackground.onStartup();
     broadcastFabContentScriptStatus();
 });
 
@@ -115,21 +143,22 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     await AppState.loadGlobalState();
     LanguageManager.loadLanguages();
 
-    const fabDefaultUiSettingsKeys = {
+    const defaultUiSettingsKeys = {
         [FabConstants.FAB_FILTER_ENABLED_KEY]: false,
         [FabConstants.FAB_AUTO_OPEN_FREE_ENABLED_KEY]: false,
         [FabConstants.FAB_AUTO_ADD_ENABLED_KEY]: false,
         [FabConstants.FAB_QUEUE_PROCESSING_ENABLED_KEY]: false,
+        [YouTubeConstants.YOUTUBE_NO_SUGGESTIONS_ENABLED_KEY]: false,
     };
-    chrome.storage.local.get(Object.keys(fabDefaultUiSettingsKeys), (result) => {
-        let newFabUiSettingsToStore = {};
-        for (const key in fabDefaultUiSettingsKeys) {
+    chrome.storage.local.get(Object.keys(defaultUiSettingsKeys), (result) => {
+        let newSettingsToStore = {};
+        for (const key in defaultUiSettingsKeys) {
             if (result[key] === undefined) {
-                newFabUiSettingsToStore[key] = fabDefaultUiSettingsKeys[key];
+                newSettingsToStore[key] = defaultUiSettingsKeys[key];
             }
         }
-        if (Object.keys(newFabUiSettingsToStore).length > 0) {
-            chrome.storage.local.set(newFabUiSettingsToStore);
+        if (Object.keys(newSettingsToStore).length > 0) {
+            chrome.storage.local.set(newSettingsToStore);
         }
     });
 
@@ -154,7 +183,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         [FabConstants.FAB_MAX_CONCURRENT_TABS_KEY]: 2,
         [FabConstants.FAB_DELAY_BETWEEN_VERIFICATION_CHECKS_MS_KEY]: 5000,
         [FabConstants.FAB_DELAY_BETWEEN_TAB_OPEN_MS_KEY]: 2000,
-        // Add new defaults
         [FabConstants.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS_KEY]: 5000,
         [FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY]: 4
     };
@@ -171,6 +199,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     });
 
     await FabBackground.onInstalled(details);
+    await YouTubeBackground.onInstalled(details);
 
     lastBroadcastedRateLimitState = null;
     broadcastFabContentScriptStatus();
@@ -249,6 +278,7 @@ chrome.webRequest.onHeadersReceived.addListener(
     await AppState.loadGlobalState();
     LanguageManager.loadLanguages();
     await FabBackground.init();
+    await YouTubeBackground.init();
     lastBroadcastedRateLimitState = null;
     broadcastFabContentScriptStatus();
     console.log("Background Coordinator: Initial global state and modules loaded.");

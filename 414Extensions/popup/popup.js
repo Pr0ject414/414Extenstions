@@ -8,62 +8,64 @@ document.addEventListener('DOMContentLoaded', () => {
     const fabFilterToggle = document.getElementById('fabFilterToggle');
     const fabAutoAddToggle = document.getElementById('fabAutoAddToggle');
     const fabAutoOpenFreeToggle = document.getElementById('fabAutoOpenFreeToggle');
-    const fabQueueProcessingToggle = document.getElementById('fabQueueProcessingToggle'); // New toggle
+    const fabQueueProcessingToggle = document.getElementById('fabQueueProcessingToggle');
     
-    // Stats display elements
+    // YouTube Helper specific Toggles
+    const youTubeModulePowerToggle = document.getElementById('youTubeModulePowerToggle');
+    const youTubeNoSuggestionsToggle = document.getElementById('youTubeNoSuggestionsToggle');
+
+    // FAB Stats display elements
     const fabQueueSizeElement = document.getElementById('fabQueueSize');
     const fabHiddenOwnedCountElement = document.getElementById('fabHiddenOwnedCount');
-    const operationalStatusIndicator = document.getElementById('operationalStatusIndicator');
-    const operationalStatusText = document.getElementById('operationalStatusText');
+    const fabOperationalStatusIndicator = document.getElementById('fabOperationalStatusIndicator');
+    const fabOperationalStatusText = document.getElementById('fabOperationalStatusText');
     
-    // Storage Keys - ensure these match constants.js
-    const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled'; //
-    const FAB_MODULE_ENABLED_KEY = 'isFabModuleEnabled'; //
-    const FAB_FILTER_ENABLED_KEY = 'isFabFilterEnabled'; //
-    const FAB_AUTO_ADD_ENABLED_KEY = 'isFabAutoAddFreeLicenseEnabled'; //
-    const FAB_AUTO_OPEN_FREE_ENABLED_KEY = 'isFabAutoOpenFreeEnabled'; //
-    const FAB_QUEUE_PROCESSING_ENABLED_KEY = 'isFabQueueProcessingEnabled'; //
+    // YouTube Stats display elements
+    const youTubeOperationalStatusIndicator = document.getElementById('youTubeOperationalStatusIndicator');
+    const youTubeOperationalStatusText = document.getElementById('youTubeOperationalStatusText');
 
-    // Function to set toggle states based on other toggles
+    // Storage Keys
+    const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled';
+    const FAB_MODULE_ENABLED_KEY = 'isFabModuleEnabled';
+    const FAB_FILTER_ENABLED_KEY = 'isFabFilterEnabled';
+    const FAB_AUTO_ADD_ENABLED_KEY = 'isFabAutoAddFreeLicenseEnabled';
+    const FAB_AUTO_OPEN_FREE_ENABLED_KEY = 'isFabAutoOpenFreeEnabled';
+    const FAB_QUEUE_PROCESSING_ENABLED_KEY = 'isFabQueueProcessingEnabled';
+    const YOUTUBE_MODULE_ENABLED_KEY = 'isYouTubeModuleEnabled';
+    const YOUTUBE_NO_SUGGESTIONS_ENABLED_KEY = 'isYouTubeNoSuggestionsEnabled';
+
+
     function setDependentTogglesState() {
         const isGlobalOn = globalMasterSwitchToggle.checked;
+        
+        // FAB Dependencies
         const isFabModuleOn = fabModulePowerToggle.checked;
-
-        // FAB specific toggles depend on both Global and FAB Module switches
         const enableFabSpecific = isGlobalOn && isFabModuleOn;
         fabFilterToggle.disabled = !enableFabSpecific;
         fabAutoAddToggle.disabled = !enableFabSpecific;
         fabAutoOpenFreeToggle.disabled = !enableFabSpecific;
-        fabQueueProcessingToggle.disabled = !enableFabSpecific; // Disable new toggle based on dependencies
-
-        // FAB Module toggle depends on Global switch
+        fabQueueProcessingToggle.disabled = !enableFabSpecific;
         fabModulePowerToggle.disabled = !isGlobalOn;
 
-        // If Global is off, visually indicate FAB module is also effectively off (but retain its stored checked state)
-        if (!isGlobalOn) {
-            document.getElementById('fab-controls').classList.add('effectively-disabled');
-        } else {
-            document.getElementById('fab-controls').classList.remove('effectively-disabled');
-        }
-         // If FAB module is off (and global is on), disable its sub-settings
-        if (!isFabModuleOn && isGlobalOn) {
-             fabFilterToggle.disabled = true;
-             fabAutoAddToggle.disabled = true;
-             fabAutoOpenFreeToggle.disabled = true;
-             fabQueueProcessingToggle.disabled = true; // Disable new toggle if FAB module is off
-        }
+        // YouTube Dependencies
+        const isYouTubeModuleOn = youTubeModulePowerToggle.checked;
+        const enableYouTubeSpecific = isGlobalOn && isYouTubeModuleOn;
+        youTubeNoSuggestionsToggle.disabled = !enableYouTubeSpecific;
+        youTubeModulePowerToggle.disabled = !isGlobalOn;
+
+        // Visual cues for disabled modules
+        document.getElementById('fab-controls').classList.toggle('effectively-disabled', !isGlobalOn);
+        document.getElementById('youtube-controls').classList.toggle('effectively-disabled', !isGlobalOn);
     }
 
-    // Handle opening the options page
-    const openOptionsPageLink = document.getElementById('openOptionsPageLink'); //
+    const openOptionsPageLink = document.getElementById('openOptionsPageLink');
     if (openOptionsPageLink) {
         openOptionsPageLink.addEventListener('click', (event) => {
-            event.preventDefault(); // Prevent the default link behavior
+            event.preventDefault();
             if (chrome.runtime.openOptionsPage) {
                 chrome.runtime.openOptionsPage();
             } else {
-                // Fallback for older Chrome versions or if the method is not available
-                chrome.tabs.create({ url: chrome.runtime.getURL('settings/settings.html') }); //
+                chrome.tabs.create({ url: chrome.runtime.getURL('settings/settings.html') });
             }
         });
     }
@@ -75,144 +77,143 @@ document.addEventListener('DOMContentLoaded', () => {
         FAB_FILTER_ENABLED_KEY,
         FAB_AUTO_ADD_ENABLED_KEY,
         FAB_AUTO_OPEN_FREE_ENABLED_KEY,
-        FAB_QUEUE_PROCESSING_ENABLED_KEY // Load new toggle state
+        FAB_QUEUE_PROCESSING_ENABLED_KEY,
+        YOUTUBE_MODULE_ENABLED_KEY,
+        YOUTUBE_NO_SUGGESTIONS_ENABLED_KEY
     ], (result) => {
-        globalMasterSwitchToggle.checked = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] === undefined ? true : result[GLOBAL_MASTER_SWITCH_ENABLED_KEY];
-        fabModulePowerToggle.checked = result[FAB_MODULE_ENABLED_KEY] === undefined ? true : result[FAB_MODULE_ENABLED_KEY];
+        globalMasterSwitchToggle.checked = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] !== false;
+        fabModulePowerToggle.checked = result[FAB_MODULE_ENABLED_KEY] !== false;
+        fabFilterToggle.checked = result[FAB_FILTER_ENABLED_KEY] === true;
+        fabAutoAddToggle.checked = result[FAB_AUTO_ADD_ENABLED_KEY] === true;
+        fabAutoOpenFreeToggle.checked = result[FAB_AUTO_OPEN_FREE_ENABLED_KEY] === true;
+        fabQueueProcessingToggle.checked = result[FAB_QUEUE_PROCESSING_ENABLED_KEY] === true;
         
-        fabFilterToggle.checked = result[FAB_FILTER_ENABLED_KEY] === undefined ? false : result[FAB_FILTER_ENABLED_KEY];
-        fabAutoAddToggle.checked = result[FAB_AUTO_ADD_ENABLED_KEY] === undefined ? false : result[FAB_AUTO_ADD_ENABLED_KEY];
-        fabAutoOpenFreeToggle.checked = result[FAB_AUTO_OPEN_FREE_ENABLED_KEY] === undefined ? false : result[FAB_AUTO_OPEN_FREE_ENABLED_KEY];
-        fabQueueProcessingToggle.checked = result[FAB_QUEUE_PROCESSING_ENABLED_KEY] === undefined ? false : result[FAB_QUEUE_PROCESSING_ENABLED_KEY]; // Initialize new toggle
+        youTubeModulePowerToggle.checked = result[YOUTUBE_MODULE_ENABLED_KEY] !== false;
+        youTubeNoSuggestionsToggle.checked = result[YOUTUBE_NO_SUGGESTIONS_ENABLED_KEY] === true;
 
-        setDependentTogglesState(); // Initial disable/enable state
-        updateStatsDisplay(); // Initial stats fetch
+        setDependentTogglesState();
+        updateFabStatsDisplay();
+        updateYouTubeStatsDisplay();
     });
 
     // Event Listeners
     globalMasterSwitchToggle.addEventListener('change', () => {
         const isEnabled = globalMasterSwitchToggle.checked;
         chrome.storage.local.set({ [GLOBAL_MASTER_SWITCH_ENABLED_KEY]: isEnabled });
-        chrome.runtime.sendMessage({ action: "setGlobalMasterSwitch", enabled: isEnabled }, (response) => {
-            if (chrome.runtime.lastError || !response || !response.success) { /* console.error */ }
+        chrome.runtime.sendMessage({ action: "setGlobalMasterSwitch", enabled: isEnabled }, () => {
             setDependentTogglesState();
-            updateStatsDisplay();
+            updateFabStatsDisplay();
+            updateYouTubeStatsDisplay();
         });
     });
 
     fabModulePowerToggle.addEventListener('change', () => {
         const isEnabled = fabModulePowerToggle.checked;
         chrome.storage.local.set({ [FAB_MODULE_ENABLED_KEY]: isEnabled });
-        chrome.runtime.sendMessage({ action: "setFabModuleEnabled", enabled: isEnabled }, (response) => {
-            if (chrome.runtime.lastError || !response || !response.success) { /* console.error */ }
+        chrome.runtime.sendMessage({ action: "setFabModuleEnabled", enabled: isEnabled }, () => {
             setDependentTogglesState();
-            updateStatsDisplay();
+            updateFabStatsDisplay();
+        });
+    });
+
+    youTubeModulePowerToggle.addEventListener('change', () => {
+        const isEnabled = youTubeModulePowerToggle.checked;
+        chrome.storage.local.set({ [YOUTUBE_MODULE_ENABLED_KEY]: isEnabled });
+        chrome.runtime.sendMessage({ action: "setYouTubeModuleEnabled", enabled: isEnabled }, () => {
+            setDependentTogglesState();
+            updateYouTubeStatsDisplay();
         });
     });
 
     fabFilterToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_FILTER_ENABLED_KEY]: fabFilterToggle.checked }));
     fabAutoAddToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_AUTO_ADD_ENABLED_KEY]: fabAutoAddToggle.checked }));
     fabAutoOpenFreeToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_AUTO_OPEN_FREE_ENABLED_KEY]: fabAutoOpenFreeToggle.checked }));
-    
-    // New event listener for fabQueueProcessingToggle
     fabQueueProcessingToggle.addEventListener('change', () => {
         const isEnabled = fabQueueProcessingToggle.checked;
-        chrome.storage.local.set({ [FAB_QUEUE_PROCESSING_ENABLED_KEY]: isEnabled }); // Save to storage
-        chrome.runtime.sendMessage({ action: "setFabQueueProcessingEnabled", enabled: isEnabled }, (response) => { // Send message to background
-            if (chrome.runtime.lastError || !response || !response.success) { 
-                console.error("Error sending setFabQueueProcessingEnabled message:", chrome.runtime.lastError ? chrome.runtime.lastError.message : "Unknown error");
-            }
-            updateStatsDisplay(); // Refresh stats display
-        });
+        chrome.storage.local.set({ [FAB_QUEUE_PROCESSING_ENABLED_KEY]: isEnabled });
+        chrome.runtime.sendMessage({ action: "setFabQueueProcessingEnabled", enabled: isEnabled }, updateFabStatsDisplay);
+    });
+    
+    youTubeNoSuggestionsToggle.addEventListener('change', () => {
+        const isEnabled = youTubeNoSuggestionsToggle.checked;
+        chrome.storage.local.set({ [YOUTUBE_NO_SUGGESTIONS_ENABLED_KEY]: isEnabled });
+        chrome.runtime.sendMessage({ action: "setYouTubeNoSuggestionsEnabled", enabled: isEnabled }, updateYouTubeStatsDisplay);
     });
 
 
-    function updateStatsDisplay() {
-        if (!chrome.runtime || !chrome.runtime.sendMessage) {
-            // Handle environments where sendMessage is not available
-            fabQueueSizeElement.textContent = "Unavailable";
-            fabHiddenOwnedCountElement.textContent = "Unavailable";
-            operationalStatusIndicator.className = 'status-error';
-            operationalStatusText.textContent = "Unavailable";
-            return;
-        }
-
+    function updateFabStatsDisplay() {
         chrome.runtime.sendMessage({ action: "getFabGlobalStats" }, (response) => {
             if (chrome.runtime.lastError) {
-                fabQueueSizeElement.textContent = "Error";
-                fabHiddenOwnedCountElement.textContent = "Error";
-                operationalStatusIndicator.className = 'status-error';
-                operationalStatusText.textContent = "Error";
-                setDependentTogglesState(); // Reflect potential desync if background is down
+                fabOperationalStatusText.textContent = "Error";
+                fabOperationalStatusIndicator.className = 'status-error';
                 return;
             }
             if (response) {
-                fabQueueSizeElement.textContent = response.queueSize !== undefined ? response.queueSize : "N/A";
-                fabHiddenOwnedCountElement.textContent = response.hiddenOwnedCount !== undefined ? response.hiddenOwnedCount : "N/A";
+                fabQueueSizeElement.textContent = response.queueSize ?? "N/A";
+                fabHiddenOwnedCountElement.textContent = response.hiddenOwnedCount ?? "N/A";
                 
-                // Update toggle states from background's perspective (source of truth for enabled state)
-                if (response.globalMasterSwitchEnabled !== undefined && globalMasterSwitchToggle.checked !== response.globalMasterSwitchEnabled) {
-                    globalMasterSwitchToggle.checked = response.globalMasterSwitchEnabled;
-                }
-                if (response.fabModuleEnabled !== undefined && fabModulePowerToggle.checked !== response.fabModuleEnabled) {
-                    fabModulePowerToggle.checked = response.fabModuleEnabled;
-                }
-                // Update new toggle state from background's perspective
-                if (response.fabQueueProcessingEnabled !== undefined && fabQueueProcessingToggle.checked !== response.fabQueueProcessingEnabled) {
-                    fabQueueProcessingToggle.checked = response.fabQueueProcessingEnabled;
-                }
-
-                setDependentTogglesState(); // After updating main toggles, ensure sub-toggles are correctly enabled/disabled.
-
-                operationalStatusIndicator.className = ''; // Clear previous status classes
-                let statusTextValue = "Unknown";
-                switch (response.operationalStatus) {
-                    case "EXTENSION_DISABLED":
-                        operationalStatusIndicator.classList.add('status-extension-disabled');
-                        statusTextValue = "Ext. Disabled";
-                        break;
-                    case "FAB_DISABLED":
-                        operationalStatusIndicator.classList.add('status-fab-disabled');
-                        statusTextValue = "FAB Disabled";
-                        break;
-                    case "OK_ACTIVE":
-                        operationalStatusIndicator.classList.add('status-ok-active');
-                        statusTextValue = "Active";
-                        break;
-                    case "OK_IDLE":
-                        operationalStatusIndicator.classList.add('status-ok-idle');
-                        statusTextValue = "Idle";
-                        break;
-                    case "SUSPENDED":
-                        operationalStatusIndicator.classList.add('status-suspended');
-                        statusTextValue = "Suspended";
-                        break;
-                    case "RATE_LIMITED":
-                        operationalStatusIndicator.classList.add('status-rate-limited');
-                        statusTextValue = "Rate Limited";
-                        break;
-                    case "QUEUE_DISABLED": // New status for queue disabled
-                        operationalStatusIndicator.classList.add('status-fab-disabled'); // Can reuse fab-disabled style or create new
-                        statusTextValue = "Queue Disabled";
-                        break;
-                    default:
-                        operationalStatusIndicator.classList.add('status-error'); // Default to error appearance
-                        statusTextValue = "Status N/A";
-                }
-                operationalStatusText.textContent = statusTextValue;
-            } else {
-                fabQueueSizeElement.textContent = "N/A";
-                fabHiddenOwnedCountElement.textContent = "N/A";
-                operationalStatusIndicator.className = 'status-error';
-                operationalStatusText.textContent = "N/A";
-                setDependentTogglesState();
+                updateStatusIndicator(fabOperationalStatusIndicator, fabOperationalStatusText, response.operationalStatus);
             }
         });
     }
 
-    // Initial call and interval
-    // updateStatsDisplay(); // Called after loading toggle states
-    const statsUpdateInterval = setInterval(updateStatsDisplay, 3000);
+    function updateYouTubeStatsDisplay() {
+        chrome.runtime.sendMessage({ action: "getYouTubeGlobalStats" }, (response) => {
+            if (chrome.runtime.lastError) {
+                youTubeOperationalStatusText.textContent = "Error";
+                youTubeOperationalStatusIndicator.className = 'status-error';
+                return;
+            }
+            if (response) {
+                 updateStatusIndicator(youTubeOperationalStatusIndicator, youTubeOperationalStatusText, response.operationalStatus);
+            }
+        });
+    }
+    
+    function updateStatusIndicator(indicator, textElement, status) {
+        indicator.className = ''; // Clear previous
+        let statusTextValue = "Unknown";
+         switch (status) {
+            case "EXTENSION_DISABLED":
+                indicator.classList.add('status-extension-disabled');
+                statusTextValue = "Ext. Disabled";
+                break;
+            case "FAB_DISABLED":
+            case "YOUTUBE_DISABLED":
+                indicator.classList.add('status-fab-disabled');
+                statusTextValue = "Mod. Disabled";
+                break;
+            case "OK_ACTIVE":
+                indicator.classList.add('status-ok-active');
+                statusTextValue = "Active";
+                break;
+            case "OK_IDLE":
+                indicator.classList.add('status-ok-idle');
+                statusTextValue = "Idle";
+                break;
+            case "SUSPENDED":
+                indicator.classList.add('status-suspended');
+                statusTextValue = "Suspended";
+                break;
+            case "RATE_LIMITED":
+                indicator.classList.add('status-rate-limited');
+                statusTextValue = "Rate Limited";
+                break;
+            case "QUEUE_DISABLED":
+                indicator.classList.add('status-fab-disabled');
+                statusTextValue = "Queue Off";
+                break;
+            default:
+                indicator.classList.add('status-error');
+                statusTextValue = "Status N/A";
+        }
+        textElement.textContent = statusTextValue;
+    }
+
+    const statsUpdateInterval = setInterval(() => {
+        updateFabStatsDisplay();
+        updateYouTubeStatsDisplay();
+    }, 3000);
     window.addEventListener('unload', () => clearInterval(statsUpdateInterval));
 
     // Tab switching logic
@@ -224,7 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
             button.classList.add('active');
             tabContents.forEach(content => content.classList.remove('active'));
             const targetTab = button.getAttribute('data-tab');
-            if (document.getElementById(targetTab)) { // Check if element exists
+            if (document.getElementById(targetTab)) {
                  document.getElementById(targetTab).classList.add('active');
             }
         });

@@ -5,6 +5,7 @@ import * as CoreConstants from './coreConstants.js';
 export let rateLimitCoolDownUntil = 0; // Timestamp for global cool-down
 export let globalMasterSwitchEnabled = true; // Default to ON for the entire extension
 export let fabModuleEnabled = true; // Default to ON for the FAB module (managed globally)
+export let youTubeModuleEnabled = true; // Default to ON for the YouTube module
 
 // Configurable global network settings (loaded from storage)
 export let globalMaxRetries = 5; // Default value
@@ -56,6 +57,14 @@ export function setFabModuleEnabled(value) {
     }
 }
 
+export function setYouTubeModuleEnabled(value) {
+    if (typeof value === 'boolean') {
+        youTubeModuleEnabled = value;
+    } else {
+        console.warn('AppState: Invalid value for setYouTubeModuleEnabled. Expected boolean.');
+    }
+}
+
 // --- Persistence Functions for Global State ---
 export async function saveGlobalState() {
     return new Promise(resolve => {
@@ -63,6 +72,7 @@ export async function saveGlobalState() {
             [CoreConstants.RATE_LIMIT_COOL_DOWN_UNTIL_KEY]: rateLimitCoolDownUntil,
             [CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY]: globalMasterSwitchEnabled,
             [CoreConstants.FAB_MODULE_ENABLED_KEY]: fabModuleEnabled,
+            [CoreConstants.YOUTUBE_MODULE_ENABLED_KEY]: youTubeModuleEnabled,
             // Save configurable global network settings
             [CoreConstants.GLOBAL_MAX_RETRIES_KEY]: globalMaxRetries,
             [CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY]: globalInitialDelayMs,
@@ -86,6 +96,7 @@ export async function loadGlobalState() {
             CoreConstants.RATE_LIMIT_COOL_DOWN_UNTIL_KEY,
             CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY,
             CoreConstants.FAB_MODULE_ENABLED_KEY,
+            CoreConstants.YOUTUBE_MODULE_ENABLED_KEY,
             CoreConstants.GLOBAL_MAX_RETRIES_KEY,
             CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY,
             CoreConstants.GLOBAL_MAX_DELAY_MS_KEY
@@ -99,6 +110,7 @@ export async function loadGlobalState() {
             // Preserve specific default logic for boolean switches
             globalMasterSwitchEnabled = result[CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY] === undefined ? true : result[CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY];
             fabModuleEnabled = result[CoreConstants.FAB_MODULE_ENABLED_KEY] === undefined ? true : result[CoreConstants.FAB_MODULE_ENABLED_KEY];
+            youTubeModuleEnabled = result[CoreConstants.YOUTUBE_MODULE_ENABLED_KEY] === undefined ? true : result[CoreConstants.YOUTUBE_MODULE_ENABLED_KEY];
 
             // Load configurable global network settings with defaults
             globalMaxRetries = result[CoreConstants.GLOBAL_MAX_RETRIES_KEY] === undefined ? 5 : result[CoreConstants.GLOBAL_MAX_RETRIES_KEY]; //
@@ -108,6 +120,7 @@ export async function loadGlobalState() {
             console.log("AppState: Global state loaded.", {
                 globalMasterSwitchEnabled,
                 fabModuleEnabled,
+                youTubeModuleEnabled,
                 rateLimitCoolDownUntil: rateLimitCoolDownUntil > 0 ? new Date(rateLimitCoolDownUntil).toISOString() : "Not set",
                 globalMaxRetries,
                 globalInitialDelayMs,
