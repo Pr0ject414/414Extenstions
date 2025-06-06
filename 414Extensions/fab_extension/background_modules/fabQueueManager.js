@@ -6,6 +6,44 @@ import { addOpenedItemToVerificationQueue } from './fabVerification.js';
 // For reading global conditions
 import * as AppState from '../../../shared_modules/appState.js';
 
+/**
+ * A new, consolidated function to handle requests from content scripts.
+ * It adds a URL to the queue and attempts to process the queue immediately.
+ * @param {string} url - The URL to be added and processed.
+ * @returns {{status: string, error?: string}} A status object for the sendResponse callback.
+ */
+export function addUrlToQueueAndProcess(url) {
+    if (!AppState.globalMasterSwitchEnabled) {
+        return { status: "global_master_disabled" };
+    }
+    if (!AppState.fabModuleEnabled) {
+        return { status: "fab_module_disabled" };
+    }
+
+    const successfullyQueued = FabState.addUrlToFabQueue(url);
+
+    if (successfullyQueued) {
+        FabState.saveFabState();
+
+        if (!FabState.fabQueueProcessingEnabled) {
+            console.log("FabQueueManager: Item queued but queue processing is disabled. URL:", url);
+            return { status: "queued_processing_disabled" };
+        }
+        if (FabState.autoProcessingSuspended) {
+            return { status: "suspended" };
+        }
+        
+        if (!AppState.isRateLimited()) {
+            processFabTabQueue(); // Fire and forget is fine here
+        }
+        
+        return { status: "queued_and_processing_attempted" };
+    } else {
+        return { status: "already_queued_or_invalid" };
+    }
+}
+
+
 export function getListingIdFromUrl(fabUrl) {
     try {
         const urlObject = new URL(fabUrl);
@@ -129,21 +167,4 @@ export async function processFabTabQueue() {
     if (stateChangedInLoop && FabState.getFabUrlQueueSize() === 0) {
         await FabState.saveFabState();
     }
-}
-
-/**
- * Adds a URL to the FAB processing queue.
- * This function now leverages FabState.addUrlToFabQueue for encapsulation.
- * @param {string} url - The URL to add.
- * @returns {boolean} True if the URL was added, false otherwise.
- */
-export function addUrlToQueue(url) {
-    const added = FabState.addUrlToFabQueue(url);
-    if (added) {
-        console.log(`FabQueueManager: URL added to queue via FabState. Queue length: ${FabState.getFabUrlQueueSize()}`);
-    } else {
-        if (typeof url !== 'string') console.warn(`FabQueueManager: Attempted to add invalid URL to queue:`, url);
-        else console.log(`FabQueueManager: URL already in queue or invalid (checked by FabState): ${url}`);
-    }
-    return added;
 }

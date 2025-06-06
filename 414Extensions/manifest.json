@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kyles Chrome Extensions",
-  "version": "1.6",
+  "version": "1.7",
   "description": "A collection of Chrome Extensions created by Kyle.",
   "permissions": [
     "storage",
@@ -14,7 +14,7 @@
   ],
   "host_permissions": [
     "*://*.fab.com/*",
-    "*://*.youtube.com/*/*"
+    "*://*.youtube.com/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -26,24 +26,10 @@
   },
   "content_scripts": [
     {
-      "run_at": "document_end",
-      "js": ["fab_extension/content_scripts/fabBrowsePage.js"],
-      "matches": [
-        "https://www.fab.com/*"
-      ]
-    },
-    {
-      "run_at": "document_idle",
-      "js": ["fab_extension/content_scripts/fabProductPage.js"],
-      "matches": [
-        "https://www.fab.com/listings/*"
-      ]
-    },
-    {
       "run_at": "document_idle",
       "js": ["youtube_extension/content_scripts/youtubePlayerPage.js"],
       "matches": [
-        "https://www.youtube.com/watch*"
+        "https://www.youtube.com/*"
       ]
     }
   ],
