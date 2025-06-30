@@ -1,6 +1,14 @@
 // KylesChromeExtensions/fab_extension/content_scripts/fabBrowsePage.js
 
 (function() {
+    // GUARD CLAUSE: Check if this script has already been loaded on this page.
+    // If it has, do nothing and exit immediately.
+    if (window.hasFabBrowseScriptRun) {
+        return;
+    }
+    // Set the flag to true to prevent this script from running again.
+    window.hasFabBrowseScriptRun = true;
+
     // If the modules haven't loaded, this script can't run.
     if (!window.FabContentModules) return;
 
@@ -18,7 +26,6 @@
     let isGloballyPaused = false;
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-        // It's good practice to check if the runtime is still valid here too.
         if (chrome.runtime.lastError) {
             console.log("FabBrowsePage Coordinator: Runtime error on message.", chrome.runtime.lastError.message);
             return;
@@ -31,7 +38,7 @@
         } else if (request.action === "getHiddenOwnedItemCount") {
             sendResponse({ count: getHiddenCount() });
         }
-        return true; // Keep the message channel open for async response
+        return true; 
     });
 
     function updateFeatureStates() {
@@ -47,8 +54,7 @@
             const response = await chrome.runtime.sendMessage({ action: "getFabRateLimitStatus" });
             isGloballyPaused = response?.rateLimited ?? false;
         } catch(e) { 
-            console.warn("Could not get initial rate limit status. Extension may have been reloaded.", e.message);
-            // Assume paused if we can't communicate with the background
+            console.warn("Could not get initial rate limit status. Assuming paused.", e.message);
             isGloballyPaused = true;
         }
 
@@ -82,7 +88,6 @@
         });
     }
 
-    // Only initialize if the runtime is valid.
     if (typeof chrome.runtime.id !== "undefined") {
         initialize();
     } else {

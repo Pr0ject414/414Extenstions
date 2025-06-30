@@ -1,18 +1,20 @@
 // KylesChromeExtensions/fab_extension/content_scripts/modules/browsePageAutoOpener.js
-// (Full, corrected file that mimics the original successful logic)
 
 window.FabContentModules = window.FabContentModules || {};
 
 (function() {
     let autoOpenerObserver = null;
-    let graceCyclesMs = 4000; // This will now act as our grace period delay
-
+    let graceCyclesMs = 4000; // This default will be replaced by settings from the main content script.
+    
     // This set tracks URLs that are currently in their grace period or have been sent for queuing.
     const processedUrls = new Set();
 
     function isItemFree(item) {
+        // Find all potential "Free" text elements within the item card.
         const candidates = item.querySelectorAll('.fabkit-Typography-root.fabkit-Typography--intent-primary');
         for (const el of candidates) {
+            // Ensure we're not grabbing the price of a different item if the selector is too broad
+            // and that it's not a link.
             if (el.tagName !== 'A' && el.textContent.trim().toLowerCase() === 'free') {
                 return true;
             }
@@ -20,72 +22,67 @@ window.FabContentModules = window.FabContentModules || {};
         return false;
     }
     
+    // Using your original function name: processItem
     function processItem(item) {
-        // Stop if the item is already hidden or if we're already processing its URL
+        // Stop if the item has already been hidden by another process
         if (item.getAttribute('data-fab-hidden') === 'true') return;
         
         const itemLinkElement = item.querySelector('a.fabkit-Typography-root.bc6TaIqU.fabkit-Focusable-root');
         if (!itemLinkElement) return;
 
         const itemUrl = itemLinkElement.href;
+        // Stop if we don't have a URL or if we are already handling this URL
         if (!itemUrl || processedUrls.has(itemUrl)) return;
         
-        // Don't process items that are already owned
+        // Stop if the item is already marked as owned in the UI
         if (item.querySelector('i.fabkit-Icon--intent-success')) return;
 
         if (isItemFree(item)) {
-            // Immediately mark the URL as being processed to prevent the observer from firing again for this item.
+            // Immediately mark the URL as being processed to prevent the observer from creating multiple timers for the same item.
             processedUrls.add(itemUrl);
 
-            // This setTimeout block is the grace period. This is the logic from your original script.
+            // This setTimeout block creates the "grace period."
             setTimeout(() => {
-                // CORE LOGIC: Check if the item is still on the page. If the user scrolled away,
-                // the browser will have removed it from the DOM.
+                // CORE LOGIC: After the grace period, we check if the item is still physically on the page.
+                // If the user scrolled away quickly, the browser's virtual scrolling will have removed it from the DOM.
                 if (!document.body.contains(item)) {
-                    // The user scrolled away during the grace period. Abort processing and allow
-                    // the item to be picked up again if they scroll back.
+                    // The user scrolled past. Abort processing and remove from our tracking set
+                    // so it can be picked up again if they scroll back to it.
                     processedUrls.delete(itemUrl);
                     return;
                 }
 
-                // If we reach here, the grace period is over and the item is still visible.
-                // Time to hide it and queue it.
+                // If we reach here, the item is still visible. It's time to hide it and queue it for opening.
                 console.log(`FabAutoOpener: Grace period over. Hiding and queueing item: ${itemUrl}`);
                 item.style.display = 'none';
                 item.setAttribute('data-fab-hidden', 'true');
 
                 try {
-                    // Send to the background for queuing. We don't need the grace period here anymore.
+                    // Send the URL to the background script to be opened in a new tab.
                     chrome.runtime.sendMessage({
-                        action: "openTabInBackground", // Using a simplified, direct action now
+                        action: "openTabInBackground",
                         url: itemUrl
                     });
                 } catch (error) {
                     console.error("FabAutoOpener: Unexpected error on sendMessage:", error);
-                    // If sending fails, un-hide the item to allow a retry.
+                    // If sending the message fails, we should un-hide the item to allow a retry on a subsequent pass.
                     item.style.display = '';
                     item.removeAttribute('data-fab-hidden');
                     processedUrls.delete(itemUrl);
                 }
 
-                // After a much longer timeout, clear the URL from the set to handle page reloads
-                // or cases where a user might navigate away and back.
-                setTimeout(() => {
-                    processedUrls.delete(itemUrl);
-                }, 45000); // 45 seconds, same as your original script's expiry.
-
-            }, graceCyclesMs); // Use the grace period from settings.
+            }, graceCyclesMs); // Use the grace period duration passed from settings.
         }
     }
     
     FabContentModules.initializeAutoOpener = function(settings) {
         if (autoOpenerObserver) autoOpenerObserver.disconnect();
-        graceCyclesMs = settings.graceCyclesMs; // Load grace period from settings
+        graceCyclesMs = settings.graceCyclesMs; // Load the grace period delay from the main content script settings
         
-        // Initial scan of the page
+        // Scan the page for any items that are already present when the script loads.
         document.querySelectorAll('div.nTa5u2sc').forEach(processItem);
         
-        // Set up the observer for new items that load as the user scrolls
+        // Set up the observer to watch for new items that get added to the page as the user scrolls.
         autoOpenerObserver = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
                 if (mutation.addedNodes.length) {
@@ -100,6 +97,7 @@ window.FabContentModules = window.FabContentModules || {};
                 }
             }
         });
+        
         autoOpenerObserver.observe(document.body, { childList: true, subtree: true });
         console.log(`FabAutoOpener: Initialized with ${graceCyclesMs}ms visibility grace period.`);
     };
@@ -109,7 +107,7 @@ window.FabContentModules = window.FabContentModules || {};
             autoOpenerObserver.disconnect();
             autoOpenerObserver = null;
         }
-        processedUrls.clear();
+        processedUrls.clear(); // Clear the tracking set
         console.log("FabAutoOpener: Stopped.");
     };
 })();
