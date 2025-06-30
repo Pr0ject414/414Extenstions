@@ -64,6 +64,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    
+    // Expose the function to the window so popup.js can call it
+    window.updateFabStatsDisplay = updateFabStatsDisplay;
 
     // Set up interval to update stats
     const fabStatsInterval = setInterval(updateFabStatsDisplay, 3000);

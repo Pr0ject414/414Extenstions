@@ -29,7 +29,7 @@
       "run_at": "document_idle",
       "js": ["youtube_extension/content_scripts/youtubePlayerPage.js"],
       "matches": [
-        "https://www.youtube.com/*"
+        "*://*.youtube.com/watch*"
       ]
     }
   ],

@@ -24,6 +24,12 @@ export async function onInstalled(details) {
 export function handleMessage(request, sender, sendResponse) {
     console.log("YouTubeBackground: Received message", request.action);
 
+    if (request.action === "getYouTubeModuleStatus") {
+        const isPaused = !AppState.globalMasterSwitchEnabled || !AppState.youTubeModuleEnabled;
+        sendResponse({ isPaused: isPaused });
+        return true;
+    }
+    
     if (request.action === "getYouTubeGlobalStats") {
         let operationalStatus;
         if (!AppState.globalMasterSwitchEnabled) {

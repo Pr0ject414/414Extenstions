@@ -1,99 +1,96 @@
 // KylesChromeExtensions/fab_extension/content_scripts/modules/browsePageAutoOpener.js
+// (Full, corrected file that mimics the original successful logic)
 
 window.FabContentModules = window.FabContentModules || {};
 
 (function() {
     let autoOpenerObserver = null;
-    let graceCyclesMs = 4000;
-    const RECENTLY_OPENED_URL_EXPIRY_MS = 45000;
+    let graceCyclesMs = 4000; // This will now act as our grace period delay
+
+    // This set tracks URLs that are currently in their grace period or have been sent for queuing.
     const processedUrls = new Set();
 
     function isItemFree(item) {
-        const priceElements = item.querySelectorAll('.J9vFXlBh .fabkit-Typography-root');
-        for (const el of priceElements) {
-            if (el.textContent.trim().toLowerCase() === 'free') return true;
+        const candidates = item.querySelectorAll('.fabkit-Typography-root.fabkit-Typography--intent-primary');
+        for (const el of candidates) {
+            if (el.tagName !== 'A' && el.textContent.trim().toLowerCase() === 'free') {
+                return true;
+            }
         }
         return false;
     }
     
-    /**
-     * Injects a "success" icon into the item's card so the hider script can see it and do its job.
-     * This is more robust than trying to hide the element from this script.
-     * @param {HTMLElement} item The item card element.
-     */
-    function markItemAsOwnedInUI(item) {
-        if (!item) return;
-        // Check if it already has the icon to prevent duplicates.
-        if (item.querySelector('i.fabkit-Icon--intent-success')) return;
-
-        // Find a good place to put the icon. The container for the price is a good candidate.
-        const priceContainer = item.querySelector('.J9vFXlBh');
-        if (priceContainer) {
-            const successIcon = document.createElement('i');
-            // These classes are what the hider script looks for.
-            successIcon.className = 'fabkit-Icon--intent-success'; 
-            priceContainer.appendChild(successIcon);
-        }
-    }
-
     function processItem(item) {
+        // Stop if the item is already hidden or if we're already processing its URL
+        if (item.getAttribute('data-fab-hidden') === 'true') return;
+        
         const itemLinkElement = item.querySelector('a.fabkit-Typography-root.bc6TaIqU.fabkit-Focusable-root');
         if (!itemLinkElement) return;
 
         const itemUrl = itemLinkElement.href;
         if (!itemUrl || processedUrls.has(itemUrl)) return;
         
-        const successIcon = item.querySelector('i.fabkit-Icon--intent-success');
-        if (successIcon) return;
+        // Don't process items that are already owned
+        if (item.querySelector('i.fabkit-Icon--intent-success')) return;
 
         if (isItemFree(item)) {
+            // Immediately mark the URL as being processed to prevent the observer from firing again for this item.
             processedUrls.add(itemUrl);
 
+            // This setTimeout block is the grace period. This is the logic from your original script.
             setTimeout(() => {
+                // CORE LOGIC: Check if the item is still on the page. If the user scrolled away,
+                // the browser will have removed it from the DOM.
                 if (!document.body.contains(item)) {
+                    // The user scrolled away during the grace period. Abort processing and allow
+                    // the item to be picked up again if they scroll back.
                     processedUrls.delete(itemUrl);
                     return;
                 }
 
+                // If we reach here, the grace period is over and the item is still visible.
+                // Time to hide it and queue it.
+                console.log(`FabAutoOpener: Grace period over. Hiding and queueing item: ${itemUrl}`);
+                item.style.display = 'none';
+                item.setAttribute('data-fab-hidden', 'true');
+
                 try {
-                    chrome.runtime.sendMessage({ action: "openTabInBackground", url: itemUrl }, (response) => {
-                        const responseStatus = response ? (response.status || JSON.stringify(response)) : "No response";
-
-                        if (chrome.runtime.lastError) {
-                            console.error(`FabAutoOpener: Runtime error for ${itemUrl}:`, chrome.runtime.lastError.message);
-                            processedUrls.delete(itemUrl); // Release claim on error
-                            return;
-                        }
-
-                        if (!response || !response.status.startsWith("queued")) {
-                            console.error(`FabAutoOpener: Failed to queue ${itemUrl}. Reason: ${responseStatus}`);
-                            processedUrls.delete(itemUrl); // Release claim on failure to allow retry
-                        } else {
-                            // SUCCESS! Mark the item in the UI so the hider script can see it.
-                            markItemAsOwnedInUI(item);
-                            // Set the claim to expire after a timeout.
-                            setTimeout(() => processedUrls.delete(itemUrl), RECENTLY_OPENED_URL_EXPIRY_MS);
-                        }
+                    // Send to the background for queuing. We don't need the grace period here anymore.
+                    chrome.runtime.sendMessage({
+                        action: "openTabInBackground", // Using a simplified, direct action now
+                        url: itemUrl
                     });
                 } catch (error) {
                     console.error("FabAutoOpener: Unexpected error on sendMessage:", error);
+                    // If sending fails, un-hide the item to allow a retry.
+                    item.style.display = '';
+                    item.removeAttribute('data-fab-hidden');
                     processedUrls.delete(itemUrl);
                 }
-            }, graceCyclesMs);
+
+                // After a much longer timeout, clear the URL from the set to handle page reloads
+                // or cases where a user might navigate away and back.
+                setTimeout(() => {
+                    processedUrls.delete(itemUrl);
+                }, 45000); // 45 seconds, same as your original script's expiry.
+
+            }, graceCyclesMs); // Use the grace period from settings.
         }
     }
     
     FabContentModules.initializeAutoOpener = function(settings) {
         if (autoOpenerObserver) autoOpenerObserver.disconnect();
-        graceCyclesMs = settings.graceCyclesMs;
+        graceCyclesMs = settings.graceCyclesMs; // Load grace period from settings
         
+        // Initial scan of the page
         document.querySelectorAll('div.nTa5u2sc').forEach(processItem);
         
+        // Set up the observer for new items that load as the user scrolls
         autoOpenerObserver = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
                 if (mutation.addedNodes.length) {
                     mutation.addedNodes.forEach(node => {
-                        if (node.nodeType === 1) {
+                        if (node.nodeType === 1) { // Process only element nodes
                             if (node.matches && node.matches('div.nTa5u2sc')) {
                                 processItem(node);
                             }
@@ -104,7 +101,7 @@ window.FabContentModules = window.FabContentModules || {};
             }
         });
         autoOpenerObserver.observe(document.body, { childList: true, subtree: true });
-        console.log(`FabAutoOpener: Initialized with ${graceCyclesMs}ms grace period.`);
+        console.log(`FabAutoOpener: Initialized with ${graceCyclesMs}ms visibility grace period.`);
     };
 
     FabContentModules.stopAutoOpener = function() {
@@ -112,6 +109,7 @@ window.FabContentModules = window.FabContentModules || {};
             autoOpenerObserver.disconnect();
             autoOpenerObserver = null;
         }
+        processedUrls.clear();
         console.log("FabAutoOpener: Stopped.");
     };
 })();

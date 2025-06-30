@@ -15,6 +15,8 @@ export let fabDelayBetweenTabOpenMs = 2000;
 export let fabBrowsePageScanIntervalMs = 5000;
 export let fabFreeItemGraceCycles = 4;
 
+let pendingGracePeriodItems = new Map();
+
 // Object defining the state keys and their default values for storage.
 const FAB_STATE_DEFAULTS = {
     [FabConstants.FAB_URL_QUEUE_KEY]: [],
@@ -29,6 +31,36 @@ const FAB_STATE_DEFAULTS = {
     [FabConstants.FAB_FREE_ITEM_GRACE_CYCLES_KEY]: 4,
 };
 
+/**
+ * Checks if a URL is either in the grace period, the main processing queue,
+ * or the verification queue. This is the definitive check to prevent any duplicates.
+ * @param {string} url The URL to check.
+ * @returns {boolean}
+ */
+export function isUrlPendingOrQueued(url) {
+    const isPending = pendingGracePeriodItems.has(url);
+    const isInQueue = fabUrlQueue.includes(url);
+    const isInVerification = verificationQueue.some(item => item.url === url);
+    return isPending || isInQueue || isInVerification;
+}
+
+/**
+ * Adds a URL to the in-memory grace period map.
+ * @param {string} url The URL to add.
+ * @param {number} timerId The ID of the setTimeout timer.
+ */
+export function addUrlToPending(url, timerId) {
+    pendingGracePeriodItems.set(url, timerId);
+}
+
+/**
+ * Removes a URL from the in-memory grace period map.
+ * This is called when the timer fires and the item is moved to the main queue.
+ * @param {string} url The URL to remove.
+ */
+export function removeUrlFromPending(url) {
+    pendingGracePeriodItems.delete(url);
+}
 
 // --- FAB State Modifiers ---
 export function addUrlToFabQueue(url) {

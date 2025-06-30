@@ -10,11 +10,16 @@ import * as YouTubeBackground from './youtube_extension/youtubeBackground.js';
 moduleManager.register(FabBackground, {
     actions: [
         "getFabGlobalStats", "openTabInBackground", "closeFabTab", "item_add_rate_limited",
-        "setFabQueueProcessingEnabled"
+        "setFabQueueProcessingEnabled", "queueItemWithGracePeriod", "queueFabItemOnly",
+        "getFabRateLimitStatus"
     ]
 });
 moduleManager.register(YouTubeBackground, {
-    actions: ["getYouTubeGlobalStats", "setYouTubeNoSuggestionsEnabled"]
+    actions: [
+        "getYouTubeGlobalStats",
+        "setYouTubeNoSuggestionsEnabled",
+        "getYouTubeModuleStatus"
+    ]
 });
 
 // --- Global Event Listeners & Functions ---
@@ -47,6 +52,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
              AppState.saveGlobalState().then(broadcastStateChanges);
              sendResponse({ success: true });
              return true;
+        case "setYouTubeModuleEnabled":
+             AppState.setYouTubeModuleEnabled(request.enabled);
+             AppState.saveGlobalState();
+             sendResponse({ success: true });
+             return true;
         case "settingsUpdated":
             (async () => {
                 await AppState.loadGlobalState();
@@ -61,30 +71,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // Inject scripts when a FAB page has finished loading
-    if (changeInfo.status === 'complete' && tab.url && tab.url.startsWith("https://www.fab.com/")) {
-        // Product Page Injection
-        if (tab.url.includes("/listings/")) {
-            console.log(`Coordinator: Injecting scripts into FAB Product Page: ${tabId}`);
-            chrome.scripting.executeScript({
-                target: { tabId: tabId },
-                files: [
-                    'fab_extension/content_scripts/modules/productPageDomScraper.js',
-                    'fab_extension/content_scripts/modules/contentApi.js',
-                    'fab_extension/content_scripts/fabProductPage.js'
-                ]
-            }).catch(err => console.error("Failed to inject product page scripts:", err));
-        } 
-        // Browse Page Injection (any other FAB page)
-        else {
-            console.log(`Coordinator: Injecting scripts into FAB Browse Page: ${tabId}`);
-            chrome.scripting.executeScript({
-                target: { tabId: tabId },
-                files: [
-                    'fab_extension/content_scripts/modules/browsePageHider.js',
-                    'fab_extension/content_scripts/modules/browsePageAutoOpener.js',
-                    'fab_extension/content_scripts/fabBrowsePage.js'
-                ]
-            }).catch(err => console.error("Failed to inject browse page scripts:", err));
+    if (changeInfo.status === 'complete' && tab.url) {
+        try {
+            const url = new URL(tab.url);
+            // Ensure we are on the correct website before injecting
+            if (url.hostname === 'www.fab.com' || url.hostname === 'fab.com') {
+                // Product Page Injection
+                if (url.pathname.includes("/listings/")) {
+                    console.log(`Coordinator: Injecting scripts into FAB Product Page: ${tabId}`);
+                    chrome.scripting.executeScript({
+                        target: { tabId: tabId },
+                        files: [
+                            'fab_extension/content_scripts/modules/productPageDomScraper.js',
+                            'fab_extension/content_scripts/modules/contentApi.js',
+                            'fab_extension/content_scripts/fabProductPage.js'
+                        ]
+                    }).catch(err => console.error("Failed to inject product page scripts:", err));
+                } 
+                // Browse Page Injection (any other FAB page)
+                else {
+                    console.log(`Coordinator: Injecting scripts into FAB Browse Page: ${tabId}`);
+                    chrome.scripting.executeScript({
+                        target: { tabId: tabId },
+                        files: [
+                            'fab_extension/content_scripts/modules/browsePageHider.js',
+                            'fab_extension/content_scripts/modules/browsePageAutoOpener.js',
+                            'fab_extension/content_scripts/fabBrowsePage.js'
+                        ]
+                    }).catch(err => console.error("Failed to inject browse page scripts:", err));
+                }
+            }
+        } catch (e) {
+            // Catches errors from creating a new URL object if tab.url is invalid
+            console.error(`Could not parse URL for script injection: ${tab.url}`, e);
         }
     }
 });

@@ -64,37 +64,24 @@ export async function processFabTabQueue() {
         console.log(`FabQueueManager: FAB Module switch is OFF. FAB queue processing paused. Queue length: ${FabState.getFabUrlQueueSize()}`);
         return;
     }
-    // New check for queue processing being enabled
     if (!FabState.fabQueueProcessingEnabled) {
         console.log(`FabQueueManager: FAB Queue Processing is DISABLED. Queue processing paused. Queue length: ${FabState.getFabUrlQueueSize()}`);
         return;
     }
-
-    // autoProcessingSuspended is a FAB-specific state
     if (FabState.autoProcessingSuspended) {
         console.log(`FabQueueManager: Auto-processing is suspended. Queue length: ${FabState.getFabUrlQueueSize()}`);
         return;
     }
-
     if (AppState.isRateLimited()) {
         console.log(`FabQueueManager: Processing paused due to global rate limit. Cool down until: ${new Date(AppState.rateLimitCoolDownUntil).toLocaleTimeString()}`);
-        // Ensure the constant name matches what's in fabConstants.js
         chrome.alarms.create(FabConstants.FAB_QUEUE_PROCESS_RETRY_ALARM_NAME, { when: AppState.rateLimitCoolDownUntil + 1000 });
         return;
     }
 
-    let stateChangedInLoop = false; // To track if any URL was actually processed from the queue
-    while (FabState.activeFabProcessingTabs < FabState.fabMaxConcurrentTabs && FabState.getFabUrlQueueSize() > 0) { // Use dynamic max concurrent tabs
-        if (!AppState.globalMasterSwitchEnabled) {
-            console.log(`FabQueueManager: Global Master switch turned OFF mid-batch. Pausing.`);
-            break;
-        }
-        if (!AppState.fabModuleEnabled) {
-            console.log(`FabQueueManager: FAB Module switch turned OFF mid-batch. Pausing FAB queue.`);
-            break;
-        }
-        if (!FabState.fabQueueProcessingEnabled) { // Re-check if it got disabled mid-batch
-            console.log(`FabQueueManager: FAB Queue Processing turned DISABLED mid-batch. Pausing.`);
+    let stateChangedInLoop = false;
+    while (FabState.activeFabProcessingTabs < FabState.fabMaxConcurrentTabs && FabState.getFabUrlQueueSize() > 0) {
+        if (!AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || !FabState.fabQueueProcessingEnabled) {
+            console.log(`FabQueueManager: A global or module switch was turned OFF mid-batch. Pausing.`);
             break;
         }
 
@@ -104,12 +91,10 @@ export async function processFabTabQueue() {
             break;
         }
         
-        // Use the new FabState function to get the next URL
         const urlToOpen = FabState.getNextUrlFromFabQueue();
-        // getNextUrlFromFabQueue already implies stateChangedInLoop if urlToOpen is not null
 
         if (urlToOpen) {
-            stateChangedInLoop = true; // A URL is being processed
+            stateChangedInLoop = true;
 
             const listingId = getListingIdFromUrl(urlToOpen);
 
@@ -120,50 +105,39 @@ export async function processFabTabQueue() {
 
             FabState.incrementActiveTabs();
 
-            // Retry logic for creating tab
-            const MAX_RETRIES = 3; // Keep this hardcoded for tab creation for now, or make configurable later.
-            let retryCount = 0;
+            try {
+                // Use async/await for cleaner tab creation and error handling
+                const newTab = await chrome.tabs.create({ url: urlToOpen, active: false });
+                if (newTab && newTab.id) {
+                    console.log(`FabQueueManager: Opened ${urlToOpen} in new tab ID: ${newTab.id}. Listing ID: ${listingId}. Active tabs: ${FabState.activeFabProcessingTabs}`);
+                    addOpenedItemToVerificationQueue({
+                        url: urlToOpen,
+                        listingId: listingId,
+                        tabId: newTab.id,
+                        status: 'opened',
+                        openTime: Date.now()
+                    });
+                } else {
+                     console.error(`FabQueueManager: Tab creation failed for ${urlToOpen} (newTab or newTab.id is undefined).`);
+                     FabState.decrementActiveTabs(); // Decrement if no tab was created
+                }
+            } catch (error) {
+                console.error(`FabQueueManager: Error opening new tab for ${urlToOpen}:`, error);
+                FabState.decrementActiveTabs(); // Decrement on failure
+            }
+            
+            await FabState.saveFabState(); // Save state after each tab operation
 
-            const attemptTabCreate = (url, tabId) => {
-                chrome.tabs.create({ url: url, active: false }, (newTab) => {
-                    if (chrome.runtime.lastError) {
-                        const errorMessage = chrome.runtime.lastError.message;
-                        if (errorMessage.includes("Tabs cannot be edited right now") && retryCount < MAX_RETRIES) {
-                            retryCount++;
-                            console.warn(`FabQueueManager: Retrying tab creation for ${url} (Attempt ${retryCount}/${MAX_RETRIES}):`, errorMessage);
-                            setTimeout(() => attemptTabCreate(url, tabId), 500); // Retry after 500ms
-                        } else {
-                            console.error(`FabQueueManager: Error opening new tab for ${url} after ${retryCount} retries:`, errorMessage);
-                            FabState.decrementActiveTabs(); // Only decrement if giving up
-                        }
-                    } else if (newTab && newTab.id) {
-                        console.log(`FabQueueManager: Opened ${url} in new tab ID: ${newTab.id}. Listing ID: ${listingId}. Active tabs: ${FabState.activeFabProcessingTabs}`);
-                        addOpenedItemToVerificationQueue({
-                            url: url,
-                            listingId: listingId,
-                            tabId: newTab.id,
-                            status: 'opened',
-                            openTime: Date.now()
-                        });
-                    } else {
-                        console.error(`FabQueueManager: Tab creation failed for ${url} (newTab or newTab.id is undefined) and no chrome.runtime.lastError reported.`);
-                        FabState.decrementActiveTabs(); // Decrement if no tab was created
-                    }
-                    FabState.saveFabState(); // Save state after each attempt's outcome
-                });
-            };
-            attemptTabCreate(urlToOpen, null); // Start initial attempt
-
-            if (FabState.getFabUrlQueueSize() > 0 && (FabState.activeFabProcessingTabs) < FabState.fabMaxConcurrentTabs) { // Use dynamic max concurrent tabs
-                console.log(`FabQueueManager: Delaying ${FabState.fabDelayBetweenTabOpenMs / 1000}s before next tab open.`); // Use dynamic delay
-                await new Promise(resolve => setTimeout(resolve, FabState.fabDelayBetweenTabOpenMs)); // Use dynamic delay
+            if (FabState.getFabUrlQueueSize() > 0 && (FabState.activeFabProcessingTabs) < FabState.fabMaxConcurrentTabs) {
+                console.log(`FabQueueManager: Delaying ${FabState.fabDelayBetweenTabOpenMs / 1000}s before next tab open.`);
+                await new Promise(resolve => setTimeout(resolve, FabState.fabDelayBetweenTabOpenMs));
             }
         } else {
-            // No URL was returned from the queue, so break the loop.
-            break;
+            break; // No more URLs in the queue
         }
     }
 
+    // Save state once at the end if changes were made and the queue is now empty
     if (stateChangedInLoop && FabState.getFabUrlQueueSize() === 0) {
         await FabState.saveFabState();
     }

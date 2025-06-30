@@ -13,15 +13,17 @@ document.addEventListener('DOMContentLoaded', () => {
         setDependentModulesState();
     });
 
-    // --- Global Event Listeners ---
+   // --- Global Event Listeners ---
     globalMasterSwitchToggle.addEventListener('change', () => {
         const isEnabled = globalMasterSwitchToggle.checked;
         chrome.storage.local.set({ [GLOBAL_MASTER_SWITCH_ENABLED_KEY]: isEnabled });
-        // Send a generic message that other UI scripts can listen for, or just reload popup state.
+        
+        // The message now has a callback that explicitly tells the module UIs to refresh
         chrome.runtime.sendMessage({ action: "setGlobalMasterSwitch", enabled: isEnabled }, () => {
             setDependentModulesState();
-            // You might need to manually trigger updates in the other UI scripts here
-            // or have them listen for the state change message.
+            // Manually trigger the status updates for each module
+            if (window.updateFabStatsDisplay) window.updateFabStatsDisplay();
+            if (window.updateYouTubeStatsDisplay) window.updateYouTubeStatsDisplay();
         });
     });
 

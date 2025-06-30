@@ -47,6 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Expose the function to the window so popup.js can call it
+    window.updateYouTubeStatsDisplay = updateYouTubeStatsDisplay;
+
     // Set up interval to update stats
     const youtubeStatsInterval = setInterval(updateYouTubeStatsDisplay, 3000);
     window.addEventListener('unload', () => clearInterval(youtubeStatsInterval));

@@ -110,7 +110,7 @@ export function handleMessage(request, sender, sendResponse) {
                             }
                             sendResponse(responseData);
                         })
-                        .catch(() => sendResponse(responseData)); // Suppress error and respond
+                        .catch(() => sendResponse(responseData));
                 } else {
                     sendResponse(responseData);
                 }
@@ -118,7 +118,43 @@ export function handleMessage(request, sender, sendResponse) {
             return true;
         }
 
+        case "getFabRateLimitStatus": {
+            const effectivelyPaused = !AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || AppState.isRateLimited();
+            sendResponse({ rateLimited: effectivelyPaused });
+            return true; // Required for asynchronous response
+        }
+
+        case "queueItemWithGracePeriod": {
+            const { url, graceMs } = request;
+
+            if (FabState.isUrlPendingOrQueued(url)) {
+                sendResponse({ status: "already_pending_or_queued" });
+                return true;
+            }
+
+            const timerId = setTimeout(() => {
+                FabState.removeUrlFromPending(url);
+                FabQueueManager.addUrlToQueueAndProcess(url);
+            }, graceMs);
+
+            FabState.addUrlToPending(url, timerId);
+            console.log(`FabBackground: Item ${url} is now pending for ${graceMs}ms.`);
+            sendResponse({ status: "pending_grace_period" });
+            return true;
+        }
+
+        case "queueFabItemOnly": { // Handler for the settings page manual add
+            const status = FabQueueManager.addUrlToQueueAndProcess(request.url);
+            if (status.status.startsWith("queued")) {
+                sendResponse({ success: true, message: `Item queued successfully.` });
+            } else {
+                sendResponse({ success: false, error: `Failed to queue item. Status: ${status.status}` });
+            }
+            return true;
+        }
+
         case "openTabInBackground": {
+            console.warn(`FabBackground: Received legacy 'openTabInBackground' request for ${request.url}`);
             const status = FabQueueManager.addUrlToQueueAndProcess(request.url);
             sendResponse(status);
             return true;
