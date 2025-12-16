@@ -20,12 +20,32 @@
 
     <div class="tab-container">
         <nav class="tab-nav">
-            <button class="tab-button active" data-tab="fab-controls">FAB Helper</button>
+            <button class="tab-button active" data-tab="volume-controls">Volume</button>
+            <button class="tab-button" data-tab="fab-controls">FAB Helper</button>
             <button class="tab-button" data-tab="youtube-controls">YouTube Helper</button>
             <button class="tab-button" data-tab="general-settings">General</button>
         </nav>
 
-        <div id="fab-controls" class="tab-content active">
+        <div id="volume-controls" class="tab-content active">
+             <h5 class="tab-description">Control audio volume for the current tab.</h5>
+             <h2>Volume Booster</h2>
+             
+             <div class="volume-control-container" style="text-align: center; padding: 20px 0;">
+                <div class="volume-display">
+                    <span id="volumeValueDisplay" style="font-size: 2.5em; font-weight: bold; color: #4caf50;">100%</span>
+                </div>
+                <!-- Added separate class for volume range to avoid conflict with toggle switch .slider -->
+                <div class="slidecontainer" style="margin: 20px 0; position: relative;"> 
+                    <input type="range" min="0" max="600" value="100" class="volume-range" id="volumeSlider" style="width: 100%;">
+                </div>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
+                    <button id="volumeResetBtn" style="padding: 5px 10px; cursor: pointer; background: #555; border: none; color: white; border-radius: 3px;">Reset to 100%</button>
+                    <p style="color: #888; font-size: 0.9em; margin: 0;">Boost up to 600%</p>
+                </div>
+             </div>
+        </div>
+
+        <div id="fab-controls" class="tab-content">
             <h5 class="tab-description">Settings and live status for FAB website automation.</h5>
             <h2>FAB Helper</h2>
 

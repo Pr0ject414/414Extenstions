@@ -252,3 +252,41 @@ input:checked + .slider:before { -webkit-transform: translateX(20px); -ms-transf
 .setting label.switch input[type="checkbox"]:disabled + .slider:before {
     background-color: #757575 !important; /* Darker circle for disabled slider */
 }
+
+/* Volume Slider Styles */
+.volume-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 8px;
+    border-radius: 5px;
+    background: var(--dark-slider-off-bg);
+    outline: none;
+    opacity: 0.9;
+    -webkit-transition: .2s;
+    transition: opacity .2s;
+    margin-top: 10px;
+}
+
+.volume-range:hover {
+    opacity: 1;
+}
+
+.volume-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    cursor: pointer;
+    box-shadow: 0 0 2px rgba(0,0,0,0.5);
+}
+
+.volume-range::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    cursor: pointer;
+}

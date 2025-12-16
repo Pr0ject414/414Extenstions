@@ -59,7 +59,7 @@ h2 {
     padding: 10px 0;
 }
 
-.setting label {
+.setting label:not(.switch) {
     flex-basis: 65%;
     margin-right: 15px;
     color: #E0E0E0;
@@ -226,6 +226,8 @@ p { /* General paragraph styling, e.g., the description for Queue Item */
   display: inline-block;
   width: 40px;
   height: 20px;
+  flex-shrink: 0;
+  flex-grow: 0;
 }
 
 .switch input {

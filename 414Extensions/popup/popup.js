@@ -3,6 +3,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Global Elements ---
     const globalMasterSwitchToggle = document.getElementById('globalMasterSwitchToggle');
     const openOptionsPageLink = document.getElementById('openOptionsPageLink');
+    
+    // --- Volume Control Elements ---
+    const volumeSlider = document.getElementById('volumeSlider');
+    const volumeValueDisplay = document.getElementById('volumeValueDisplay');
+    const volumeResetBtn = document.getElementById('volumeResetBtn');
 
     // --- Global Storage Key ---
     const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled';
@@ -31,6 +36,69 @@ document.addEventListener('DOMContentLoaded', () => {
         openOptionsPageLink.addEventListener('click', (event) => {
             event.preventDefault();
             chrome.runtime.openOptionsPage ? chrome.runtime.openOptionsPage() : chrome.tabs.create({ url: chrome.runtime.getURL('settings/settings.html') });
+        });
+    }
+
+    // --- Volume Control Logic ---
+    if (volumeSlider && volumeValueDisplay) {
+        const updateVolumeDisplay = (val) => {
+            volumeValueDisplay.textContent = `${val}%`;
+            // Visual feedback - color change based on volume
+            if (val > 100) volumeValueDisplay.style.color = '#ff9800'; // Orange for boost
+            else volumeValueDisplay.style.color = '#4caf50'; // Green for normal
+        };
+
+        volumeSlider.addEventListener('input', () => {
+             const val = volumeSlider.value;
+             updateVolumeDisplay(val);
+        });
+
+        volumeSlider.addEventListener('change', () => {
+            const val = volumeSlider.value;
+            // Get current active tab to send message
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs && tabs.length > 0) {
+                    const volumeFloat = parseFloat(val) / 100; // Convert 100 -> 1.0
+                    chrome.runtime.sendMessage({ 
+                        action: "updateVolume", 
+                        tabId: tabs[0].id, 
+                        volume: volumeFloat 
+                    });
+                }
+            });
+        });
+
+        if (volumeResetBtn) {
+            volumeResetBtn.addEventListener('click', () => {
+                volumeSlider.value = 100;
+                updateVolumeDisplay(100);
+                // Trigger change logic
+                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                    if (tabs && tabs.length > 0) {
+                        chrome.runtime.sendMessage({ 
+                            action: "updateVolume", 
+                            tabId: tabs[0].id, 
+                            volume: 1.0 
+                        });
+                    }
+                });
+            });
+        }
+
+        // Initialize Volume State
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs.length > 0) {
+                 chrome.runtime.sendMessage({ 
+                    action: "getCurrentVolumeForPopup", 
+                    tabId: tabs[0].id 
+                }, (response) => {
+                    if (response && response.volume !== undefined) {
+                        const volPercent = Math.round(response.volume * 100);
+                        volumeSlider.value = volPercent;
+                        updateVolumeDisplay(volPercent);
+                    }
+                });
+            }
         });
     }
 
