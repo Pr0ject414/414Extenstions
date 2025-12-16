@@ -8,6 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const volumeSlider = document.getElementById('volumeSlider');
     const volumeValueDisplay = document.getElementById('volumeValueDisplay');
     const volumeResetBtn = document.getElementById('volumeResetBtn');
+    
+    // --- VSC Elements ---
+    const vscPowerToggle = document.getElementById('vscPowerToggle');
+    const vscPopupKeySpeed = document.getElementById('vscPopupKeySpeed');
+    const vscSaveSpeedBtn = document.getElementById('vscSaveSpeedBtn');
+    const vscAddBlacklistBtn = document.getElementById('vscAddBlacklistBtn');
+    const vscPopupStatus = document.getElementById('vscPopupStatus');
 
     // --- Global Storage Key ---
     const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled';
@@ -16,6 +23,24 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get([GLOBAL_MASTER_SWITCH_ENABLED_KEY], (result) => {
         globalMasterSwitchToggle.checked = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] !== false;
         setDependentModulesState();
+        setDependentModulesState();
+    });
+    
+    // --- VSC Storage Keys (Duplicated from controller.js/settings.js for independence) ---
+    const VSC_STORAGE_KEYS = {
+      BLACKLIST: 'vsc_blacklist',
+      IS_ENABLED: 'vsc_is_enabled',
+      OPTIONS: 'vsc_options'
+    };
+    
+    // --- Load VSC State ---
+    chrome.storage.local.get([VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.OPTIONS], (result) => {
+        // Default Enabled if not present
+        const isVscEnabled = result[VSC_STORAGE_KEYS.IS_ENABLED] !== false;
+        if (vscPowerToggle) vscPowerToggle.checked = isVscEnabled;
+        
+        const vscOptions = result[VSC_STORAGE_KEYS.OPTIONS] || {};
+        if (vscPopupKeySpeed) vscPopupKeySpeed.value = vscOptions.keySpeed || 2.0;
     });
 
    // --- Global Event Listeners ---
@@ -101,6 +126,83 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // --- VSC Logic ---
+    if (vscPowerToggle) {
+        vscPowerToggle.addEventListener('change', () => {
+            const isEnabled = vscPowerToggle.checked;
+            chrome.storage.local.set({ [VSC_STORAGE_KEYS.IS_ENABLED]: isEnabled });
+            // Since controller.js checks on page load/init, we might want to reload active tabs or send message
+            // For now, simpler to just save. User might need to refresh.
+        });
+    }
+
+    if (vscSaveSpeedBtn) {
+        vscSaveSpeedBtn.addEventListener('click', () => {
+            const newSpeed = parseFloat(vscPopupKeySpeed.value);
+            if (isNaN(newSpeed) || newSpeed < 0.1 || newSpeed > 16) {
+                if (vscPopupStatus) {
+                   vscPopupStatus.textContent = "Invalid speed (0.1 - 16)";
+                   vscPopupStatus.className = "status-message error";
+                }
+                return;
+            }
+            
+            // Allow partial update of options
+            chrome.storage.local.get([VSC_STORAGE_KEYS.OPTIONS], (result) => {
+                const options = result[VSC_STORAGE_KEYS.OPTIONS] || {};
+                options.keySpeed = newSpeed;
+                chrome.storage.local.set({ [VSC_STORAGE_KEYS.OPTIONS]: options }, () => {
+                   if (vscPopupStatus) {
+                       vscPopupStatus.textContent = "Speed saved!";
+                       vscPopupStatus.className = "status-message success";
+                       setTimeout(() => vscPopupStatus.textContent = "", 2000);
+                   } 
+                });
+            });
+        });
+    }
+
+    if (vscAddBlacklistBtn) {
+        vscAddBlacklistBtn.addEventListener('click', () => {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (!tabs || tabs.length === 0) return;
+                const tab = tabs[0];
+                if (!tab.url) return;
+                
+                try {
+                    const url = new URL(tab.url);
+                    const hostname = url.hostname;
+                    
+                    chrome.storage.local.get([VSC_STORAGE_KEYS.BLACKLIST], (result) => {
+                        let blacklist = result[VSC_STORAGE_KEYS.BLACKLIST] || '';
+                        // Simple check if already there
+                        if (blacklist.includes(hostname)) {
+                            if (vscPopupStatus) {
+                                vscPopupStatus.textContent = "Site already blacklisted";
+                                vscPopupStatus.className = "status-message warning";
+                            }
+                            return;
+                        }
+                        
+                        blacklist = blacklist + '\n' + hostname;
+                        chrome.storage.local.set({ [VSC_STORAGE_KEYS.BLACKLIST]: blacklist }, () => {
+                             if (vscPopupStatus) {
+                                vscPopupStatus.textContent = `Added ${hostname}`;
+                                vscPopupStatus.className = "status-message success";
+                             }
+                        });
+                    });
+                } catch (e) {
+                    if (vscPopupStatus) {
+                        vscPopupStatus.textContent = "Invalid URL";
+                        vscPopupStatus.className = "status-message error";
+                    }
+                }
+            });
+        });
+    }
+
 
     // --- Functions Accessible by Module UI Scripts ---
     

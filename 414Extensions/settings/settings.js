@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const vscForceLastSavedInput = document.getElementById('vscForceLastSaved');
     const vscOpacityInput = document.getElementById('vscOpacity');
     const vscButtonSizeInput = document.getElementById('vscButtonSize');
+    const vscKeySpeedInput = document.getElementById('vscKeySpeed');
 
     // Storage Keys (Must match those defined in coreConstants.js and fabConstants.js)
     const GLOBAL_SETTINGS_STORAGE_KEYS = {
@@ -76,7 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
         hideDefault: false,
         forceLastSaved: false,
         opacity: 0.3,
-        buttonSize: 14
+        buttonSize: 14,
+        keySpeed: 2.0
     };
 
     function showStatusMessage(element, message, type = 'success') {
@@ -134,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (vscForceLastSavedInput) vscForceLastSavedInput.checked = vscOptions.forceLastSaved === true;
             if (vscOpacityInput) vscOpacityInput.value = vscOptions.opacity || 0.3;
             if (vscButtonSizeInput) vscButtonSizeInput.value = vscOptions.buttonSize || 14;
+            if (vscKeySpeedInput) vscKeySpeedInput.value = vscOptions.keySpeed || 2.0;
         });
     }
 
@@ -292,7 +295,8 @@ document.addEventListener('DOMContentLoaded', () => {
                  hideDefault: vscHideDefaultInput.checked,
                  forceLastSaved: vscForceLastSavedInput.checked,
                  opacity: parseFloat(vscOpacityInput.value),
-                 buttonSize: parseInt(vscButtonSizeInput.value)
+                 buttonSize: parseInt(vscButtonSizeInput.value),
+                 keySpeed: parseFloat(vscKeySpeedInput.value)
              };
              
              const settings = {
@@ -321,6 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
              vscForceLastSavedInput.checked = DEFAULT_VSC_OPTIONS.forceLastSaved;
              vscOpacityInput.value = DEFAULT_VSC_OPTIONS.opacity;
              vscButtonSizeInput.value = DEFAULT_VSC_OPTIONS.buttonSize;
+             vscKeySpeedInput.value = DEFAULT_VSC_OPTIONS.keySpeed;
              showStatusMessage(vscStatusMessage, 'Restored defaults (Hit Save to apply)!', 'warning');
         });
     }

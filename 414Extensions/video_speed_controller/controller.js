@@ -35,7 +35,8 @@ const DEFAULT_VSC_OPTIONS = {
     hideDefault: false,
     forceLastSaved: false,
     opacity: 0.3,
-    buttonSize: 14
+    buttonSize: 14,
+    keySpeed: 2.0
 };
 
 let currentConfig = {
@@ -50,7 +51,13 @@ let currentConfig = {
 
 function checkBlacklistAndInit() {
   const hostname = window.location.hostname;
-  chrome.storage.local.get([VSC_STORAGE_KEYS.BLACKLIST, VSC_STORAGE_KEYS.SHORTCUTS, VSC_STORAGE_KEYS.OPTIONS, VSC_STORAGE_KEYS.SPEED], (result) => {
+  chrome.storage.local.get([VSC_STORAGE_KEYS.BLACKLIST, VSC_STORAGE_KEYS.SHORTCUTS, VSC_STORAGE_KEYS.OPTIONS, VSC_STORAGE_KEYS.SPEED, VSC_STORAGE_KEYS.IS_ENABLED], (result) => {
+    // 0. Master Switch Check
+    if (result[VSC_STORAGE_KEYS.IS_ENABLED] === false) {
+        debugLog('VSC is disabled globally.');
+        return;
+    }
+
     // 1. Blacklist Check
     const blacklist = result[VSC_STORAGE_KEYS.BLACKLIST] || '';
     const lines = blacklist.split('\n');
@@ -91,28 +98,66 @@ function checkBlacklistAndInit() {
 // -----------------------------------------------------------------------------
 // INITIALIZATION
 // -----------------------------------------------------------------------------
+
+// Module-level references for cleanup
+let pageObserver = null;
+let isInitialized = false;
+
+// Named Handlers for removal
+const handleMouseEnter = (e) => {
+      const target = e.target;
+      const isAudio = target.nodeName === 'AUDIO';
+      const isVideo = target.nodeName === 'VIDEO';
+      if ((isVideo) || (isAudio && currentConfig.options.audio)) {
+          attachController(target, currentConfig.options.rememberSpeed ? undefined : 1.0); // Simple pass, logic inside handles storage check
+      }
+};
+
+const handleGlobalKeyDownInternal = (e) => handleKeyDown(e); // Alias to existing function
+
 function init(savedSpeed) {
+  if (isInitialized) return;
+  isInitialized = true;
   debugLog('Initializing Video Speed Controller', currentConfig);
   
   // Observer
   observeVideos(savedSpeed);
   
   // Mouse Enter
-  document.addEventListener('mouseenter', (e) => {
-      const target = e.target;
-      const isAudio = target.nodeName === 'AUDIO';
-      const isVideo = target.nodeName === 'VIDEO';
-      if ((isVideo) || (isAudio && currentConfig.options.audio)) {
-          attachController(target, savedSpeed);
-      }
-  }, true);
+  document.addEventListener('mouseenter', handleMouseEnter, true);
 
   // Keyboard
-  document.addEventListener('keydown', handleKeyDown);
+  document.addEventListener('keydown', handleGlobalKeyDownInternal);
+}
+
+function deinit() {
+    if (!isInitialized) return;
+    isInitialized = false;
+    debugLog('De-initializing VSC');
+    
+    // Disconnect Observer
+    if (pageObserver) {
+        pageObserver.disconnect();
+        pageObserver = null;
+    }
+    
+    // Remove Global Listeners
+    document.removeEventListener('mouseenter', handleMouseEnter, true);
+    document.removeEventListener('keydown', handleGlobalKeyDownInternal);
+    
+    // Remove UI from all videos
+    document.querySelectorAll('.vsc-controller-host').forEach(el => el.remove());
+    
+    // Clear Maps
+    // (WeakMaps clear themselves when elements die, but we can't iterate them to clear specific data 
+    // without tracking the keys. However, removing the UI stops the enforcement loops because 
+    // `syncPosition` checks `host.isConnected` or `video.isConnected`. 
+    // BUT, the enforcement loop `requestAnimationFrame` might keep running if we don't stop it.
+    // The loop checks `!video.isConnected` OR `host`. Since we removed host, loop should die.)
 }
 
 function observeVideos(initialSpeed) {
-  const observer = new MutationObserver((mutations) => {
+  pageObserver = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType !== 1) return;
@@ -131,7 +176,7 @@ function observeVideos(initialSpeed) {
     });
   });
   
-  observer.observe(document.body, { childList: true, subtree: true });
+  pageObserver.observe(document.body, { childList: true, subtree: true });
   // Initial scan
   const selector = currentConfig.options.audio ? 'video, audio' : 'video';
   document.querySelectorAll(selector).forEach(v => attachController(v, initialSpeed));
@@ -185,6 +230,8 @@ function onMouseUp() {
 const videoTargetSpeeds = new WeakMap();
 // Track anchors for invisible players
 const videoAnchors = new WeakMap();
+// Track override state per video
+const videoOverrideState = new WeakMap(); // { active: bool, originalSpeed: number }
 
 // Global Interaction Tracking (to guess triggers)
 let lastInteraction = { element: null, time: 0 };
@@ -208,6 +255,7 @@ function attachController(video, initialSpeed) {
     
     // Set initial target for enforcement
     videoTargetSpeeds.set(video, video.playbackRate);
+    videoOverrideState.set(video, { active: false, originalSpeed: null });
     
     // Create Host
     const host = document.createElement('div');
@@ -349,6 +397,17 @@ function attachController(video, initialSpeed) {
                 }, 500); // 500ms grace period
             }
         }
+        
+        // If override is active, ensure we stay at override speed
+        const overrideState = videoOverrideState.get(video);
+        if (overrideState && overrideState.active) {
+            const desired = currentConfig.options.keySpeed || 2.0;
+            if (Math.abs(video.playbackRate - desired) > 0.05) {
+                 // The site tried to fight back? Force it.
+                 // Use a small timeout to avoid max stack if they really fight
+                 setTimeout(() => video.playbackRate = desired, 0);
+            }
+        }
     }
     
     video.addEventListener('ratechange', handleRateChange);
@@ -424,11 +483,212 @@ function attachController(video, initialSpeed) {
     requestAnimationFrame(syncPosition);
 }
 
+
+
+function triggerOverride(video, active) {
+    const state = videoOverrideState.get(video) || { active: false, originalSpeed: null };
+    const overrideSpeed = currentConfig.options.keySpeed || 2.0;
+    
+    if (active) {
+        if (state.active) return; // Already active
+        
+        state.active = true;
+        state.originalSpeed = video.playbackRate;
+        videoOverrideState.set(video, state);
+        
+        debugLog("Override Activated: ", overrideSpeed);
+        
+        // Apply speed
+        video.playbackRate = overrideSpeed;
+        
+    } else {
+        if (!state.active) return; // Not active
+        
+        state.active = false;
+        const restoreSpeed = state.originalSpeed || 1.0;
+        state.originalSpeed = null;
+        videoOverrideState.set(video, state);
+        
+        debugLog("Override Deactivated. Restoring: ", restoreSpeed);
+        
+        // Restore speed
+        video.playbackRate = restoreSpeed;
+        
+        // Sync target speed so enforcement doesn't fight the restore
+        videoTargetSpeeds.set(video, restoreSpeed);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// GLOBAL OVERRIDE HANDLERS (Capture Phase)
+// -----------------------------------------------------------------------------
+// We use capture to catch events before sites (like Crunchyroll) swallow them.
+// We use geometric checks because many sites put transparent divs over the video.
+
+// -----------------------------------------------------------------------------
+// GLOBAL OVERRIDE HANDLERS (Capture Phase)
+// -----------------------------------------------------------------------------
+let overrideTriggeredByMouse = false;
+let overrideTriggeredByKey = false;
+let shouldSuppressClick = false;
+let spaceKeyPending = false;
+let spaceTimer = null;
+
+document.addEventListener('mousedown', (e) => {
+    // 1. Basic Filters
+    if (e.button !== 0) return; 
+    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.closest('a') || e.target.closest('[role="button"]')) return;
+    if (e.target.closest('.vsc-controller-host')) return;
+
+    // 2. Find Video
+    const selector = currentConfig.options.audio ? 'video, audio' : 'video';
+    const videos = Array.from(document.querySelectorAll(selector));
+    
+    const targetVideo = videos.find(video => {
+        if (e.target === video) return true;
+        const rect = video.getBoundingClientRect();
+        return (
+            e.clientX >= rect.left && e.clientX <= rect.right &&
+            e.clientY >= rect.top && e.clientY <= rect.bottom
+        );
+    });
+
+    if (targetVideo) {
+        // Delay activation to distinguish click vs hold
+        const delayMs = 500;
+        
+        const timerId = setTimeout(() => {
+            overrideTriggeredByMouse = true;
+            shouldSuppressClick = true; // Prepare to kill the click
+            triggerOverride(targetVideo, true);
+        }, delayMs);
+        
+        const onMouseUp = () => {
+             clearTimeout(timerId);
+             
+             if (overrideTriggeredByMouse) {
+                 overrideTriggeredByMouse = false;
+                 // Don't disable if key is holding
+                 if (!overrideTriggeredByKey) {
+                     triggerOverride(targetVideo, false);
+                 }
+                 
+                 // We kept shouldSuppressClick = true. 
+                 // It will be consumed by the click handler that fires immediately after mouseup.
+                 // We set a safety timeout to clear it if click doesn't fire.
+                 setTimeout(() => shouldSuppressClick = false, 100);
+             }
+             document.removeEventListener('mouseup', onMouseUp, true);
+        };
+        document.addEventListener('mouseup', onMouseUp, true);
+    }
+}, true); // Capture
+
+document.addEventListener('click', (e) => {
+    if (shouldSuppressClick) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        shouldSuppressClick = false;
+        debugLog('Suppressed Click after Hold');
+    }
+}, true);
+
+document.addEventListener('keydown', (e) => {
+    // Space bar check
+    if (e.code === 'Space') {
+        if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
+
+        // HIJACK: Stop site from seeing Space
+        e.stopImmediatePropagation();
+        e.preventDefault();
+
+        // If already overriding, ignore active holds (but handle repeats if we were pending)
+        if (overrideTriggeredByKey) return;
+
+        const selector = currentConfig.options.audio ? 'video, audio' : 'video';
+        const videos = Array.from(document.querySelectorAll(selector));
+        
+        // Helper to find target
+        const getTarget = () => {
+            let t = videos.find(v => !v.paused);
+            if (!t) t = videos.find(v => v.getBoundingClientRect().width > 0);
+            return t;
+        };
+
+        // If we are pending (waiting to decide Tap vs Hold) and getting repeats, confirm Hold now
+        if (spaceKeyPending && e.repeat) {
+             clearTimeout(spaceTimer);
+             spaceKeyPending = false;
+             overrideTriggeredByKey = true;
+             const target = getTarget();
+             if (target) {
+                 target.play().catch(()=>{}); // Force play
+                 triggerOverride(target, true);
+             }
+             return;
+        }
+
+        // New Press
+        if (!spaceKeyPending) {
+            spaceKeyPending = true;
+            // 200ms threshold for Space (quicker than mouse)
+            spaceTimer = setTimeout(() => {
+                spaceKeyPending = false;
+                overrideTriggeredByKey = true;
+                const target = getTarget();
+                if (target) {
+                    target.play().catch(()=>{});
+                    triggerOverride(target, true);
+                }
+            }, 200);
+        }
+    }
+}, true); // Capture
+
+document.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') {
+         if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
+         
+         // Always stop prop for Space if we are managing it
+         e.stopImmediatePropagation();
+         e.preventDefault();
+
+         if (spaceKeyPending) {
+             // Released before timer -> TAP
+             clearTimeout(spaceTimer);
+             spaceKeyPending = false;
+             
+             // Toggle Play/Pause Manually
+             const selector = currentConfig.options.audio ? 'video, audio' : 'video';
+             const videos = Array.from(document.querySelectorAll(selector));
+             // Toggle specific target or all? Usually site toggles active one.
+             // Best guess: Find playing -> pause. Else find first visible -> play.
+             const playing = videos.find(v => !v.paused);
+             if (playing) {
+                 playing.pause();
+             } else {
+                 const visible = videos.find(v => v.getBoundingClientRect().width > 0);
+                 if (visible) visible.play().catch(()=>{});
+             }
+         }
+         else if (overrideTriggeredByKey) {
+             // Released after Hold -> Stop Override
+             overrideTriggeredByKey = false;
+             const selector = currentConfig.options.audio ? 'video, audio' : 'video';
+             const videos = Array.from(document.querySelectorAll(selector));
+             videos.forEach(v => triggerOverride(v, false));
+         }
+    }
+}, true); // Capture
+
+
 // Logic to guess anchor
 function tryAnchor(video) {
     // If we have a recent interaction (< 2s)
     if (lastInteraction.element && (Date.now() - lastInteraction.time < 2000)) {
         const isInvisible = (video.nodeName === 'AUDIO' || (video.offsetWidth === 0 && video.offsetHeight === 0));
+        // Also check if video is playing?
+        
         if (isInvisible) {
             debugLog('Anchoring invisible controller to:', lastInteraction.element);
             videoAnchors.set(video, lastInteraction.element);
@@ -529,3 +789,67 @@ function handleKeyDown(e) {
 
 // Start
 checkBlacklistAndInit();
+
+// Storage Listener for Real-Time Updates
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace !== 'local') return;
+  
+  // 1. Master Switch
+  if (changes[VSC_STORAGE_KEYS.IS_ENABLED]) {
+      const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED].newValue;
+      if (isEnabled === false) {
+          deinit();
+      } else {
+          checkBlacklistAndInit();
+      }
+  }
+  
+  // 2. Options Update (Speed, Opacity, etc.)
+  if (changes[VSC_STORAGE_KEYS.OPTIONS]) {
+      currentConfig.options = { ...currentConfig.options, ...changes[VSC_STORAGE_KEYS.OPTIONS].newValue };
+      // Apply immediate visual effects?
+      // Opacity / Display default
+      document.querySelectorAll('.vsc-controller-host').forEach(host => {
+          if (host.shadowRoot) {
+            const wrapper = host.shadowRoot.querySelector('.vsc-controller');
+            if (wrapper) wrapper.style.opacity = currentConfig.options.hideDefault ? '0' : currentConfig.options.opacity;
+            // Background update requires re-render of style or direct manipulation
+            // wrapper.style.background = `rgba(0, 0, 0, ${currentConfig.options.opacity})`;
+          }
+      });
+  }
+  
+  // 3. Blacklist Update
+  if (changes[VSC_STORAGE_KEYS.BLACKLIST]) {
+       // if current site is now blacklisted, deinit.
+       // if current site was blacklisted but now isn't, init.
+       // Easiest is to re-run check logic.
+       // But if we are already init, we need to check if we should STOP.
+       // if we are stopped, check if we should START.
+       
+       // Force re-check
+       if (isInitialized) {
+            checkBlacklistAndInit(); // Will handle disabling if needed? 
+            // Actually checkBlacklistAndInit calls init(). It doesn't deinit.
+            // We need logic to deinit if currently blacklisted.
+            
+            const hostname = window.location.hostname;
+            const newBlacklist = changes[VSC_STORAGE_KEYS.BLACKLIST].newValue || '';
+            let isBlacklisted = false;
+            // Quick check
+            // ... (Duping regex logic is annoying, maybe extract?)
+            // Just running checkBlacklistAndInit is safer if we Modify it to handle "Already Init -> Should Disable" case.
+            // For now, let's implement a naive check here or reloading page is acceptable for *blacklist* specifically? 
+            // User requested "popup changes" (speed/enable) to be instant. Blacklist slightly less critical but nice.
+            
+            // Let's rely on standard reload for Blacklist to ensure cleanliness?
+            // User: "Making changes on the popup requires me to reload". Implies ALL changes.
+            
+            // Re-run full check.
+            deinit(); 
+            checkBlacklistAndInit();
+       } else {
+           checkBlacklistAndInit();
+       }
+  }
+});
