@@ -1,14 +1,40 @@
 // KylesChromeExtensions/fab_extension/content_scripts/fabProductPage.js
 
 (function() {
-    // Functions from our modules are attached to window.FabContentModules
-    const { scrapePageData, isAlreadyInLibraryUI, checkOwnership, addToLibrary } = window.FabContentModules;
+    // GUARD CLAUSE: Prevent the script from running multiple times
+    if (window.hasFabProductScriptRun) {
+        return;
+    }
+    window.hasFabProductScriptRun = true;
 
+    // If the modules haven't loaded, this script can't run.
+    if (!window.FabContentModules) return;
+
+    const { scrapePageData, isAlreadyInLibraryUI, checkOwnership, addToLibrary } = window.FabContentModules;
     const FAB_AUTO_ADD_ENABLED_KEY = 'isFabAutoAddFreeLicenseEnabled';
-    let currentFabAutoAddState = true;
+
+    let autoAddEnabled = false;
+    let isGloballyPaused = true; // Default to paused until we confirm otherwise.
+
+    // Listen for global status updates from the background script.
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.action === "fab_content_scripts_status") {
+            const wasPaused = isGloballyPaused;
+            isGloballyPaused = request.rateLimited;
+            // If the state changes from paused to unpaused, try to run the logic.
+            if (wasPaused && !isGloballyPaused) {
+                runAutoAddLogic();
+            }
+            sendResponse({ status: "ack_status_received" });
+        }
+        return true;
+    });
 
     async function attemptDirectFreeLicenseAdd() {
-        if (!currentFabAutoAddState) return;
+        // Final check before executing the core logic.
+        if (isGloballyPaused || !autoAddEnabled) {
+            return;
+        }
         console.log('FabProductPage: Script initiated.');
 
         // 1. Check UI first for a quick exit
@@ -26,9 +52,9 @@
         }
         const { listingId, offerId, csrfToken } = pageData;
 
-        // 3. Check ownership via API call from the content script
+        // 3. Check ownership via API call
         try {
-            const ownership = await checkOwnership(listingId); // Direct call
+            const ownership = await checkOwnership(listingId);
             if (ownership?.ownsFreePersonalLicense) {
                 console.log('FabProductPage: API confirms ownership. Closing.');
                 setTimeout(() => chrome.runtime.sendMessage({ action: "closeFabTab" }), 250);
@@ -36,49 +62,69 @@
             }
         } catch (e) { console.error('FabProductPage: Ownership check failed.', e); }
         
-        // 4. If not owned, attempt to add to library via API from content script
+        // 4. If not owned, attempt to add to library
         try {
-            const addResponse = await addToLibrary(listingId, offerId, csrfToken); // Direct call
+            const addResponse = await addToLibrary(listingId, offerId, csrfToken);
             
             if (addResponse?.success) {
                 console.log('FabProductPage: Successfully added to library. Closing.');
                 setTimeout(() => chrome.runtime.sendMessage({ action: "closeFabTab" }), 250);
             } else {
-                // The error message is updated to use the new response format
                 console.error(`FabProductPage: Failed to add. Status: ${addResponse?.status}`);
-                // If we get rate limited, we can still inform the background script to pause other operations
                 if (addResponse?.status === 429) {
+                    // Inform the background script to trigger a global cool-down.
                     chrome.runtime.sendMessage({ action: "item_add_rate_limited", url: window.location.href, listingId });
                 }
             }
         } catch (e) { console.error('FabProductPage: Add to library call failed.', e); }
     }
 
-    function initialize() {
-        chrome.storage.local.get([FAB_AUTO_ADD_ENABLED_KEY], (result) => {
-            currentFabAutoAddState = result[FAB_AUTO_ADD_ENABLED_KEY] !== false;
-            if (currentFabAutoAddState) {
-                if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                    setTimeout(attemptDirectFreeLicenseAdd, 3500);
-                } else {
-                    window.addEventListener('load', () => setTimeout(attemptDirectFreeLicenseAdd, 3500));
-                }
+    // A wrapper function to decide if and when to run the main logic.
+    function runAutoAddLogic() {
+        if (!isGloballyPaused && autoAddEnabled) {
+            // Use a timeout to give the page time to settle.
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                setTimeout(attemptDirectFreeLicenseAdd, 3500);
+            } else {
+                // Use 'once: true' to avoid adding multiple listeners.
+                window.addEventListener('load', () => setTimeout(attemptDirectFreeLicenseAdd, 3500), { once: true });
             }
-        });
-
-        chrome.storage.onChanged.addListener((changes, namespace) => {
-            if (namespace === 'local' && changes[FAB_AUTO_ADD_ENABLED_KEY]) {
-                currentFabAutoAddState = !!changes[FAB_AUTO_ADD_ENABLED_KEY].newValue;
-                if (currentFabAutoAddState) setTimeout(attemptDirectFreeLicenseAdd, 500);
-            }
-        });
+        }
     }
 
-    // Ensure all modules are loaded before initializing
+    async function initialize() {
+        // 1. Get the initial global pause status from the background script.
+        try {
+            const response = await chrome.runtime.sendMessage({ action: "getFabRateLimitStatus" });
+            isGloballyPaused = response?.rateLimited ?? true;
+        } catch (e) {
+            console.warn("FabProductPage: Could not get initial rate limit status. Assuming paused.", e.message);
+            isGloballyPaused = true;
+        }
+
+        // 2. Get the user's setting for this feature from local storage.
+        const result = await chrome.storage.local.get([FAB_AUTO_ADD_ENABLED_KEY]);
+        autoAddEnabled = result[FAB_AUTO_ADD_ENABLED_KEY] !== false;
+
+        // 3. Listen for changes to the user's setting.
+        chrome.storage.onChanged.addListener((changes, namespace) => {
+            if (namespace === 'local' && changes[FAB_AUTO_ADD_ENABLED_KEY]) {
+                autoAddEnabled = !!changes[FAB_AUTO_ADD_ENABLED_KEY].newValue;
+                // Re-evaluate whether to run the logic when the setting changes.
+                runAutoAddLogic();
+            }
+        });
+
+        // 4. Make the initial attempt to run the logic.
+        runAutoAddLogic();
+        console.log(`FabProductPage: Initialized. Paused: ${isGloballyPaused}, Auto-add: ${autoAddEnabled}`);
+    }
+
+    // Ensure all required modules are loaded before initializing.
     if (window.FabContentModules?.scrapePageData && window.FabContentModules?.checkOwnership) {
         initialize();
     } else {
-        // Fallback if scripts load out of order, though executeScript should prevent this.
+        // Fallback if scripts load out of order.
         window.addEventListener('load', initialize, { once: true });
         console.warn("FabProductPage: Modules not immediately available. Initializing on window load.");
     }

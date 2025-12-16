@@ -14,7 +14,8 @@
   ],
   "host_permissions": [
     "*://*.fab.com/*",
-    "*://*.youtube.com/*"
+    "*://*.youtube.com/*",
+    "*://*/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -31,6 +32,15 @@
       "matches": [
         "*://*.youtube.com/watch*"
       ]
+    },
+    {
+      "run_at": "document_idle",
+      "js": ["video_speed_controller/controller.js"],
+      "css": ["video_speed_controller/controller.css"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "all_frames": true
     }
   ],
   "content_security_policy": {

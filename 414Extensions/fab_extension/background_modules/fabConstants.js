@@ -11,6 +11,7 @@ export const FAB_URL_QUEUE_KEY = 'fabUrlQueue';
 export const FAB_QUEUED_URL_SET_KEY = 'fabQueuedUrlSet';
 export const FAB_VERIFICATION_QUEUE_KEY = 'fabVerificationQueue';
 export const FAB_AUTO_PROCESSING_SUSPENDED_KEY = 'fabAutoProcessingSuspended';
+export const FAB_SHOW_FREE_ONLY_KEY = 'isFabShowFreeOnlyEnabled';
 
 // FAB Alarm Names
 export const FAB_VERIFICATION_ALARM_NAME = 'fabVerificationAlarm';

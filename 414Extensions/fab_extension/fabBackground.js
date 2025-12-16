@@ -194,6 +194,16 @@ export function handleMessage(request, sender, sendResponse) {
             return true;
         }
 
+        case "item_add_rate_limited": {
+            console.log(`FabBackground: Content script reported rate limit for ${request.listingId}. Applying global cool-down.`);
+            if (AppState.setRateLimitCoolDown(Date.now() + AppState.globalMaxDelayMs)) {
+                AppState.saveGlobalState();
+                // The global coordinator will broadcast the state change automatically
+            }
+            sendResponse({ success: true });
+            return true;
+        }
+
         default:
             console.warn(`FabBackground: Unhandled message action: ${request.action}`);
             sendResponse({ success: false, error: "Unknown FAB action" });
@@ -213,7 +223,7 @@ export async function handleAlarm(alarm) {
     }
 }
 
-export async function handleTabRemoved(tabId, removeInfo) {
+export async function handleTabRemoved(tabId) {
     const wasProcessing = FabVerification.markItemForVerificationOnTabClose(tabId);
     if (wasProcessing) {
         if (FabState.activeFabProcessingTabs > 0) {

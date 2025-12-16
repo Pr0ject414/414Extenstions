@@ -1,0 +1,32 @@
+.vsc-controller {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-family: sans-serif;
+    font-size: 14px;
+    z-index: 99999;
+    cursor: default;
+    transition: opacity 0.3s;
+    pointer-events: none; /* Let clicks pass through unless hovering controls explicitly? */
+}
+
+/* If we want it to be interactive, pointer-events: auto */
+.vsc-controller {
+    pointer-events: auto;
+}
+
+.vsc-indicator {
+    font-weight: bold;
+}
+
+.vsc-hidden .vsc-controller {
+    display: none;
+}
+
+/* Ensure parent has context for absolute positioning if possible, 
+   but since we can't control parent style easily, we might need a better positioning strategy later. 
+   For now, this assumes parent is the video container. */

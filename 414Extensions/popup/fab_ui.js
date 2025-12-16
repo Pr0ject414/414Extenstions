@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fabAutoAddToggle = document.getElementById('fabAutoAddToggle');
     const fabAutoOpenFreeToggle = document.getElementById('fabAutoOpenFreeToggle');
     const fabQueueProcessingToggle = document.getElementById('fabQueueProcessingToggle');
+    const fabShowFreeToggle = document.getElementById('fabShowFreeToggle');
 
     // FAB Stats display elements
     const fabQueueSizeElement = document.getElementById('fabQueueSize');
@@ -19,17 +20,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const FAB_AUTO_ADD_ENABLED_KEY = 'isFabAutoAddFreeLicenseEnabled';
     const FAB_AUTO_OPEN_FREE_ENABLED_KEY = 'isFabAutoOpenFreeEnabled';
     const FAB_QUEUE_PROCESSING_ENABLED_KEY = 'isFabQueueProcessingEnabled';
+    const FAB_SHOW_FREE_ONLY_KEY = 'isFabShowFreeOnlyEnabled';
 
     // Load initial states
     chrome.storage.local.get([
-        FAB_MODULE_ENABLED_KEY, FAB_FILTER_ENABLED_KEY, FAB_AUTO_ADD_ENABLED_KEY,
-        FAB_AUTO_OPEN_FREE_ENABLED_KEY, FAB_QUEUE_PROCESSING_ENABLED_KEY
-    ], (result) => {
+    FAB_MODULE_ENABLED_KEY, FAB_FILTER_ENABLED_KEY, FAB_AUTO_ADD_ENABLED_KEY,
+    FAB_AUTO_OPEN_FREE_ENABLED_KEY, FAB_QUEUE_PROCESSING_ENABLED_KEY,
+    FAB_SHOW_FREE_ONLY_KEY
+], (result) => {
         fabModulePowerToggle.checked = result[FAB_MODULE_ENABLED_KEY] !== false;
         fabFilterToggle.checked = result[FAB_FILTER_ENABLED_KEY] === true;
         fabAutoAddToggle.checked = result[FAB_AUTO_ADD_ENABLED_KEY] === true;
         fabAutoOpenFreeToggle.checked = result[FAB_AUTO_OPEN_FREE_ENABLED_KEY] === true;
         fabQueueProcessingToggle.checked = result[FAB_QUEUE_PROCESSING_ENABLED_KEY] === true;
+        fabShowFreeToggle.checked = result[FAB_SHOW_FREE_ONLY_KEY] === true;
         updateFabStatsDisplay();
     });
 
@@ -43,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fabFilterToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_FILTER_ENABLED_KEY]: fabFilterToggle.checked }));
     fabAutoAddToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_AUTO_ADD_ENABLED_KEY]: fabAutoAddToggle.checked }));
     fabAutoOpenFreeToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_AUTO_OPEN_FREE_ENABLED_KEY]: fabAutoOpenFreeToggle.checked }));
+    fabShowFreeToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_SHOW_FREE_ONLY_KEY]: fabShowFreeToggle.checked }));
     
     fabQueueProcessingToggle.addEventListener('change', () => {
         const isEnabled = fabQueueProcessingToggle.checked;

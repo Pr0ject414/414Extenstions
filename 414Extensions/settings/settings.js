@@ -21,6 +21,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const queueItemButton = document.getElementById('queueItemButton');
     const queueStatusMessage = document.getElementById('queueStatus');
 
+    // VSC Settings Elements
+    const vscSitesBlacklistInput = document.getElementById('vscSitesBlacklist');
+    const saveVscSettingsButton = document.getElementById('saveVscSettings');
+    const resetVscSettingsButton = document.getElementById('resetVscSettings');
+    const vscStatusMessage = document.getElementById('vscStatus');
+    const vscShortcutsContainer = document.getElementById('vscShortcutsContainer');
+    
+    // VSC Options Inputs
+    const vscAudioSupportInput = document.getElementById('vscAudioSupport');
+    const vscRememberSpeedInput = document.getElementById('vscRememberSpeed');
+    const vscHideDefaultInput = document.getElementById('vscHideDefault');
+    const vscForceLastSavedInput = document.getElementById('vscForceLastSaved');
+    const vscOpacityInput = document.getElementById('vscOpacity');
+    const vscButtonSizeInput = document.getElementById('vscButtonSize');
+
     // Storage Keys (Must match those defined in coreConstants.js and fabConstants.js)
     const GLOBAL_SETTINGS_STORAGE_KEYS = {
         MAX_RETRIES: 'maxRetries',
@@ -35,6 +50,33 @@ document.addEventListener('DOMContentLoaded', () => {
         // New keys from fabConstants.js
         FAB_BROWSE_PAGE_SCAN_INTERVAL_MS: 'fabBrowsePageScanIntervalMs',
         FAB_FREE_ITEM_GRACE_CYCLES: 'fabFreeItemGraceCycles'
+    };
+
+    const VSC_STORAGE_KEYS = {
+        BLACKLIST: 'vsc_blacklist',
+        SHORTCUTS: 'vsc_shortcuts',
+        OPTIONS: 'vsc_options'
+    };
+    
+    // Default Shortcuts Config
+    const DEFAULT_VSC_SHORTCUTS = [
+        { id: "toggle", label: "Show/hide controller", key: "v", value: null, valueType: "none" },
+        { id: "decrease", label: "Decrease speed", key: "s", value: 0.1, valueType: "number" },
+        { id: "increase", label: "Increase speed", key: "d", value: 0.1, valueType: "number" },
+        { id: "rewind", label: "Rewind", key: "z", value: 10, valueType: "number" },
+        { id: "advance", label: "Advance", key: "x", value: 10, valueType: "number" },
+        { id: "reset", label: "Reset speed", key: "r", value: 1.0, valueType: "fixed" },
+        { id: "preferred", label: "Preferred speed", key: "g", value: 1.8, valueType: "fixed" }
+    ];
+
+    // Default Options Config
+    const DEFAULT_VSC_OPTIONS = {
+        audio: true,
+        rememberSpeed: true,
+        hideDefault: false,
+        forceLastSaved: false,
+        opacity: 0.3,
+        buttonSize: 14
     };
 
     function showStatusMessage(element, message, type = 'success') {
@@ -57,8 +99,14 @@ document.addEventListener('DOMContentLoaded', () => {
             [FAB_SETTINGS_STORAGE_KEYS.DELAY_BETWEEN_TAB_OPEN_MS]: 2000,
             [FAB_SETTINGS_STORAGE_KEYS.MAX_CONCURRENT_FAB_TABS]: 2,
             [FAB_SETTINGS_STORAGE_KEYS.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS]: 5000,
-            [FAB_SETTINGS_STORAGE_KEYS.FAB_FREE_ITEM_GRACE_CYCLES]: 4
+            [FAB_SETTINGS_STORAGE_KEYS.FAB_FREE_ITEM_GRACE_CYCLES]: 4,
+            [FAB_SETTINGS_STORAGE_KEYS.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS]: 5000,
+            [FAB_SETTINGS_STORAGE_KEYS.FAB_FREE_ITEM_GRACE_CYCLES]: 4,
+            [VSC_STORAGE_KEYS.BLACKLIST]: '',
+            [VSC_STORAGE_KEYS.SHORTCUTS]: DEFAULT_VSC_SHORTCUTS,
+            [VSC_STORAGE_KEYS.OPTIONS]: DEFAULT_VSC_OPTIONS
         };
+
 
         chrome.storage.local.get(allSettingKeysDefaults, (result) => {
             if (maxRetriesInput) maxRetriesInput.value = result[GLOBAL_SETTINGS_STORAGE_KEYS.MAX_RETRIES];
@@ -71,7 +119,82 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (fabBrowsePageScanIntervalSInput) fabBrowsePageScanIntervalSInput.value = result[FAB_SETTINGS_STORAGE_KEYS.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS] / 1000;
             if (fabFreeItemGraceCyclesInput) fabFreeItemGraceCyclesInput.value = result[FAB_SETTINGS_STORAGE_KEYS.FAB_FREE_ITEM_GRACE_CYCLES];
+            
+            if (vscSitesBlacklistInput) vscSitesBlacklistInput.value = result[VSC_STORAGE_KEYS.BLACKLIST];
+            
+            // Render Shortcuts
+            const shortcuts = result[VSC_STORAGE_KEYS.SHORTCUTS] || DEFAULT_VSC_SHORTCUTS;
+            renderShortcuts(shortcuts);
+            
+            // Render Options
+            const vscOptions = result[VSC_STORAGE_KEYS.OPTIONS] || DEFAULT_VSC_OPTIONS;
+            if (vscAudioSupportInput) vscAudioSupportInput.checked = vscOptions.audio !== false;
+            if (vscRememberSpeedInput) vscRememberSpeedInput.checked = vscOptions.rememberSpeed !== false;
+            if (vscHideDefaultInput) vscHideDefaultInput.checked = vscOptions.hideDefault === true;
+            if (vscForceLastSavedInput) vscForceLastSavedInput.checked = vscOptions.forceLastSaved === true;
+            if (vscOpacityInput) vscOpacityInput.value = vscOptions.opacity || 0.3;
+            if (vscButtonSizeInput) vscButtonSizeInput.value = vscOptions.buttonSize || 14;
         });
+    }
+
+    function renderShortcuts(shortcuts) {
+        if (!vscShortcutsContainer) return;
+        vscShortcutsContainer.innerHTML = '';
+        
+        shortcuts.forEach(sc => {
+            const row = document.createElement('div');
+            row.className = 'shortcut-row';
+            row.dataset.id = sc.id;
+            
+            const label = document.createElement('label');
+            label.textContent = sc.label;
+            
+            const keyInput = document.createElement('input');
+            keyInput.type = 'text';
+            keyInput.className = 'shortcut-key';
+            keyInput.value = sc.key;
+            keyInput.maxLength = 1; // Single char usually
+            
+            const valInput = document.createElement('input');
+            if (sc.valueType === 'none') {
+                 valInput.disabled = true;
+                 valInput.value = 'N/A';
+                 valInput.style.visibility = 'hidden'; // Or just placeholder
+            } else {
+                 valInput.type = 'number';
+                 valInput.className = 'shortcut-value';
+                 valInput.value = sc.value;
+                 valInput.step = 0.1;
+            }
+            
+            row.append(label, keyInput, valInput);
+            vscShortcutsContainer.appendChild(row);
+        });
+    }
+
+    function getShortcutsFromUI() {
+        if (!vscShortcutsContainer) return DEFAULT_VSC_SHORTCUTS;
+        const rows = vscShortcutsContainer.querySelectorAll('.shortcut-row');
+        const shortcuts = [];
+        
+        rows.forEach(row => {
+             const id = row.dataset.id;
+             const originalMsg = DEFAULT_VSC_SHORTCUTS.find(x => x.id === id); // To keep label/type info
+             const key = row.querySelector('.shortcut-key').value.toLowerCase();
+             let val = originalMsg.value;
+             
+             if (originalMsg.valueType !== 'none') {
+                 val = parseFloat(row.querySelector('.shortcut-value').value);
+             }
+             
+             shortcuts.push({
+                 ...originalMsg,
+                 key: key,
+                 value: val
+             });
+        });
+        
+        return shortcuts;
     }
 
     if (saveGlobalSettingsButton) {
@@ -156,6 +279,49 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 showStatusMessage(queueStatusMessage, 'Please enter a valid FAB product URL!', 'warning');
             }
+        });
+    }
+
+    if (saveVscSettingsButton) {
+        saveVscSettingsButton.addEventListener('click', () => {
+             const blacklistValue = vscSitesBlacklistInput.value;
+             const shortcuts = getShortcutsFromUI();
+             const options = {
+                 audio: vscAudioSupportInput.checked,
+                 rememberSpeed: vscRememberSpeedInput.checked,
+                 hideDefault: vscHideDefaultInput.checked,
+                 forceLastSaved: vscForceLastSavedInput.checked,
+                 opacity: parseFloat(vscOpacityInput.value),
+                 buttonSize: parseInt(vscButtonSizeInput.value)
+             };
+             
+             const settings = {
+                 [VSC_STORAGE_KEYS.BLACKLIST]: blacklistValue,
+                 [VSC_STORAGE_KEYS.SHORTCUTS]: shortcuts,
+                 [VSC_STORAGE_KEYS.OPTIONS]: options
+             };
+             
+             chrome.storage.local.set(settings, () => {
+                 if (chrome.runtime.lastError) {
+                     showStatusMessage(vscStatusMessage, 'Error saving VSC settings!', 'error');
+                 } else {
+                     showStatusMessage(vscStatusMessage, 'VSC settings saved!', 'success');
+                 }
+             });
+        });
+    }
+    
+    if (resetVscSettingsButton) {
+        resetVscSettingsButton.addEventListener('click', () => {
+             // Reset UI to defaults
+             renderShortcuts(DEFAULT_VSC_SHORTCUTS);
+             vscAudioSupportInput.checked = DEFAULT_VSC_OPTIONS.audio;
+             vscRememberSpeedInput.checked = DEFAULT_VSC_OPTIONS.rememberSpeed;
+             vscHideDefaultInput.checked = DEFAULT_VSC_OPTIONS.hideDefault;
+             vscForceLastSavedInput.checked = DEFAULT_VSC_OPTIONS.forceLastSaved;
+             vscOpacityInput.value = DEFAULT_VSC_OPTIONS.opacity;
+             vscButtonSizeInput.value = DEFAULT_VSC_OPTIONS.buttonSize;
+             showStatusMessage(vscStatusMessage, 'Restored defaults (Hit Save to apply)!', 'warning');
         });
     }
 

@@ -17,6 +17,7 @@
     const FAB_FILTER_ENABLED_KEY = 'isFabFilterEnabled';
     const FAB_AUTO_OPEN_FREE_ENABLED_KEY = 'isFabAutoOpenFreeEnabled';
     const FAB_FREE_ITEM_GRACE_CYCLES_KEY = 'fabFreeItemGraceCycles';
+    const FAB_SHOW_FREE_ONLY_KEY = 'isFabShowFreeOnlyEnabled';
 
     let settings = {
         filterEnabled: false,
@@ -58,7 +59,7 @@
             isGloballyPaused = true;
         }
 
-        const keys = [FAB_FILTER_ENABLED_KEY, FAB_AUTO_OPEN_FREE_ENABLED_KEY, FAB_FREE_ITEM_GRACE_CYCLES_KEY];
+        const keys = [FAB_FILTER_ENABLED_KEY, FAB_AUTO_OPEN_FREE_ENABLED_KEY, FAB_FREE_ITEM_GRACE_CYCLES_KEY, FAB_SHOW_FREE_ONLY_KEY];
         const result = await chrome.storage.local.get(keys);
         
         settings.filterEnabled = result[FAB_FILTER_ENABLED_KEY] ?? false;
@@ -67,6 +68,13 @@
         settings.graceCyclesMs = graceCycles * 1000;
 
         console.log("FabBrowsePage Coordinator: Initializing with settings:", settings);
+        if (result[FAB_SHOW_FREE_ONLY_KEY] && window.location.href.includes('/category/') && !window.location.search.includes('is_free=1')) {
+            console.log("FAB Browse Page: 'Only Show Free' is enabled on a category page. Redirecting...");
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.set('is_free', '1');
+            window.location.href = newUrl.href;
+            return; // Stop further execution to allow the page to reload
+        }
         updateFeatureStates();
 
         chrome.storage.onChanged.addListener((changes, namespace) => {
