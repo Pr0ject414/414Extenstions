@@ -12,8 +12,10 @@
 
     const { scrapePageData, isAlreadyInLibraryUI, checkOwnership, addToLibrary } = window.FabContentModules;
     const FAB_AUTO_ADD_ENABLED_KEY = 'isFabAutoAddFreeLicenseEnabled';
+    const FAB_QUEUE_PROCESSING_ENABLED_KEY = 'isFabQueueProcessingEnabled';
 
     let autoAddEnabled = false;
+    let queueProcessingEnabled = false;
     let isGloballyPaused = true; // Default to paused until we confirm otherwise.
 
     // Listen for global status updates from the background script.
@@ -32,7 +34,9 @@
 
     async function attemptDirectFreeLicenseAdd() {
         // Final check before executing the core logic.
-        if (isGloballyPaused || !autoAddEnabled) {
+        // We run if EITHER auto-add is explicitly enabled OR if we are processing the queue.
+        // If queue processing is on, the user expects items to be added and closed.
+        if (isGloballyPaused || (!autoAddEnabled && !queueProcessingEnabled)) {
             return;
         }
         console.log('FabProductPage: Script initiated.');
@@ -81,14 +85,33 @@
 
     // A wrapper function to decide if and when to run the main logic.
     function runAutoAddLogic() {
-        if (!isGloballyPaused && autoAddEnabled) {
-            // Use a timeout to give the page time to settle.
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                setTimeout(attemptDirectFreeLicenseAdd, 3500);
-            } else {
-                // Use 'once: true' to avoid adding multiple listeners.
-                window.addEventListener('load', () => setTimeout(attemptDirectFreeLicenseAdd, 3500), { once: true });
-            }
+        if (isGloballyPaused || (!autoAddEnabled && !queueProcessingEnabled)) return;
+
+        const checkAndRun = () => {
+            let attempts = 0;
+            const maxAttempts = 50; // 10 seconds max (50 * 200ms)
+            const interval = setInterval(() => {
+                attempts++;
+                const dataEl = document.getElementById('js-json-data-prefetched-data');
+                // We also check if we can scrape, as scrapePageData depends on this.
+                if (dataEl) {
+                    clearInterval(interval);
+                    // SAFETY DELAY: Even though getElementById is client-side only and safe, 
+                    // we add a randomized delay (1s - 2.5s) to mimic human behavior and avoid
+                    // any potential side-effects of triggering the API call too soon after page load.
+                    const randomDelay = Math.floor(Math.random() * 1500) + 1000;
+                    setTimeout(attemptDirectFreeLicenseAdd, randomDelay); 
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(interval);
+                    console.log("FabProductPage: Timed out waiting for page data.");
+                }
+            }, 200);
+        };
+
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            checkAndRun();
+        } else {
+            window.addEventListener('load', checkAndRun, { once: true });
         }
     }
 
@@ -103,21 +126,33 @@
         }
 
         // 2. Get the user's setting for this feature from local storage.
-        const result = await chrome.storage.local.get([FAB_AUTO_ADD_ENABLED_KEY]);
+        const result = await chrome.storage.local.get([FAB_AUTO_ADD_ENABLED_KEY, FAB_QUEUE_PROCESSING_ENABLED_KEY]);
         autoAddEnabled = result[FAB_AUTO_ADD_ENABLED_KEY] !== false;
+        queueProcessingEnabled = result[FAB_QUEUE_PROCESSING_ENABLED_KEY] === true;
 
         // 3. Listen for changes to the user's setting.
         chrome.storage.onChanged.addListener((changes, namespace) => {
-            if (namespace === 'local' && changes[FAB_AUTO_ADD_ENABLED_KEY]) {
-                autoAddEnabled = !!changes[FAB_AUTO_ADD_ENABLED_KEY].newValue;
-                // Re-evaluate whether to run the logic when the setting changes.
-                runAutoAddLogic();
+            if (namespace === 'local') {
+                let shouldCheck = false;
+                if (changes[FAB_AUTO_ADD_ENABLED_KEY]) {
+                    autoAddEnabled = !!changes[FAB_AUTO_ADD_ENABLED_KEY].newValue;
+                    shouldCheck = true;
+                }
+                if (changes[FAB_QUEUE_PROCESSING_ENABLED_KEY]) {
+                    queueProcessingEnabled = !!changes[FAB_QUEUE_PROCESSING_ENABLED_KEY].newValue;
+                    shouldCheck = true;
+                }
+                
+                if (shouldCheck) {
+                    // Re-evaluate whether to run the logic when the setting changes.
+                    runAutoAddLogic();
+                }
             }
         });
 
         // 4. Make the initial attempt to run the logic.
         runAutoAddLogic();
-        console.log(`FabProductPage: Initialized. Paused: ${isGloballyPaused}, Auto-add: ${autoAddEnabled}`);
+        console.log(`FabProductPage: Initialized. Paused: ${isGloballyPaused}, Auto-add: ${autoAddEnabled}, Queue-processing: ${queueProcessingEnabled}`);
     }
 
     // Ensure all required modules are loaded before initializing.

@@ -56,6 +56,10 @@ async function updateBadgeForTab(tabId) {
             await chrome.action.setBadgeText({ tabId: tabId, text: '' });
         }
     } catch (e) {
+        // Ignore "No tab with id" errors, which happen frequently during tab closing/navigation
+        if (e.message && e.message.includes("No tab with id")) {
+            return;
+        }
         console.error("VolumeBackground: Error updating badge", e);
     }
 }

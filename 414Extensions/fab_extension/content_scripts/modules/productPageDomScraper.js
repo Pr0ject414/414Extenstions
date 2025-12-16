@@ -21,8 +21,26 @@ window.FabContentModules = window.FabContentModules || {};
             return { error: 'Could not parse page JSON data.' };
         }
 
-        const listingDataKey = Object.keys(preloadedData).find(key => key.startsWith('/i/listings/') && key.includes(listingId));
-        const listingData = listingDataKey ? preloadedData[listingDataKey] : null;
+        // Strategy 1: Look for key matching the specific API definition pattern
+        let listingDataKey = Object.keys(preloadedData).find(key => key.startsWith('/i/listings/') && key.includes(listingId));
+        let listingData = listingDataKey ? preloadedData[listingDataKey] : null;
+
+        // Strategy 2: Fallback - Search all values for an object with the matching ID and licenses array.
+        // This handles cases where the key format changes (e.g. query params) or if the data isn't keyed by URL.
+        if (!listingData) {
+             const potentialMatch = Object.values(preloadedData).find(val => 
+                 val && 
+                 typeof val === 'object' && 
+                 val.id && 
+                 String(val.id).toLowerCase() === listingId.toLowerCase() && 
+                 Array.isArray(val.licenses)
+             );
+             if (potentialMatch) {
+                 listingData = potentialMatch;
+                 console.log("FabProductPage: Found listing data via fallback value search.");
+             }
+        }
+        
         if (!listingData || !listingData.licenses) return { error: 'Listing data or licenses not found in parsed JSON.' };
 
         let freeLicenseOfferId = null;

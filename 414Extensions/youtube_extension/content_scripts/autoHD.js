@@ -184,11 +184,13 @@
              style.innerHTML = `
                  .ytp-settings-menu, .ytp-popup {
                      opacity: 0 !important;
-                     display: block; /* Ensure it computes styles */
-                     visibility: hidden !important; 
+                     visibility: hidden !important;
+                     display: block !important; /* Force block so it renders for interaction */
+                     pointer-events: none !important; /* Prevent clicks while hidden */
+                     z-index: -1000 !important;
                  }
              `;
-             document.head.appendChild(style);
+             (document.head || document.documentElement).appendChild(style);
              return style;
         };
 
@@ -197,7 +199,7 @@
              if (style) style.remove();
         };
 
-        const style = addStyle();
+        addStyle(); // execute immediately
 
         try {
             // 1. Open Settings
@@ -206,7 +208,8 @@
             }
             
             // 2. Open "Quality" submenu
-            await new Promise(r => setTimeout(r, 50)); 
+            // Increased wait slightly to ensure menu render
+            await new Promise(r => setTimeout(r, 100)); 
             
             let elQualityMenuBtn = elPlayer.querySelector(SELECTORS.optionQuality);
             
@@ -218,23 +221,27 @@
     
             if (elQualityMenuBtn) {
                 elQualityMenuBtn.click();
-                await new Promise(r => setTimeout(r, 50));
+                await new Promise(r => setTimeout(r, 100));
                 
                 // 3. Select Quality
                 changeQuality();
             }
             
             // Ensure menu is closed if it remained open
+            // We wait a moment for the click to register
+            await new Promise(r => setTimeout(r, 50));
             if (getIsSettingsMenuOpen()) {
                  elSettingsBtn.click(); 
             }
             
             elSettingsBtn.blur();
 
+        } catch (e) {
+            console.error("[YouTube AutoHD] Error during quality change:", e);
         } finally {
             // Always restore visibility
-            // Wait a tick to ensure close animation starts invisible?
-            setTimeout(removeStyle, 200);
+            // Wait longer to ensure any close animations finish so we don't see a "ghost" menu closing
+            setTimeout(removeStyle, 500); 
         }
     }
 
@@ -289,32 +296,47 @@
         // Watch for page navigation / video load
         // YouTube is SPA. We need to observe URL changes or video element attachment.
         
+        // URL Change Detection Strategy:
+        // YouTube fires 'yt-navigate-finish' when internal navigation completes.
+        // We also use a lightweight interval as a fallback for URL changes not caught by events.
+        
         let lastUrl = location.href;
-        new MutationObserver(() => {
+        
+        const handleNavigation = () => {
+             if (location.pathname.startsWith('/watch')) {
+                 setTimeout(applySettings, 1000); // Wait for player to settle
+             }
+        };
+
+        window.addEventListener('yt-navigate-finish', () => {
+             lastUrl = location.href;
+             handleNavigation();
+        });
+
+        // Fallback: Check URL every 1s (much cheaper than observing body mutations)
+        setInterval(() => {
              if (location.href !== lastUrl) {
                  lastUrl = location.href;
-                 if (location.pathname.startsWith('/watch')) {
-                     // Determine triggered
-                     setTimeout(applySettings, 1000); // Wait for player init
-                 }
+                 if (location.pathname.startsWith('/watch')) handleNavigation();
              }
-        }).observe(document.body, {childList: true, subtree: true}); // High level nav observer
+        }, 1000);
+
+        // Video Element Detection Strategy:
+        // Instead of observing the entire body for VIDEO tag insertion, we can check specific containers
+        // or just rely on the navigation event + 'canplay' on existing videos.
+        // YouTube recycles the <video> element often.
         
-        // Also specific video observer
-        const observer = new MutationObserver((mutations) => {
-            for (const m of mutations) {
-                if (m.addedNodes.length) {
-                    // if video element added
-                    const video = [...m.addedNodes].find(n => n.nodeName === 'VIDEO');
-                    if (video) {
-                        video.addEventListener('canplay', () => {
-                             setTimeout(applySettings, 500); 
-                        }, {once:true});
-                    }
-                }
+        // We will add a listener to the document capturing phase for 'canplay' 
+        // which will bubble up (or rather capture down) for any media element.
+        // Actually 'canplay' does not bubble, so we must use capture: true.
+        
+        document.addEventListener('canplay', (e) => {
+            if (e.target.tagName === 'VIDEO') {
+                 // Debounce slightly
+                 setTimeout(applySettings, 500);
             }
-        });
-        observer.observe(document.body, {childList: true, subtree: true});
+        }, { capture: true }); // Capture phase catches events from elements deep in DOM
+
     }
 
     if (document.readyState === 'loading') {

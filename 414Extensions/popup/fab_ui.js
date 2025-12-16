@@ -65,7 +65,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response) {
                 fabQueueSizeElement.textContent = response.queueSize ?? "N/A";
                 fabHiddenOwnedCountElement.textContent = response.hiddenOwnedCount ?? "N/A";
-                window.updateStatusIndicator(fabOperationalStatusIndicator, fabOperationalStatusText, response.operationalStatus);
+                
+                let statusText = response.operationalStatus;
+                if (response.operationalStatus === "RATE_LIMITED" && response.rateLimitCoolDownUntil) {
+                     const remainingMs = response.rateLimitCoolDownUntil - Date.now();
+                     const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+                     statusText = `Rate Limited (${remainingSec}s)`;
+                }
+                
+                window.updateStatusIndicator(fabOperationalStatusIndicator, fabOperationalStatusText, statusText);
             }
         });
     }
@@ -74,6 +82,6 @@ document.addEventListener('DOMContentLoaded', () => {
     window.updateFabStatsDisplay = updateFabStatsDisplay;
 
     // Set up interval to update stats
-    const fabStatsInterval = setInterval(updateFabStatsDisplay, 3000);
+    const fabStatsInterval = setInterval(updateFabStatsDisplay, 1000);
     window.addEventListener('unload', () => clearInterval(fabStatsInterval));
 });

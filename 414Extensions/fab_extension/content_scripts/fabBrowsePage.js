@@ -68,31 +68,91 @@
         settings.graceCyclesMs = graceCycles * 1000;
 
         console.log("FabBrowsePage Coordinator: Initializing with settings:", settings);
-        if (result[FAB_SHOW_FREE_ONLY_KEY] && window.location.href.includes('/category/') && !window.location.search.includes('is_free=1')) {
-            console.log("FAB Browse Page: 'Only Show Free' is enabled on a category page. Redirecting...");
-            const newUrl = new URL(window.location.href);
-            newUrl.searchParams.set('is_free', '1');
-            window.location.href = newUrl.href;
-            return; // Stop further execution to allow the page to reload
-        }
+        // URL Monitoring logic to handle SPA navigation
+        let lastUrl = location.href;
+        let isRedirecting = false;
+
+        const checkAndEnforceFilter = () => {
+             // Re-fetch setting in case it changed in memory (though usually static here until reload)
+             // Check if we need to enforce "Show Free Only"
+             const currentUrl = new URL(window.location.href);
+             const path = currentUrl.pathname;
+             
+             // Expand the definition of a "Browse Page" where we want to filter items.
+             const isBrowsePage = 
+                path.includes('/category/') || 
+                path.includes('/search') || 
+                path.includes('/channels/') || 
+                path.includes('/tags/') || 
+                path.includes('/formats/') || 
+                path.includes('/sellers/');
+             
+             chrome.storage.local.get([FAB_SHOW_FREE_ONLY_KEY], (res) => {
+                 if (res[FAB_SHOW_FREE_ONLY_KEY] && isBrowsePage) {
+                    // Check if is_free is missing OR if it is present but not set to '1'
+                    if (currentUrl.searchParams.get('is_free') !== '1') {
+                        if (isRedirecting) return; // Prevent loop
+
+                        console.log("FAB Browse Page: 'Only Show Free' is enabled. Redirecting to filtered view...");
+                        currentUrl.searchParams.set('is_free', '1');
+                        isRedirecting = true;
+                        window.location.href = currentUrl.href;
+                    }
+                 }
+             });
+        };
+
+        // Run immediately
+        checkAndEnforceFilter();
+
+        // Check periodically for URL changes (SPA navigation)
+        const urlCheckInterval = setInterval(() => {
+            // SAFETY CHECK: If extension is reloaded, chrome.runtime.id becomes undefined.
+            // We must stop running to clear "Extension context invalidated" errors.
+            if (typeof chrome.runtime.id === 'undefined') {
+                clearInterval(urlCheckInterval);
+                return;
+            }
+
+            if (location.href !== lastUrl) {
+                lastUrl = location.href;
+                isRedirecting = false; // Reset flag on URL change (new navigation)
+                
+                checkAndEnforceFilter();
+                // Also re-trigger feature state updates if needed (e.g. hider might need reset)
+                updateFeatureStates();
+            }
+        }, 500); // Check every 500ms for snappier response to SPA changes
         updateFeatureStates();
 
         chrome.storage.onChanged.addListener((changes, namespace) => {
             if (namespace !== 'local') return;
             let needsUpdate = false;
-            if (changes[FAB_FILTER_ENABLED_KEY]) {
-                settings.filterEnabled = !!changes[FAB_FILTER_ENABLED_KEY].newValue;
-                needsUpdate = true;
-            }
-            if (changes[FAB_AUTO_OPEN_FREE_ENABLED_KEY]) {
-                settings.autoOpenEnabled = !!changes[FAB_AUTO_OPEN_FREE_ENABLED_KEY].newValue;
-                needsUpdate = true;
-            }
-            if (changes[FAB_FREE_ITEM_GRACE_CYCLES_KEY]) {
-                settings.graceCyclesMs = (changes[FAB_FREE_ITEM_GRACE_CYCLES_KEY].newValue ?? 4) * 1000;
-                needsUpdate = true;
-            }
-            if (needsUpdate) updateFeatureStates();
+            
+            // Re-check rate limit status on any setting change to see if we can resume
+            chrome.runtime.sendMessage({ action: "getFabRateLimitStatus" }).then(response => {
+                const wasPaused = isGloballyPaused;
+                isGloballyPaused = response?.rateLimited ?? false;
+                if (wasPaused !== isGloballyPaused) {
+                    console.log(`FabBrowsePage: Rate limit status updated to ${isGloballyPaused ? 'PAUSED' : 'ACTIVE'}`);
+                    needsUpdate = true;
+                }
+
+                if (changes[FAB_FILTER_ENABLED_KEY]) {
+                    settings.filterEnabled = !!changes[FAB_FILTER_ENABLED_KEY].newValue;
+                    needsUpdate = true;
+                }
+                if (changes[FAB_AUTO_OPEN_FREE_ENABLED_KEY]) {
+                    settings.autoOpenEnabled = !!changes[FAB_AUTO_OPEN_FREE_ENABLED_KEY].newValue;
+                    needsUpdate = true;
+                }
+                if (changes[FAB_FREE_ITEM_GRACE_CYCLES_KEY]) {
+                    settings.graceCyclesMs = (changes[FAB_FREE_ITEM_GRACE_CYCLES_KEY].newValue ?? 4) * 1000;
+                    needsUpdate = true;
+                }
+                
+                if (needsUpdate) updateFeatureStates();
+            }).catch(e => console.warn("FabBrowsePage: Failed to check rate limit status on change.", e));
         });
     }
 

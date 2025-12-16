@@ -17,6 +17,7 @@ export const FAB_SHOW_FREE_ONLY_KEY = 'isFabShowFreeOnlyEnabled';
 export const FAB_VERIFICATION_ALARM_NAME = 'fabVerificationAlarm';
 export const FAB_QUEUE_PROCESS_RETRY_ALARM_NAME = 'fabQueueProcessRetryAlarm';
 export const FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX = "_resumeVerification";
+export const FAB_RATE_LIMIT_EXPIRY_ALARM_NAME = 'fabRateLimitExpiryAlarm';
 
 // Configurable FAB Processing Limits and Delays (values loaded from storage)
 export const FAB_MAX_CONCURRENT_TABS_KEY = 'maxConcurrentFabTabs';

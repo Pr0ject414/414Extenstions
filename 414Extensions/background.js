@@ -75,45 +75,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return moduleManager.routeMessage(request, sender, sendResponse);
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    // Inject scripts when a FAB page has finished loading
-    if (changeInfo.status === 'complete' && tab.url) {
-        try {
-            const url = new URL(tab.url);
-            // Ensure we are on the correct website before injecting
-            if (url.hostname === 'www.fab.com' || url.hostname === 'fab.com') {
-                // Product Page Injection
-                if (url.pathname.includes("/listings/")) {
-                    console.log(`Coordinator: Injecting scripts into FAB Product Page: ${tabId}`);
-                    chrome.scripting.executeScript({
-                        target: { tabId: tabId },
-                        files: [
-                            'fab_extension/content_scripts/modules/productPageDomScraper.js',
-                            'fab_extension/content_scripts/modules/contentApi.js',
-                            'fab_extension/content_scripts/fabProductPage.js'
-                        ]
-                    }).catch(err => console.error("Failed to inject product page scripts:", err));
-                } 
-                // Browse Page Injection (any other FAB page)
-                else {
-                    console.log(`Coordinator: Injecting scripts into FAB Browse Page: ${tabId}`);
-                    chrome.scripting.executeScript({
-                        target: { tabId: tabId },
-                        files: [
-                            'fab_extension/content_scripts/modules/browsePageHider.js',
-                            'fab_extension/content_scripts/modules/browsePageAutoOpener.js',
-                            'fab_extension/content_scripts/fabBrowsePage.js'
-                        ]
-                    }).catch(err => console.error("Failed to inject browse page scripts:", err));
-                }
-            }
-        } catch (e) {
-            // Catches errors from creating a new URL object if tab.url is invalid
-            console.error(`Could not parse URL for script injection: ${tab.url}`, e);
-        }
-    }
-});
-
 chrome.runtime.onStartup.addListener(async () => {
     await AppState.loadGlobalState();
     await moduleManager.handleOnStartup();

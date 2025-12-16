@@ -141,17 +141,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 indicator.classList.add('status-suspended');
                 statusTextValue = "Suspended";
                 break;
-            case "RATE_LIMITED":
-                indicator.classList.add('status-rate-limited');
-                statusTextValue = "Rate Limited";
-                break;
             case "QUEUE_DISABLED":
                 indicator.classList.add('status-fab-disabled');
                 statusTextValue = "Queue Off";
                 break;
             default:
-                indicator.classList.add('status-error');
-                statusTextValue = "Status N/A";
+                // Check for dynamic statuses
+                if (status.startsWith("Rate Limited")) {
+                    indicator.classList.add('status-rate-limited');
+                    statusTextValue = status; // Use the dynamic string (e.g. "Rate Limited (45s)")
+                } else {
+                    indicator.classList.add('status-error');
+                    statusTextValue = "Status N/A";
+                }
         }
         textElement.textContent = statusTextValue;
     };
@@ -160,16 +162,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Tab Switching Logic ---
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
+
+    const switchTab = (tabId) => {
+        const targetButton = document.querySelector(`.tab-button[data-tab="${tabId}"]`);
+        const targetContent = document.getElementById(tabId);
+        
+        if (targetButton && targetContent) {
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabContents.forEach(content => content.classList.remove('active'));
+            
+            targetButton.classList.add('active');
+            targetContent.classList.add('active');
+        }
+    };
+
+    // Restore last active tab
+    chrome.storage.session.get(['lastActiveTab'], (result) => {
+        if (result.lastActiveTab) {
+            switchTab(result.lastActiveTab);
+        }
+    });
+
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            button.classList.add('active');
-            tabContents.forEach(content => content.classList.remove('active'));
             const targetTab = button.getAttribute('data-tab');
-            const targetElement = document.getElementById(targetTab);
-            if (targetElement) {
-                 targetElement.classList.add('active');
-            }
+            switchTab(targetTab);
+            chrome.storage.session.set({ lastActiveTab: targetTab });
         });
     });
 });

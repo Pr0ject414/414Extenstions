@@ -75,13 +75,26 @@ window.FabContentModules = window.FabContentModules || {};
         }
     }
     
+    let scanInterval = null;
+
     FabContentModules.initializeAutoOpener = function(settings) {
         if (autoOpenerObserver) autoOpenerObserver.disconnect();
+        if (scanInterval) clearInterval(scanInterval);
+
         graceCyclesMs = settings.graceCyclesMs; // Load the grace period delay from the main content script settings
         
-        // Scan the page for any items that are already present when the script loads.
-        document.querySelectorAll('div.nTa5u2sc').forEach(processItem);
+        const scanPage = () => {
+             document.querySelectorAll('div.nTa5u2sc').forEach(processItem);
+        };
+
+        // Initial Scan
+        scanPage();
         
+        // Periodic Re-scan (Safety Net)
+        // This ensures that if the observer misses something or if the DOM settles in a way that reveals new items,
+        // we catch them. It also keeps the "loop" going.
+        scanInterval = setInterval(scanPage, 2000);
+
         // Set up the observer to watch for new items that get added to the page as the user scrolls.
         autoOpenerObserver = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
@@ -91,7 +104,10 @@ window.FabContentModules = window.FabContentModules || {};
                             if (node.matches && node.matches('div.nTa5u2sc')) {
                                 processItem(node);
                             }
-                            node.querySelectorAll('div.nTa5u2sc').forEach(processItem);
+                            // Also deep check in case a container was added
+                            if (node.querySelectorAll) {
+                                node.querySelectorAll('div.nTa5u2sc').forEach(processItem);
+                            }
                         }
                     });
                 }
@@ -99,13 +115,17 @@ window.FabContentModules = window.FabContentModules || {};
         });
         
         autoOpenerObserver.observe(document.body, { childList: true, subtree: true });
-        console.log(`FabAutoOpener: Initialized with ${graceCyclesMs}ms visibility grace period.`);
+        console.log(`FabAutoOpener: Initialized with ${graceCyclesMs}ms visibility grace period and 2s periodic scan.`);
     };
 
     FabContentModules.stopAutoOpener = function() {
         if (autoOpenerObserver) {
             autoOpenerObserver.disconnect();
             autoOpenerObserver = null;
+        }
+        if (scanInterval) {
+            clearInterval(scanInterval);
+            scanInterval = null;
         }
         processedUrls.clear(); // Clear the tracking set
         console.log("FabAutoOpener: Stopped.");

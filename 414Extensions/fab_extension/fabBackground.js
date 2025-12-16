@@ -18,23 +18,54 @@ export function onGlobalStateChange() {
 
 function handle429(details) {
     if (details.statusCode === 429) {
-        console.log("FabBackground (webRequest): Detected a 429 status code. Applying global cool-down.");
-        if (AppState.setRateLimitCoolDown(Date.now() + AppState.globalMaxDelayMs)) {
+        console.log("FabBackground (webRequest): Detected a 429 status code.");
+        
+        let coolDownUntil = Date.now() + AppState.globalMaxDelayMs; // Default fallback
+
+        // Attempt to parse Retry-After header
+        const retryHeader = details.responseHeaders?.find(h => h.name.toLowerCase() === 'retry-after') || 
+                            details.responseHeaders?.find(h => h.name.toLowerCase() === 'x-ratelimit-reset'); // Some APIs use this
+
+        if (retryHeader && retryHeader.value) {
+            const val = retryHeader.value;
+            // Retry-After can be seconds (integer) or a specific date (string)
+            if (/^\d+$/.test(val)) {
+                // It's seconds
+                coolDownUntil = Date.now() + (parseInt(val, 10) * 1000);
+            } else {
+                // Try parsing as date
+                const dateVal = Date.parse(val);
+                if (!isNaN(dateVal)) {
+                    coolDownUntil = dateVal;
+                }
+            }
+            console.log(`FabBackground: Parsed Retry-After/RateLimit-Reset header: ${val}. Cooldown until ${new Date(coolDownUntil).toISOString()}`);
+        } else {
+            console.log("FabBackground: No Retry-After header found. Using default global cooldown.");
+        }
+
+        if (AppState.setRateLimitCoolDown(coolDownUntil)) {
             AppState.saveGlobalState();
+            
+            // Set an alarm to wake us up exactly when the cooldown expires
+            chrome.alarms.create(FabConstants.FAB_RATE_LIMIT_EXPIRY_ALARM_NAME, {
+                when: coolDownUntil
+            });
+            console.log(`FabBackground: Scheduled wake-up alarm for ${new Date(coolDownUntil).toISOString()}`);
+            
             // The global coordinator will broadcast the state change to content scripts
         }
     }
 }
-
 function registerWebRequestlistener() {
     if (isWebRequestlistenerRegistered) return;
     chrome.webRequest.onHeadersReceived.addListener(
         handle429,
-        { urls: ["*://*.fab.com/*"], types: ["main_frame", "xmlhttprequest"] },
-        ["responseHeaders"]
+        { urls: ["*://*.fab.com/*"] }, // Catch ALL types (xmlhttprequest, main_frame, sub_frame, other, etc.)
+        ["responseHeaders", "extraHeaders"] // Add extraHeaders to ensure we see everything
     );
     isWebRequestlistenerRegistered = true;
-    console.log("FabBackground: WebRequest listener for 429s registered.");
+    console.log("FabBackground: WebRequest listener for 429s registered (Broadened).");
 }
 
 function unregisterWebRequestlistener() {
@@ -94,6 +125,7 @@ export function handleMessage(request, sender, sendResponse) {
                 queueSize: FabState.getFabUrlQueueSize(),
                 hiddenOwnedCount: "N/A",
                 operationalStatus: operationalStatus,
+                rateLimitCoolDownUntil: AppState.rateLimitCoolDownUntil // Added field
             };
 
             chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -219,6 +251,11 @@ export async function handleAlarm(alarm) {
     } else if (alarm.name === FabConstants.FAB_QUEUE_PROCESS_RETRY_ALARM_NAME) {
         if (FabState.fabQueueProcessingEnabled) {
             FabQueueManager.processFabTabQueue();
+        }
+    } else if (alarm.name === FabConstants.FAB_RATE_LIMIT_EXPIRY_ALARM_NAME) {
+        console.log("FabBackground: Rate limit cooldown expired. Alarm fired.");
+        if (FabState.fabQueueProcessingEnabled) {
+             FabQueueManager.processFabTabQueue();
         }
     }
 }
