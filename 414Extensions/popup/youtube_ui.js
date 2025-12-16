@@ -34,6 +34,31 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.runtime.sendMessage({ action: "setYouTubeNoSuggestionsEnabled", enabled: isEnabled }, updateYouTubeStatsDisplay);
     });
 
+    // --- New Auto HD Controls ---
+    const youTubeQualitySelect = document.getElementById('youTubeQualitySelect');
+    const youTubeEnhancedBitrateToggle = document.getElementById('youTubeEnhancedBitrateToggle');
+
+    // Load HD settings
+    chrome.storage.local.get(['preferredQuality', 'isEnhancedBitrate'], (result) => {
+        if (result.preferredQuality) {
+            youTubeQualitySelect.value = result.preferredQuality;
+        }
+        if (result.isEnhancedBitrate !== undefined) {
+            youTubeEnhancedBitrateToggle.checked = result.isEnhancedBitrate;
+        }
+    });
+
+    youTubeQualitySelect.addEventListener('change', () => {
+        const val = youTubeQualitySelect.value;
+        chrome.storage.local.set({ preferredQuality: val });
+        // Optional: Notify if needed, but storage listener in content script handles it
+    });
+
+    youTubeEnhancedBitrateToggle.addEventListener('change', () => {
+        const val = youTubeEnhancedBitrateToggle.checked;
+        chrome.storage.local.set({ isEnhancedBitrate: val });
+    });
+
     function updateYouTubeStatsDisplay() {
         chrome.runtime.sendMessage({ action: "getYouTubeGlobalStats" }, (response) => {
             if (chrome.runtime.lastError) {

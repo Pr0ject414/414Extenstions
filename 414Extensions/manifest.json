@@ -28,9 +28,12 @@
   "content_scripts": [
     {
       "run_at": "document_idle",
-      "js": ["youtube_extension/content_scripts/youtubePlayerPage.js"],
+      "js": [
+        "youtube_extension/content_scripts/youtubePlayerPage.js",
+        "youtube_extension/content_scripts/autoHD.js"
+      ],
       "matches": [
-        "*://*.youtube.com/watch*"
+        "*://*.youtube.com/*"
       ]
     },
     {

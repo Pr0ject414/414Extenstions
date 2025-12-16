@@ -129,6 +129,32 @@
                     <span class="slider"></span>
                 </label>
             </div>
+
+            <h3 class="sub-heading">Video Quality</h3>
+            <div class="setting" style="flex-direction: column; align-items: flex-start;">
+                <label for="youTubeQualitySelect" style="margin-bottom: 5px;">Preferred Quality:</label>
+                <select id="youTubeQualitySelect" style="width: 100%; padding: 5px; border-radius: 4px; border: 1px solid #444; background: #333; color: white;">
+                    <option value="4320">8K (4320p)</option>
+                    <option value="2160" selected>4K (2160p)</option>
+                    <option value="1440">1440p</option>
+                    <option value="1080">1080p</option>
+                    <option value="720">720p</option>
+                    <option value="480">480p</option>
+                    <option value="360">360p</option>
+                    <option value="240">240p</option>
+                    <option value="144">144p</option>
+                </select>
+            </div>
+            <div class="setting">
+                <label for="youTubeEnhancedBitrateToggle">Enhanced Bitrate / Premium:</label>
+                <label class="switch">
+                    <input type="checkbox" id="youTubeEnhancedBitrateToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: -5px; margin-bottom: 10px;">
+                *Enhanced Bitrate and Super Resolution only apply if your user account has access (e.g., Premium).
+            </p>
              <h3 class="sub-heading">Live Status</h3>
             <div class="stats-section operational-status-section">
                 <p>
@@ -146,6 +172,11 @@
             <h2>General Info</h2>
             <p class="placeholder-text">The "Extension Power (All)" switch in the header controls all functionalities of this extension, including all website-specific helpers.</p>
             <p class="placeholder-text" style="margin-top: 15px;">Future global settings will appear here. For advanced settings and magic numbers, please visit the <a href="#" id="openOptionsPageLink">Extension Options page</a>.</p>
+            
+            <h3 class="sub-heading" style="margin-top: 20px;">Credits & Licenses</h3>
+            <div class="setting" style="display: block; font-size: 0.8em; color: #aaa;">
+                <p><strong>YouTube Auto HD</strong> functionality is based on code from <a href="https://github.com/avi12/youtube-auto-hd" target="_blank" style="color: #4caf50;">youtube-auto-hd</a> by avi12, used under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" style="color: #4caf50;">GPLv3 License</a>.</p>
+            </div>
         </div>
     </div>
     <script src="popup.js"></script>
