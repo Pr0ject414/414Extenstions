@@ -426,10 +426,41 @@ function attachController(video, initialSpeed) {
         
         // Fullscreen Handling
         const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
-        if (fsElement && host.parentNode !== fsElement) {
-             fsElement.appendChild(host);
-        } else if (!fsElement && host.parentNode !== document.body) {
-             document.body.appendChild(host);
+        if (fsElement) {
+            // Check if THIS video is part of the fullscreen element
+            const isRelatedToFS = (video === fsElement || fsElement.contains(video));
+            
+            if (isRelatedToFS) {
+                if (host.parentNode !== fsElement) {
+                    fsElement.appendChild(host);
+                }
+                // Ensure it's not hidden if it was previously hidden by another FS video
+                if (host.classList.contains('vsc-fs-hidden')) {
+                    host.classList.remove('vsc-fs-hidden');
+                    host.style.display = 'block';
+                }
+            } else {
+                // Another video is FS, hide this one
+                if (!host.classList.contains('vsc-fs-hidden')) {
+                    host.classList.add('vsc-fs-hidden');
+                    host.style.display = 'none';
+                }
+                // Keep it in body if hidden
+                if (host.parentNode !== document.body) {
+                    document.body.appendChild(host);
+                }
+                requestAnimationFrame(syncPosition);
+                return; // Skip the rest of positioning
+            }
+        } else {
+            // No fullscreen, ensure visible and in body
+            if (host.classList.contains('vsc-fs-hidden')) {
+                host.classList.remove('vsc-fs-hidden');
+                host.style.display = 'block';
+            }
+            if (host.parentNode !== document.body) {
+                document.body.appendChild(host);
+            }
         }
         
         // Get Rect
