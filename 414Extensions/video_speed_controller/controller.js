@@ -594,11 +594,16 @@ document.addEventListener('mousedown', (e) => {
             triggerOverride(targetVideo, true);
         }, delayMs);
         
-        const onMouseUp = () => {
+        const onMouseUp = (e) => {
              clearTimeout(timerId);
              
              if (overrideTriggeredByMouse) {
                  overrideTriggeredByMouse = false;
+                 
+                 // HIJACK: Prevent site from seeing the mouseup that follows a hold
+                 e.stopImmediatePropagation();
+                 e.preventDefault();
+
                  // Don't disable if key is holding
                  if (!overrideTriggeredByKey) {
                      triggerOverride(targetVideo, false);
