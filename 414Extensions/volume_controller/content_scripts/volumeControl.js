@@ -11,20 +11,60 @@
 
     function initAudioContext() {
         if (!audioCtx) {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            audioCtx = new AudioContext();
-            gainNode = audioCtx.createGain();
-            gainNode.connect(audioCtx.destination);
-            gainNode.gain.value = currentVolume;
-        }
-        else if (audioCtx.state === 'suspended') {
-            audioCtx.resume();
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+                gainNode = audioCtx.createGain();
+                gainNode.connect(audioCtx.destination);
+                gainNode.gain.value = currentVolume;
+                console.log("VolumeControl: AudioContext initialized. State:", audioCtx.state);
+            } catch (e) {
+                console.error("VolumeControl: Failed to initialize AudioContext", e);
+            }
         }
         return audioCtx;
     }
 
+    // Add gesture listeners to unlock AudioContext
+    const unlockEvents = ['mousedown', 'keydown', 'touchstart'];
+    const unlockAudio = () => {
+        if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().then(() => {
+                console.log("VolumeControl: AudioContext resumed via user gesture.");
+                unlockEvents.forEach(evt => document.removeEventListener(evt, unlockAudio, true));
+            });
+        }
+    };
+    unlockEvents.forEach(evt => document.addEventListener(evt, unlockAudio, true));
+
+    function ensureCORS(mediaElement) {
+        // We no longer programmatically set crossOrigin because it can break 
+        // playback if the server doesn't support CORS headers (like Google's assets).
+        // We just return the CORS state for decision making.
+        const src = mediaElement.currentSrc || mediaElement.src || (mediaElement.querySelector('source') && mediaElement.querySelector('source').src);
+        if (src && !src.startsWith('data:') && !src.startsWith('blob:')) {
+            try {
+                const url = new URL(src, window.location.href);
+                if (url.origin !== window.location.origin) {
+                    return (mediaElement.crossOrigin === 'anonymous' || mediaElement.crossOrigin === 'use-credentials');
+                }
+            } catch (e) {}
+        }
+        return true; // same-origin or handled
+    }
+
     function attachToMedia(mediaElement) {
-        if (mediaSources.has(mediaElement)) return;
+        if (!ensureCORS(mediaElement)) {
+            // Already cross-origin and no CORS. If we haven't logged it yet, do so.
+            if (!mediaSources.has(mediaElement)) {
+                mediaSources.set(mediaElement, null); // Mark as skipped
+            }
+            // Always sync native volume for skipped elements (handles dynamically loaded sources)
+            mediaElement.volume = Math.min(1.0, currentVolume);
+            return;
+        }
+
+        if (mediaSources.has(mediaElement) && mediaSources.get(mediaElement) !== null) return;
         
         try {
             initAudioContext();
@@ -35,8 +75,6 @@
             console.log("VolumeControl: Attached to media element", mediaElement);
         } catch (e) {
             console.error("VolumeControl: Failed to attach to media element", e);
-            // If it fails (e.g. already connected), we mark it as 'handled' to stop retrying immediately
-            // But we might want to retry if state changes? No, InvalidStateError is permanent for that element instance.
             mediaSources.set(mediaElement, null); 
         }
     }
@@ -44,6 +82,13 @@
     function scanForMedia() {
         document.querySelectorAll('audio, video').forEach(attachToMedia);
     }
+
+    // Capture late-bound sources (like Google Pronunciation)
+    document.addEventListener('play', (e) => {
+        if (e.target.tagName === 'AUDIO' || e.target.tagName === 'VIDEO') {
+            attachToMedia(e.target);
+        }
+    }, true);
 
     // Observer for new media elements
     const observer = new MutationObserver(mutations => {
@@ -85,9 +130,15 @@
                 if (gainNode) {
                     gainNode.gain.value = currentVolume;
                 }
+                // Sync native volume for fallback elements
+                document.querySelectorAll('audio, video').forEach(el => {
+                    if (mediaSources.get(el) === null) {
+                        el.volume = Math.min(1.0, currentVolume);
+                    }
+                });
                 // Ensure context is running (it might suspend)
                 if (audioCtx && audioCtx.state === 'suspended') {
-                    audioCtx.resume();
+                    audioCtx.resume().catch(() => {});
                 }
                 console.log(`VolumeControl: Set volume to ${currentVolume}`);
             }
