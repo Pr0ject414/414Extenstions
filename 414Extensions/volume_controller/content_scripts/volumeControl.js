@@ -72,7 +72,7 @@
             const source = audioCtx.createMediaElementSource(mediaElement);
             source.connect(gainNode);
             mediaSources.set(mediaElement, source);
-            console.log("VolumeControl: Attached to media element", mediaElement);
+            // console.log("VolumeControl: Attached to media element", mediaElement);
         } catch (e) {
             console.error("VolumeControl: Failed to attach to media element", e);
             mediaSources.set(mediaElement, null); 

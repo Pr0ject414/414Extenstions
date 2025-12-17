@@ -568,8 +568,17 @@ let spaceTimer = null;
 document.addEventListener('mousedown', (e) => {
     // 1. Basic Filters
     if (e.button !== 0) return; 
-    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.closest('a') || e.target.closest('[role="button"]')) return;
-    if (e.target.closest('.vsc-controller-host')) return;
+    // 1. Basic Filters: Ignore clicks on interactive elements, controls, or our own UI
+    const excludedRoles = ['button', 'slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
+    const roleSelector = excludedRoles.map(role => `[role="${role}"]`).join(',');
+    
+    if (
+        e.target.tagName === 'BUTTON' || 
+        e.target.tagName === 'INPUT' || 
+        e.target.closest('a') || 
+        e.target.closest(roleSelector) ||
+        e.target.closest('.vsc-controller-host')
+    ) return;
 
     // 2. Find Video
     const selector = currentConfig.options.audio ? 'video, audio' : 'video';
@@ -594,29 +603,50 @@ document.addEventListener('mousedown', (e) => {
             triggerOverride(targetVideo, true);
         }, delayMs);
         
-        const onMouseUp = (e) => {
+        const onRelease = (e) => {
              clearTimeout(timerId);
              
              if (overrideTriggeredByMouse) {
                  overrideTriggeredByMouse = false;
                  
-                 // HIJACK: Prevent site from seeing the mouseup that follows a hold
-                 e.stopImmediatePropagation();
-                 e.preventDefault();
+                 // Strategy: Allow mouseup to propagate (fixes UI stickiness)
+                 // But FORCE video to play if the site paused it (fixes pause bug)
+                 setTimeout(() => {
+                     if (targetVideo.paused) {
+                         // console.log("VSC: Force playing after release");
+                         targetVideo.play().catch(() => {});
+                     }
+                 }, 50); // Small delay to let site's mouseup handler run first
 
                  // Don't disable if key is holding
                  if (!overrideTriggeredByKey) {
                      triggerOverride(targetVideo, false);
                  }
                  
-                 // We kept shouldSuppressClick = true. 
-                 // It will be consumed by the click handler that fires immediately after mouseup.
-                 // We set a safety timeout to clear it if click doesn't fire.
+                 // we still suppress the following click just in case
                  setTimeout(() => shouldSuppressClick = false, 100);
              }
-             document.removeEventListener('mouseup', onMouseUp, true);
+             
+             // Clean up all listeners
+             document.removeEventListener('mouseup', onRelease, true);
+             document.removeEventListener('dragend', onRelease, true);
+             document.removeEventListener('mouseleave', onRelease, true);
+             window.removeEventListener('blur', onRelease, true);
+             document.removeEventListener('mousemove', onMouseMoveCheck, true);
         };
-        document.addEventListener('mouseup', onMouseUp, true);
+        
+        // Dead Man's Switch: If mouse moves and buttons are 0, we missed the release.
+        const onMouseMoveCheck = (e) => {
+            if (e.buttons === 0) {
+                onRelease(e);
+            }
+        };
+
+        document.addEventListener('mouseup', onRelease, true);
+        document.addEventListener('dragend', onRelease, true);
+        document.addEventListener('mouseleave', onRelease, true); // Fail-safe: mouse leaves window
+        window.addEventListener('blur', onRelease, true); // Fail-safe: alt-tab
+        document.addEventListener('mousemove', onMouseMoveCheck, true); // Dead Man's Switch for drags
     }
 }, true); // Capture
 
