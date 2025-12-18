@@ -24,6 +24,7 @@ async function getStoredVolumeForTab(tabId) {
         const result = await chrome.storage.local.get([key]);
         return result[key] !== undefined ? result[key] : DEFAULT_VOLUME;
     } catch (e) {
+        if (e.message && e.message.includes("No tab with id")) return DEFAULT_VOLUME;
         console.error("VolumeBackground: Error getting stored volume", e);
         return DEFAULT_VOLUME;
     }
@@ -41,6 +42,7 @@ async function setStoredVolumeForTab(tabId, volume) {
         await chrome.storage.local.set({ [key]: volume });
         console.log(`VolumeBackground: Saved volume ${volume} for ${hostname}`);
     } catch (e) {
+        if (e.message && e.message.includes("No tab with id")) return;
         console.error("VolumeBackground: Error saving stored volume", e);
     }
 }
