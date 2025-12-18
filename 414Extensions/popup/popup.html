@@ -216,7 +216,18 @@
                     <span class="slider"></span>
                 </label>
             </div>
-            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: -5px;">
+            
+            <div class="setting" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
+                <label for="xVolumeSlider" style="margin-bottom: 5px; display: flex; justify-content: space-between; width: 100%;">
+                    <span>Initial Volume:</span>
+                    <span id="xVolumeValueDisplay" style="font-weight: bold; color: #4caf50;">100%</span>
+                </label>
+                <div class="slidecontainer" style="width: 100%; position: relative;">
+                     <input type="range" min="0" max="100" value="100" class="volume-range" id="xVolumeSlider">
+                </div>
+            </div>
+
+            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: 5px;">
                 Ensures videos start muted. Sound is enabled only when you explicitly unmute or adjust volume.
             </p>
         </div>

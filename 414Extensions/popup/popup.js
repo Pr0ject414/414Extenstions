@@ -121,6 +121,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- X Module Logic ---
+    const xVolumeSlider = document.getElementById('xVolumeSlider');
+    const xVolumeValueDisplay = document.getElementById('xVolumeValueDisplay');
+    const X_VOLUME_LEVEL_KEY = 'xVolumeLevel';
+
+    chrome.storage.local.get([X_MODULE_ENABLED_KEY, X_ALWAYS_MUTE_KEY, X_VOLUME_LEVEL_KEY], (result) => {
+         if (xModulePowerToggle) xModulePowerToggle.checked = result[X_MODULE_ENABLED_KEY] !== false;
+         if (xAlwaysMuteToggle) xAlwaysMuteToggle.checked = result[X_ALWAYS_MUTE_KEY] !== false;
+         
+         if (xVolumeSlider) {
+             const savedVol = result[X_VOLUME_LEVEL_KEY] !== undefined ? result[X_VOLUME_LEVEL_KEY] : 1.0;
+             const displayVol = Math.round(savedVol * 100);
+             xVolumeSlider.value = displayVol;
+             if (xVolumeValueDisplay) xVolumeValueDisplay.textContent = `${displayVol}%`;
+         }
+    });
+
     if (xModulePowerToggle) {
         xModulePowerToggle.addEventListener('change', () => {
              const isEnabled = xModulePowerToggle.checked;
@@ -131,6 +147,18 @@ document.addEventListener('DOMContentLoaded', () => {
         xAlwaysMuteToggle.addEventListener('change', () => {
              const isEnabled = xAlwaysMuteToggle.checked;
              chrome.storage.local.set({ [X_ALWAYS_MUTE_KEY]: isEnabled });
+        });
+    }
+
+    if (xVolumeSlider) {
+        xVolumeSlider.addEventListener('input', () => {
+            const val = xVolumeSlider.value;
+            if (xVolumeValueDisplay) xVolumeValueDisplay.textContent = `${val}%`;
+        });
+        xVolumeSlider.addEventListener('change', () => {
+             const val = parseFloat(xVolumeSlider.value) / 100;
+             chrome.storage.local.set({ [X_VOLUME_LEVEL_KEY]: val });
+             // xSettingsLoader.js listens to storage changes and propagates to tabs automatically
         });
     }
 

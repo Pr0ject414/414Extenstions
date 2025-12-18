@@ -13,6 +13,8 @@ export const YOUTUBE_MODULE_ENABLED_KEY = 'isYouTubeModuleEnabled';
 export const X_MODULE_ENABLED_KEY = 'isXModuleEnabled';
 // Specific feature toggle for X
 export const X_ALWAYS_MUTE_KEY = 'isXAlwaysMuteEnabled';
+// Volume Persistence Key
+export const X_VOLUME_LEVEL_KEY = 'xVolumeLevel';
 
 // Global rate limiting
 export const RATE_LIMIT_COOL_DOWN_UNTIL_KEY = 'rateLimitCoolDownUntil';
