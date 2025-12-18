@@ -219,12 +219,6 @@ function observeVideos(initialSpeed) {
 // -----------------------------------------------------------------------------
 // CONTROLLER UI
 // -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-// CONTROLLER UI
-// -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-// CONTROLLER UI
-// -----------------------------------------------------------------------------
 
 // -----------------------------------------------------------------------------
 // DRAG LOGIC
@@ -278,8 +272,6 @@ document.addEventListener('mousedown', (e) => {
 function attachController(video, initialSpeed) {
     if (video.dataset.vscAttached) return;
     video.dataset.vscAttached = 'true';
-    
-    // video.dataset.vscAttached = 'true';
     
     // Attempt Initial Anchor (if created right after click)
     // REMOVED: This causes ghost overlays on X.com when "Load More" is clicked 
@@ -417,8 +409,12 @@ function attachController(video, initialSpeed) {
         // Update UI immediately for responsiveness
         valueDisplay.textContent = video.playbackRate.toFixed(1);
         
+        // Check override state [FIX 2: Enforcement Conflict]
+        const overrideState = videoOverrideState.get(video);
+        const isOverriding = overrideState && overrideState.active;
+        
         // Force Enforcement Logic
-        if (currentConfig.options.forceLastSaved) {
+        if (currentConfig.options.forceLastSaved && !isOverriding) {
             const target = videoTargetSpeeds.get(video);
             
             // If strictly different
@@ -428,6 +424,9 @@ function attachController(video, initialSpeed) {
                 clearTimeout(enforcementTimeout);
                 enforcementTimeout = setTimeout(() => {
                      // Re-check after letting the dust settle
+                     const currentOverride = videoOverrideState.get(video);
+                     if (currentOverride && currentOverride.active) return;
+                     
                      if (Math.abs(video.playbackRate - target) > 0.05) {
                          debugLog("Enforcing speed", target, "over", video.playbackRate);
                          video.playbackRate = target;
@@ -437,8 +436,7 @@ function attachController(video, initialSpeed) {
         }
         
         // If override is active, ensure we stay at override speed
-        const overrideState = videoOverrideState.get(video);
-        if (overrideState && overrideState.active) {
+        if (isOverriding) {
             const desired = currentConfig.options.keySpeed || 2.0;
             if (Math.abs(video.playbackRate - desired) > 0.05) {
                  // The site tried to fight back? Force it.
@@ -527,20 +525,20 @@ function attachController(video, initialSpeed) {
                      host.style.display = 'block';
                  
                  // Positioning
-                 if (anchor && anchor.isConnected) {
-                    const anchorRect = anchor.getBoundingClientRect();
-                    const top = anchorRect.bottom + 10 + dragOffset.y;
-                    const left = anchorRect.left + dragOffset.x;
-                    host.style.top = `${top}px`;
-                    host.style.left = `${left}px`;
-                 } else {
+                     if (anchor && anchor.isConnected) {
+                        const anchorRect = anchor.getBoundingClientRect();
+                        const top = anchorRect.bottom + 10 + dragOffset.y;
+                        const left = anchorRect.left + dragOffset.x;
+                        host.style.top = `${top}px`;
+                        host.style.left = `${left}px`;
+                     } else {
                     // Fallback to top-left if no anchor or anchor lost
-                    const top = 10 + dragOffset.y;
-                    const left = 10 + dragOffset.x;
-                    host.style.top = `${top}px`;
-                    host.style.left = `${left}px`;
+                        const top = 10 + dragOffset.y;
+                        const left = 10 + dragOffset.x;
+                        host.style.top = `${top}px`;
+                        host.style.left = `${left}px`;
+                     }
                  }
-             }
             }
         } else {
             // Normal Visible Video
@@ -557,8 +555,6 @@ function attachController(video, initialSpeed) {
     requestAnimationFrame(syncPosition);
 }
 
-
-
 function triggerOverride(video, active) {
     const state = videoOverrideState.get(video) || { active: false, originalSpeed: null };
     const overrideSpeed = currentConfig.options.keySpeed || 2.0;
@@ -570,8 +566,6 @@ function triggerOverride(video, active) {
         state.originalSpeed = video.playbackRate;
         videoOverrideState.set(video, state);
         
-        debugLog("Override Activated: ", overrideSpeed);
-        
         // Apply speed
         video.playbackRate = overrideSpeed;
         
@@ -582,8 +576,6 @@ function triggerOverride(video, active) {
         const restoreSpeed = state.originalSpeed || 1.0;
         state.originalSpeed = null;
         videoOverrideState.set(video, state);
-        
-        debugLog("Override Deactivated. Restoring: ", restoreSpeed);
         
         // Restore speed
         video.playbackRate = restoreSpeed;
@@ -599,9 +591,6 @@ function triggerOverride(video, active) {
 // We use capture to catch events before sites (like Crunchyroll) swallow them.
 // We use geometric checks because many sites put transparent divs over the video.
 
-// -----------------------------------------------------------------------------
-// GLOBAL OVERRIDE HANDLERS (Capture Phase)
-// -----------------------------------------------------------------------------
 let overrideTriggeredByMouse = false;
 let overrideTriggeredByKey = false;
 let shouldSuppressClick = false;
@@ -611,9 +600,9 @@ let spaceTimer = null;
 document.addEventListener('mousedown', (e) => {
     if (isGloballyDisabled) return;
 
-    // 1. Basic Filters
-    if (e.button !== 0) return; 
     // 1. Basic Filters: Ignore clicks on interactive elements, controls, or our own UI
+    if (e.button !== 0) return; 
+    
     const excludedRoles = ['button', 'slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
     const roleSelector = excludedRoles.map(role => `[role="${role}"]`).join(',');
     
@@ -624,7 +613,21 @@ document.addEventListener('mousedown', (e) => {
         e.target.closest(roleSelector) ||
         e.target.closest('.vsc-controller-host') ||
         e.target.closest('[aria-label="Volume slider"]')
-    ) return;
+    ) {
+        // Size-based exclusion
+        const excludedEl = e.target.closest(roleSelector) || e.target.closest('button');
+        if (excludedEl) {
+             const rect = excludedEl.getBoundingClientRect();
+             // Allow triggering on large overlays (likely video surfaces)
+             if (rect.width > 300 && rect.height > 300) {
+                 // Proceed
+             } else {
+                 return; // Real button
+             }
+        } else {
+             return; // Other excluded type
+        }
+    }
 
     // 2. Find Video
     const selector = currentConfig.options.audio ? 'video, audio' : 'video';
@@ -650,6 +653,11 @@ document.addEventListener('mousedown', (e) => {
         }, delayMs);
         
         const onRelease = (e) => {
+             // Blur Event
+             if (e && e.type === 'blur' && e.target !== window) {
+                 return;
+             }
+
              clearTimeout(timerId);
              
              if (overrideTriggeredByMouse) {
@@ -659,7 +667,6 @@ document.addEventListener('mousedown', (e) => {
                  // But FORCE video to play if the site paused it (fixes pause bug)
                  setTimeout(() => {
                      if (targetVideo.paused) {
-                         // console.log("VSC: Force playing after release");
                          targetVideo.play().catch(() => {});
                      }
                  }, 50); // Small delay to let site's mouseup handler run first
