@@ -32,7 +32,7 @@ moduleManager.register(VolumeBackground, {
 let lastBroadcastedRateLimitState = null;
 
 function broadcastStateChanges() {
-    const effectivelyPaused = !AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || AppState.isRateLimited();
+    const effectivelyPaused = !AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || !AppState.fabModuleVisible || AppState.isRateLimited();
     if (lastBroadcastedRateLimitState === effectivelyPaused) return;
     
     lastBroadcastedRateLimitState = effectivelyPaused;

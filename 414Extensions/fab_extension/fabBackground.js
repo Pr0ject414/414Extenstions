@@ -9,7 +9,7 @@ let isWebRequestlistenerRegistered = false;
 
 // This function will be called by the global background script's broadcast function
 export function onGlobalStateChange() {
-    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled) {
+    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && AppState.fabModuleVisible) {
         registerWebRequestlistener();
     } else {
         unregisterWebRequestlistener();
@@ -83,7 +83,7 @@ export async function init() {
     FabVerification.setupVerificationAlarm();
     onGlobalStateChange(); // Register webRequest listener if enabled
 
-    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
+    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && AppState.fabModuleVisible && FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
         FabQueueManager.processFabTabQueue();
     }
     console.log("FabBackground: Initialized.");
@@ -114,7 +114,7 @@ export function handleMessage(request, sender, sendResponse) {
         case "getFabGlobalStats": {
             let operationalStatus;
             if (!AppState.globalMasterSwitchEnabled) operationalStatus = "EXTENSION_DISABLED";
-            else if (!AppState.fabModuleEnabled) operationalStatus = "FAB_DISABLED";
+            else if (!AppState.fabModuleEnabled || !AppState.fabModuleVisible) operationalStatus = "FAB_DISABLED";
             else if (!FabState.fabQueueProcessingEnabled) operationalStatus = "QUEUE_DISABLED";
             else if (FabState.autoProcessingSuspended) operationalStatus = "SUSPENDED";
             else if (AppState.isRateLimited()) operationalStatus = "RATE_LIMITED";
@@ -151,7 +151,7 @@ export function handleMessage(request, sender, sendResponse) {
         }
 
         case "getFabRateLimitStatus": {
-            const effectivelyPaused = !AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || AppState.isRateLimited();
+            const effectivelyPaused = !AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || !AppState.fabModuleVisible || AppState.isRateLimited();
             sendResponse({ rateLimited: effectivelyPaused });
             return true; // Required for asynchronous response
         }
@@ -200,7 +200,7 @@ export function handleMessage(request, sender, sendResponse) {
                 
                 FabState.saveFabState().then(() => {
                     chrome.tabs.remove(tabIdToClose).catch(e => console.error(`Failed to close tab ${tabIdToClose}`, e));
-                    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
+                    if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && AppState.fabModuleVisible && FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
                         FabQueueManager.processFabTabQueue();
                     }
                 });
@@ -216,7 +216,7 @@ export function handleMessage(request, sender, sendResponse) {
                 FabState.setFabQueueProcessingEnabled(request.enabled);
                 FabState.saveFabState();
                 console.log(`FabBackground: FAB Queue Processing set to ${request.enabled}.`);
-                if (request.enabled && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && !AppState.isRateLimited()) {
+                if (request.enabled && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && AppState.fabModuleVisible && !AppState.isRateLimited()) {
                     FabQueueManager.processFabTabQueue();
                 }
                 sendResponse({ success: true });
@@ -244,7 +244,7 @@ export function handleMessage(request, sender, sendResponse) {
 }
 
 export async function handleAlarm(alarm) {
-    if (!AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled) return;
+    if (!AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || !AppState.fabModuleVisible) return;
 
     if (alarm.name === FabConstants.FAB_VERIFICATION_ALARM_NAME || alarm.name.startsWith(FabConstants.FAB_VERIFICATION_ALARM_NAME + FabConstants.FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX)) {
         await FabVerification.handleVerificationAlarm();

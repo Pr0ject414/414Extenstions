@@ -15,14 +15,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const vscSaveSpeedBtn = document.getElementById('vscSaveSpeedBtn');
     const vscAddBlacklistBtn = document.getElementById('vscAddBlacklistBtn');
     const vscPopupStatus = document.getElementById('vscPopupStatus');
+    
+    // --- Visibility Toggle Elements ---
+    const visibilityVolumeToggle = document.getElementById('visibilityVolumeToggle');
+    const visibilityVscToggle = document.getElementById('visibilityVscToggle');
+    const visibilityFabToggle = document.getElementById('visibilityFabToggle');
+    const visibilityYouTubeToggle = document.getElementById('visibilityYouTubeToggle');
 
-    // --- Global Storage Key ---
+    // --- Global Storage Keys ---
     const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled';
+    const VOLUME_MODULE_VISIBLE_KEY = 'isVolumeModuleVisible';
+    const VSC_MODULE_VISIBLE_KEY = 'isVscModuleVisible';
+    const FAB_MODULE_VISIBLE_KEY = 'isFabModuleVisible';
+    const YOUTUBE_MODULE_VISIBLE_KEY = 'isYouTubeModuleVisible';
 
     // --- Load Global State ---
-    chrome.storage.local.get([GLOBAL_MASTER_SWITCH_ENABLED_KEY], (result) => {
+    chrome.storage.local.get([
+        GLOBAL_MASTER_SWITCH_ENABLED_KEY,
+        VOLUME_MODULE_VISIBLE_KEY,
+        VSC_MODULE_VISIBLE_KEY,
+        FAB_MODULE_VISIBLE_KEY,
+        YOUTUBE_MODULE_VISIBLE_KEY
+    ], (result) => {
         globalMasterSwitchToggle.checked = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] !== false;
-        setDependentModulesState();
+        
+        if (visibilityVolumeToggle) visibilityVolumeToggle.checked = result[VOLUME_MODULE_VISIBLE_KEY] !== false;
+        if (visibilityVscToggle) visibilityVscToggle.checked = result[VSC_MODULE_VISIBLE_KEY] !== false;
+        if (visibilityFabToggle) visibilityFabToggle.checked = result[FAB_MODULE_VISIBLE_KEY] !== false;
+        if (visibilityYouTubeToggle) visibilityYouTubeToggle.checked = result[YOUTUBE_MODULE_VISIBLE_KEY] !== false;
+
+        refreshTabVisibility();
         setDependentModulesState();
     });
     
@@ -63,6 +85,24 @@ document.addEventListener('DOMContentLoaded', () => {
             chrome.runtime.openOptionsPage ? chrome.runtime.openOptionsPage() : chrome.tabs.create({ url: chrome.runtime.getURL('settings/settings.html') });
         });
     }
+
+    // --- Visibility Toggle Listeners ---
+    [
+        { el: visibilityVolumeToggle, key: VOLUME_MODULE_VISIBLE_KEY },
+        { el: visibilityVscToggle, key: VSC_MODULE_VISIBLE_KEY },
+        { el: visibilityFabToggle, key: FAB_MODULE_VISIBLE_KEY },
+        { el: visibilityYouTubeToggle, key: YOUTUBE_MODULE_VISIBLE_KEY }
+    ].forEach(({ el, key }) => {
+        if (el) {
+            el.addEventListener('change', () => {
+                const isVisible = el.checked;
+                chrome.storage.local.set({ [key]: isVisible }, () => {
+                    refreshTabVisibility();
+                    chrome.runtime.sendMessage({ action: "settingsUpdated", type: "global" });
+                });
+            });
+        }
+    });
 
     // --- Volume Control Logic ---
     if (volumeSlider && volumeValueDisplay) {
@@ -264,6 +304,34 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Tab Switching Logic ---
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
+
+    function refreshTabVisibility() {
+        const visibilityMap = {
+            'volume-controls': visibilityVolumeToggle?.checked !== false,
+            'speed-controls': visibilityVscToggle?.checked !== false,
+            'fab-controls': visibilityFabToggle?.checked !== false,
+            'youtube-controls': visibilityYouTubeToggle?.checked !== false,
+            'general-settings': true // Always visible
+        };
+
+        let activeTabHidden = false;
+        tabButtons.forEach(btn => {
+            const tabId = btn.getAttribute('data-tab');
+            const isVisible = visibilityMap[tabId];
+            btn.style.display = isVisible ? '' : 'none';
+            if (!isVisible && btn.classList.contains('active')) {
+                activeTabHidden = true;
+            }
+        });
+
+        if (activeTabHidden) {
+            // Find first visible tab and switch to it
+            const firstVisibleButton = Array.from(tabButtons).find(btn => btn.style.display !== 'none');
+            if (firstVisibleButton) {
+                switchTab(firstVisibleButton.getAttribute('data-tab'));
+            }
+        }
+    }
 
     const switchTab = (tabId) => {
         const targetButton = document.querySelector(`.tab-button[data-tab="${tabId}"]`);

@@ -4,6 +4,19 @@
     if (window.hasVolumeControlInjected) return;
     window.hasVolumeControlInjected = true;
 
+    const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled';
+    const VOLUME_MODULE_VISIBLE_KEY = 'isVolumeModuleVisible';
+
+    chrome.storage.local.get([GLOBAL_MASTER_SWITCH_ENABLED_KEY, VOLUME_MODULE_VISIBLE_KEY], (result) => {
+        if (result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] === false || result[VOLUME_MODULE_VISIBLE_KEY] === false) {
+            console.log("VolumeControl: Disabled globally or hidden. Exiting.");
+            return;
+        }
+        
+        startVolumeControl();
+    });
+
+    function startVolumeControl() {
     let audioCtx;
     let gainNode;
     let mediaSources = new WeakMap();
@@ -154,5 +167,5 @@
              if (gainNode) gainNode.gain.value = currentVolume;
         }
     });
-
+    }
 })();

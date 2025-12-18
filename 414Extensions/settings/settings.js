@@ -37,11 +37,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const vscButtonSizeInput = document.getElementById('vscButtonSize');
     const vscKeySpeedInput = document.getElementById('vscKeySpeed');
 
+    // Visibility Settings Elements
+    const visibilityVolumeToggle = document.getElementById('visibilityVolumeToggle');
+    const visibilityVscToggle = document.getElementById('visibilityVscToggle');
+    const visibilityFabToggle = document.getElementById('visibilityFabToggle');
+    const visibilityYouTubeToggle = document.getElementById('visibilityYouTubeToggle');
+
     // Storage Keys (Must match those defined in coreConstants.js and fabConstants.js)
     const GLOBAL_SETTINGS_STORAGE_KEYS = {
         MAX_RETRIES: 'maxRetries',
         INITIAL_DELAY_MS: 'initialDelayMs',
-        MAX_DELAY_MS: 'maxDelayMs'
+        MAX_DELAY_MS: 'maxDelayMs',
+        // Visibility Keys
+        VOLUME_MODULE_VISIBLE: 'isVolumeModuleVisible',
+        VSC_MODULE_VISIBLE: 'isVscModuleVisible',
+        FAB_MODULE_VISIBLE: 'isFabModuleVisible',
+        YOUTUBE_MODULE_VISIBLE: 'isYouTubeModuleVisible'
     };
 
     const FAB_SETTINGS_STORAGE_KEYS = {
@@ -137,6 +148,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (vscOpacityInput) vscOpacityInput.value = vscOptions.opacity || 0.3;
             if (vscButtonSizeInput) vscButtonSizeInput.value = vscOptions.buttonSize || 14;
             if (vscKeySpeedInput) vscKeySpeedInput.value = vscOptions.keySpeed || 2.0;
+
+            if (visibilityVolumeToggle) visibilityVolumeToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.VOLUME_MODULE_VISIBLE] !== false;
+            if (visibilityVscToggle) visibilityVscToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.VSC_MODULE_VISIBLE] !== false;
+            if (visibilityFabToggle) visibilityFabToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.FAB_MODULE_VISIBLE] !== false;
+            if (visibilityYouTubeToggle) visibilityYouTubeToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE] !== false;
         });
     }
 
@@ -219,7 +235,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const settings = {
                 [GLOBAL_SETTINGS_STORAGE_KEYS.MAX_RETRIES]: maxRetriesValue,
                 [GLOBAL_SETTINGS_STORAGE_KEYS.INITIAL_DELAY_MS]: initialDelayMsValue,
-                [GLOBAL_SETTINGS_STORAGE_KEYS.MAX_DELAY_MS]: maxDelayMsValue
+                [GLOBAL_SETTINGS_STORAGE_KEYS.MAX_DELAY_MS]: maxDelayMsValue,
+                [GLOBAL_SETTINGS_STORAGE_KEYS.VOLUME_MODULE_VISIBLE]: visibilityVolumeToggle.checked,
+                [GLOBAL_SETTINGS_STORAGE_KEYS.VSC_MODULE_VISIBLE]: visibilityVscToggle.checked,
+                [GLOBAL_SETTINGS_STORAGE_KEYS.FAB_MODULE_VISIBLE]: visibilityFabToggle.checked,
+                [GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE]: visibilityYouTubeToggle.checked
             };
             chrome.storage.local.set(settings, () => {
                 if (chrome.runtime.lastError) {

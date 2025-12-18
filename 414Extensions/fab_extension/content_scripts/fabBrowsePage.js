@@ -88,7 +88,7 @@
                 path.includes('/sellers/');
              
              chrome.storage.local.get([FAB_SHOW_FREE_ONLY_KEY], (res) => {
-                 if (res[FAB_SHOW_FREE_ONLY_KEY] && isBrowsePage) {
+                 if (res[FAB_SHOW_FREE_ONLY_KEY] && isBrowsePage && !isGloballyPaused) {
                     // Check if is_free is missing OR if it is present but not set to '1'
                     if (currentUrl.searchParams.get('is_free') !== '1') {
                         if (isRedirecting) return; // Prevent loop

@@ -25,7 +25,7 @@ export function handleMessage(request, sender, sendResponse) {
     console.log("YouTubeBackground: Received message", request.action);
 
     if (request.action === "getYouTubeModuleStatus") {
-        const isPaused = !AppState.globalMasterSwitchEnabled || !AppState.youTubeModuleEnabled;
+        const isPaused = !AppState.globalMasterSwitchEnabled || !AppState.youTubeModuleEnabled || !AppState.youTubeModuleVisible;
         sendResponse({ isPaused: isPaused });
         return true;
     }
@@ -34,7 +34,7 @@ export function handleMessage(request, sender, sendResponse) {
         let operationalStatus;
         if (!AppState.globalMasterSwitchEnabled) {
             operationalStatus = "EXTENSION_DISABLED";
-        } else if (!AppState.youTubeModuleEnabled) {
+        } else if (!AppState.youTubeModuleEnabled || !AppState.youTubeModuleVisible) {
             operationalStatus = "YOUTUBE_DISABLED";
         } else {
             operationalStatus = "OK_IDLE"; // YouTube module is simple, so it's always idle unless disabled

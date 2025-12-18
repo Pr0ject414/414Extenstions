@@ -7,6 +7,12 @@ export let rateLimitCoolDownUntil = 0;
 export let globalMasterSwitchEnabled = true;
 export let fabModuleEnabled = true;
 export let youTubeModuleEnabled = true;
+
+export let volumeModuleVisible = true;
+export let vscModuleVisible = true;
+export let fabModuleVisible = true;
+export let youTubeModuleVisible = true;
+
 export let globalMaxRetries = 5;
 export let globalInitialDelayMs = 30000;
 export let globalMaxDelayMs = 300000;
@@ -17,6 +23,10 @@ const APP_STATE_DEFAULTS = {
     [CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY]: true,
     [CoreConstants.FAB_MODULE_ENABLED_KEY]: true,
     [CoreConstants.YOUTUBE_MODULE_ENABLED_KEY]: true,
+    [CoreConstants.VOLUME_MODULE_VISIBLE_KEY]: true,
+    [CoreConstants.VSC_MODULE_VISIBLE_KEY]: true,
+    [CoreConstants.FAB_MODULE_VISIBLE_KEY]: true,
+    [CoreConstants.YOUTUBE_MODULE_VISIBLE_KEY]: true,
     [CoreConstants.GLOBAL_MAX_RETRIES_KEY]: 5,
     [CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY]: 30000,
     [CoreConstants.GLOBAL_MAX_DELAY_MS_KEY]: 300000,
@@ -49,6 +59,22 @@ export function setYouTubeModuleEnabled(value) {
     youTubeModuleEnabled = !!value;
 }
 
+export function setVolumeModuleVisible(value) {
+    volumeModuleVisible = !!value;
+}
+
+export function setVscModuleVisible(value) {
+    vscModuleVisible = !!value;
+}
+
+export function setFabModuleVisible(value) {
+    fabModuleVisible = !!value;
+}
+
+export function setYouTubeModuleVisible(value) {
+    youTubeModuleVisible = !!value;
+}
+
 // --- Persistence Functions ---
 export async function saveGlobalState() {
     try {
@@ -57,6 +83,10 @@ export async function saveGlobalState() {
             [CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY]: globalMasterSwitchEnabled,
             [CoreConstants.FAB_MODULE_ENABLED_KEY]: fabModuleEnabled,
             [CoreConstants.YOUTUBE_MODULE_ENABLED_KEY]: youTubeModuleEnabled,
+            [CoreConstants.VOLUME_MODULE_VISIBLE_KEY]: volumeModuleVisible,
+            [CoreConstants.VSC_MODULE_VISIBLE_KEY]: vscModuleVisible,
+            [CoreConstants.FAB_MODULE_VISIBLE_KEY]: fabModuleVisible,
+            [CoreConstants.YOUTUBE_MODULE_VISIBLE_KEY]: youTubeModuleVisible,
             [CoreConstants.GLOBAL_MAX_RETRIES_KEY]: globalMaxRetries,
             [CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY]: globalInitialDelayMs,
             [CoreConstants.GLOBAL_MAX_DELAY_MS_KEY]: globalMaxDelayMs,
@@ -76,6 +106,10 @@ export async function loadGlobalState() {
         globalMasterSwitchEnabled = loadedState[CoreConstants.GLOBAL_MASTER_SWITCH_ENABLED_KEY];
         fabModuleEnabled = loadedState[CoreConstants.FAB_MODULE_ENABLED_KEY];
         youTubeModuleEnabled = loadedState[CoreConstants.YOUTUBE_MODULE_ENABLED_KEY];
+        volumeModuleVisible = loadedState[CoreConstants.VOLUME_MODULE_VISIBLE_KEY];
+        vscModuleVisible = loadedState[CoreConstants.VSC_MODULE_VISIBLE_KEY];
+        fabModuleVisible = loadedState[CoreConstants.FAB_MODULE_VISIBLE_KEY];
+        youTubeModuleVisible = loadedState[CoreConstants.YOUTUBE_MODULE_VISIBLE_KEY];
         globalMaxRetries = loadedState[CoreConstants.GLOBAL_MAX_RETRIES_KEY];
         globalInitialDelayMs = loadedState[CoreConstants.GLOBAL_INITIAL_DELAY_MS_KEY];
         globalMaxDelayMs = loadedState[CoreConstants.GLOBAL_MAX_DELAY_MS_KEY];

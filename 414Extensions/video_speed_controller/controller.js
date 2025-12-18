@@ -2,6 +2,7 @@ const VSC_STORAGE_KEYS = {
   SPEED: 'vsc_speed',
   BLACKLIST: 'vsc_blacklist',
   IS_ENABLED: 'vsc_is_enabled',
+  VISIBLE: 'isVscModuleVisible',
   SHORTCUTS: 'vsc_shortcuts',
   OPTIONS: 'vsc_options'
 };
@@ -51,12 +52,15 @@ let currentConfig = {
 
 function checkBlacklistAndInit() {
   const hostname = window.location.hostname;
-  chrome.storage.local.get([VSC_STORAGE_KEYS.BLACKLIST, VSC_STORAGE_KEYS.SHORTCUTS, VSC_STORAGE_KEYS.OPTIONS, VSC_STORAGE_KEYS.SPEED, VSC_STORAGE_KEYS.IS_ENABLED], (result) => {
-    // 0. Master Switch Check
-    if (result[VSC_STORAGE_KEYS.IS_ENABLED] === false) {
-        debugLog('VSC is disabled globally.');
+  chrome.storage.local.get([VSC_STORAGE_KEYS.BLACKLIST, VSC_STORAGE_KEYS.SHORTCUTS, VSC_STORAGE_KEYS.OPTIONS, VSC_STORAGE_KEYS.SPEED, VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.VISIBLE], (result) => {
+    // 0. Master Switch & Visibility Check
+    if (result[VSC_STORAGE_KEYS.IS_ENABLED] === false || result[VSC_STORAGE_KEYS.VISIBLE] === false) {
+        debugLog('VSC is disabled globally or hidden.');
+        isGloballyDisabled = true;
+        deinit(); // Ensure cleanup if it was running
         return;
     }
+    isGloballyDisabled = false;
 
     // 1. Blacklist Check
     const blacklist = result[VSC_STORAGE_KEYS.BLACKLIST] || '';
@@ -102,6 +106,30 @@ function checkBlacklistAndInit() {
 // Module-level references for cleanup
 let pageObserver = null;
 let isInitialized = false;
+let isGloballyDisabled = true; // Default to true until checked
+
+// Monitor Storage for Visibility/Enable changes
+chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace !== 'local') return;
+    
+    const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED];
+    const isVisible = changes[VSC_STORAGE_KEYS.VISIBLE];
+    
+    if (isEnabled || isVisible) {
+        // Re-evaluate state
+        chrome.storage.local.get([VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.VISIBLE], (result) => {
+             const disabled = result[VSC_STORAGE_KEYS.IS_ENABLED] === false || result[VSC_STORAGE_KEYS.VISIBLE] === false;
+             if (disabled !== isGloballyDisabled) {
+                 isGloballyDisabled = disabled;
+                 if (isGloballyDisabled) {
+                     deinit();
+                 } else {
+                     checkBlacklistAndInit();
+                 }
+             }
+        });
+    }
+});
 
 // Named Handlers for removal
 const handleMouseEnter = (e) => {
@@ -147,6 +175,12 @@ function deinit() {
     
     // Remove UI from all videos
     document.querySelectorAll('.vsc-controller-host').forEach(el => el.remove());
+
+    // Clear Dataset attached flag so we can re-attach later
+    const selector = currentConfig.options.audio ? 'video, audio' : 'video';
+    document.querySelectorAll(selector).forEach(v => {
+        delete v.dataset.vscAttached;
+    });
     
     // Clear Maps
     // (WeakMaps clear themselves when elements die, but we can't iterate them to clear specific data 
@@ -417,7 +451,8 @@ function attachController(video, initialSpeed) {
     
     // Position Sync Loop
     function syncPosition() {
-        if (!video.isConnected) {
+        // If disabled or disconnected, remove and stop
+        if (isGloballyDisabled || !video.isConnected) {
             host.remove();
             videoTargetSpeeds.delete(video);
             videoAnchors.delete(video);
@@ -566,6 +601,8 @@ let spaceKeyPending = false;
 let spaceTimer = null;
 
 document.addEventListener('mousedown', (e) => {
+    if (isGloballyDisabled) return;
+
     // 1. Basic Filters
     if (e.button !== 0) return; 
     // 1. Basic Filters: Ignore clicks on interactive elements, controls, or our own UI
@@ -660,6 +697,8 @@ document.addEventListener('click', (e) => {
 }, true);
 
 document.addEventListener('keydown', (e) => {
+    if (isGloballyDisabled) return;
+
     // Space bar check
     if (e.code === 'Space') {
         if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
@@ -712,6 +751,8 @@ document.addEventListener('keydown', (e) => {
 }, true); // Capture
 
 document.addEventListener('keyup', (e) => {
+    if (isGloballyDisabled) return;
+
     if (e.code === 'Space') {
          if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
          
