@@ -24,6 +24,7 @@
             <button class="tab-button" data-tab="speed-controls">Speed</button>
             <button class="tab-button" data-tab="fab-controls">FAB Helper</button>
             <button class="tab-button" data-tab="youtube-controls">YouTube Helper</button>
+            <button class="tab-button" data-tab="x-controls">X (Twitter)</button>
             <button class="tab-button" data-tab="general-settings">General</button>
         </nav>
 
@@ -193,6 +194,31 @@
                     </span>
                 </p>
             </div>
+
+        </div>
+        
+        <div id="x-controls" class="tab-content">
+            <h5 class="tab-description">Settings for the X (Twitter) experience.</h5>
+            <h2>X Helper</h2>
+            <div class="setting x-module-toggle-container">
+                <label for="xModulePowerToggle">X Helper Power:</label>
+                <label class="switch">
+                    <input type="checkbox" id="xModulePowerToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <h3 class="sub-heading">Video Settings</h3>
+            <div class="setting">
+                <label for="xAlwaysMuteToggle">Always Mute Videos:</label>
+                <label class="switch">
+                    <input type="checkbox" id="xAlwaysMuteToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: -5px;">
+                Ensures videos start muted. Sound is enabled only when you explicitly unmute or adjust volume.
+            </p>
         </div>
 
         <div id="general-settings" class="tab-content">
@@ -229,6 +255,13 @@
                 <label for="visibilityYouTubeToggle">YouTube Helper:</label>
                 <label class="switch">
                     <input type="checkbox" id="visibilityYouTubeToggle" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting">
+                <label for="visibilityXToggle">X (Twitter):</label>
+                <label class="switch">
+                    <input type="checkbox" id="visibilityXToggle" checked>
                     <span class="slider"></span>
                 </label>
             </div>

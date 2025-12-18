@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const visibilityVscToggle = document.getElementById('visibilityVscToggle');
     const visibilityFabToggle = document.getElementById('visibilityFabToggle');
     const visibilityYouTubeToggle = document.getElementById('visibilityYouTubeToggle');
+    const visibilityXToggle = document.getElementById('visibilityXToggle');
 
     // Storage Keys (Must match those defined in coreConstants.js and fabConstants.js)
     const GLOBAL_SETTINGS_STORAGE_KEYS = {
@@ -52,7 +53,8 @@ document.addEventListener('DOMContentLoaded', () => {
         VOLUME_MODULE_VISIBLE: 'isVolumeModuleVisible',
         VSC_MODULE_VISIBLE: 'isVscModuleVisible',
         FAB_MODULE_VISIBLE: 'isFabModuleVisible',
-        YOUTUBE_MODULE_VISIBLE: 'isYouTubeModuleVisible'
+        YOUTUBE_MODULE_VISIBLE: 'isYouTubeModuleVisible',
+        X_MODULE_VISIBLE: 'isXModuleVisible'
     };
 
     const FAB_SETTINGS_STORAGE_KEYS = {
@@ -153,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (visibilityVscToggle) visibilityVscToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.VSC_MODULE_VISIBLE] !== false;
             if (visibilityFabToggle) visibilityFabToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.FAB_MODULE_VISIBLE] !== false;
             if (visibilityYouTubeToggle) visibilityYouTubeToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE] !== false;
+            if (visibilityXToggle) visibilityXToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.X_MODULE_VISIBLE] !== false;
         });
     }
 
@@ -239,7 +242,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 [GLOBAL_SETTINGS_STORAGE_KEYS.VOLUME_MODULE_VISIBLE]: visibilityVolumeToggle.checked,
                 [GLOBAL_SETTINGS_STORAGE_KEYS.VSC_MODULE_VISIBLE]: visibilityVscToggle.checked,
                 [GLOBAL_SETTINGS_STORAGE_KEYS.FAB_MODULE_VISIBLE]: visibilityFabToggle.checked,
-                [GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE]: visibilityYouTubeToggle.checked
+                [GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE]: visibilityYouTubeToggle.checked,
+                [GLOBAL_SETTINGS_STORAGE_KEYS.X_MODULE_VISIBLE]: visibilityXToggle.checked
             };
             chrome.storage.local.set(settings, () => {
                 if (chrome.runtime.lastError) {

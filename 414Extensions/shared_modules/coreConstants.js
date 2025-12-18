@@ -9,6 +9,11 @@ export const FAB_MODULE_ENABLED_KEY = 'isFabModuleEnabled';
 // Master On/Off Switch for the YouTube Module
 export const YOUTUBE_MODULE_ENABLED_KEY = 'isYouTubeModuleEnabled';
 
+// Master On/Off Switch for the X (Twitter) Module
+export const X_MODULE_ENABLED_KEY = 'isXModuleEnabled';
+// Specific feature toggle for X
+export const X_ALWAYS_MUTE_KEY = 'isXAlwaysMuteEnabled';
+
 // Global rate limiting
 export const RATE_LIMIT_COOL_DOWN_UNTIL_KEY = 'rateLimitCoolDownUntil';
 
@@ -17,6 +22,7 @@ export const VOLUME_MODULE_VISIBLE_KEY = 'isVolumeModuleVisible';
 export const VSC_MODULE_VISIBLE_KEY = 'isVscModuleVisible';
 export const FAB_MODULE_VISIBLE_KEY = 'isFabModuleVisible';
 export const YOUTUBE_MODULE_VISIBLE_KEY = 'isYouTubeModuleVisible';
+export const X_MODULE_VISIBLE_KEY = 'isXModuleVisible';
 
 // Configurable global network settings keys (values loaded from storage)
 export const GLOBAL_MAX_RETRIES_KEY = 'maxRetries';

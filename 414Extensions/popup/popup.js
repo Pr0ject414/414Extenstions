@@ -21,6 +21,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const visibilityVscToggle = document.getElementById('visibilityVscToggle');
     const visibilityFabToggle = document.getElementById('visibilityFabToggle');
     const visibilityYouTubeToggle = document.getElementById('visibilityYouTubeToggle');
+    const visibilityXToggle = document.getElementById('visibilityXToggle');
+
+    // --- X Module Elements ---
+    const xModulePowerToggle = document.getElementById('xModulePowerToggle');
+    const xAlwaysMuteToggle = document.getElementById('xAlwaysMuteToggle');
 
     // --- Global Storage Keys ---
     const GLOBAL_MASTER_SWITCH_ENABLED_KEY = 'isGlobalMasterSwitchEnabled';
@@ -28,6 +33,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const VSC_MODULE_VISIBLE_KEY = 'isVscModuleVisible';
     const FAB_MODULE_VISIBLE_KEY = 'isFabModuleVisible';
     const YOUTUBE_MODULE_VISIBLE_KEY = 'isYouTubeModuleVisible';
+    const X_MODULE_VISIBLE_KEY = 'isXModuleVisible';
+    const X_MODULE_ENABLED_KEY = 'isXModuleEnabled';
+    const X_ALWAYS_MUTE_KEY = 'isXAlwaysMuteEnabled';
 
     // --- Load Global State ---
     chrome.storage.local.get([
@@ -35,7 +43,10 @@ document.addEventListener('DOMContentLoaded', () => {
         VOLUME_MODULE_VISIBLE_KEY,
         VSC_MODULE_VISIBLE_KEY,
         FAB_MODULE_VISIBLE_KEY,
-        YOUTUBE_MODULE_VISIBLE_KEY
+        YOUTUBE_MODULE_VISIBLE_KEY,
+        X_MODULE_VISIBLE_KEY,
+        X_MODULE_ENABLED_KEY,
+        X_ALWAYS_MUTE_KEY
     ], (result) => {
         globalMasterSwitchToggle.checked = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] !== false;
         
@@ -43,6 +54,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (visibilityVscToggle) visibilityVscToggle.checked = result[VSC_MODULE_VISIBLE_KEY] !== false;
         if (visibilityFabToggle) visibilityFabToggle.checked = result[FAB_MODULE_VISIBLE_KEY] !== false;
         if (visibilityYouTubeToggle) visibilityYouTubeToggle.checked = result[YOUTUBE_MODULE_VISIBLE_KEY] !== false;
+        if (visibilityXToggle) visibilityXToggle.checked = result[X_MODULE_VISIBLE_KEY] !== false;
+
+        if (xModulePowerToggle) xModulePowerToggle.checked = result[X_MODULE_ENABLED_KEY] !== false;
+        if (xAlwaysMuteToggle) xAlwaysMuteToggle.checked = result[X_ALWAYS_MUTE_KEY] !== false;
 
         refreshTabVisibility();
         setDependentModulesState();
@@ -91,7 +106,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { el: visibilityVolumeToggle, key: VOLUME_MODULE_VISIBLE_KEY },
         { el: visibilityVscToggle, key: VSC_MODULE_VISIBLE_KEY },
         { el: visibilityFabToggle, key: FAB_MODULE_VISIBLE_KEY },
-        { el: visibilityYouTubeToggle, key: YOUTUBE_MODULE_VISIBLE_KEY }
+        { el: visibilityYouTubeToggle, key: YOUTUBE_MODULE_VISIBLE_KEY },
+        { el: visibilityXToggle, key: X_MODULE_VISIBLE_KEY }
     ].forEach(({ el, key }) => {
         if (el) {
             el.addEventListener('change', () => {
@@ -103,6 +119,20 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     });
+
+    // --- X Module Logic ---
+    if (xModulePowerToggle) {
+        xModulePowerToggle.addEventListener('change', () => {
+             const isEnabled = xModulePowerToggle.checked;
+             chrome.storage.local.set({ [X_MODULE_ENABLED_KEY]: isEnabled });
+        });
+    }
+    if (xAlwaysMuteToggle) {
+        xAlwaysMuteToggle.addEventListener('change', () => {
+             const isEnabled = xAlwaysMuteToggle.checked;
+             chrome.storage.local.set({ [X_ALWAYS_MUTE_KEY]: isEnabled });
+        });
+    }
 
     // --- Volume Control Logic ---
     if (volumeSlider && volumeValueDisplay) {
@@ -251,9 +281,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const isGlobalOn = globalMasterSwitchToggle.checked;
         document.getElementById('fab-controls').classList.toggle('effectively-disabled', !isGlobalOn);
         document.getElementById('youtube-controls').classList.toggle('effectively-disabled', !isGlobalOn);
+        document.getElementById('x-controls').classList.toggle('effectively-disabled', !isGlobalOn);
+        
         // Also disable the power toggles themselves
         document.getElementById('fabModulePowerToggle').disabled = !isGlobalOn;
         document.getElementById('youTubeModulePowerToggle').disabled = !isGlobalOn;
+        document.getElementById('xModulePowerToggle').disabled = !isGlobalOn;
     }
 
     // Attach a global status indicator updater to the window object
@@ -311,6 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'speed-controls': visibilityVscToggle?.checked !== false,
             'fab-controls': visibilityFabToggle?.checked !== false,
             'youtube-controls': visibilityYouTubeToggle?.checked !== false,
+            'x-controls': visibilityXToggle?.checked !== false,
             'general-settings': true // Always visible
         };
 
