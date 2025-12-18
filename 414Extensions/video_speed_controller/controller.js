@@ -279,8 +279,12 @@ function attachController(video, initialSpeed) {
     if (video.dataset.vscAttached) return;
     video.dataset.vscAttached = 'true';
     
+    // video.dataset.vscAttached = 'true';
+    
     // Attempt Initial Anchor (if created right after click)
-    tryAnchor(video);
+    // REMOVED: This causes ghost overlays on X.com when "Load More" is clicked 
+    // and invisible preload videos are added. We will wait for 'play' or visibility.
+    // tryAnchor(video);
     
     // Apply initial speed if provided and valid
     if (initialSpeed && initialSpeed !== 1.0) {
@@ -508,16 +512,19 @@ function attachController(video, initialSpeed) {
              const anchor = videoAnchors.get(video);
              
              // VISIBILITY RULES FOR INVISIBLE PLAYERS:
-             // 1. If Playing -> SHOW
-             // 2. If Paused AND Anchored -> SHOW (User sees it next to button)
-             // 3. If Paused AND Unanchored -> HIDE (Prevent garbage stack at 0,0)
+             // 1. If AUDIO -> Follow Anchor Logic
+             // 2. If VIDEO -> HIDE (Fix for X.com ghost overlays from preload videos)
              
-             const shouldShow = !video.paused || (video.paused && !!anchor);
-             
-             if (!shouldShow) {
+             if (video.nodeName === 'VIDEO') {
                  host.style.display = 'none';
              } else {
-                 host.style.display = 'block';
+                 // AUDIO LOGIC
+                 const shouldShow = !video.paused || (video.paused && !!anchor);
+                 
+                 if (!shouldShow) {
+                     host.style.display = 'none';
+                 } else {
+                     host.style.display = 'block';
                  
                  // Positioning
                  if (anchor && anchor.isConnected) {
@@ -534,6 +541,7 @@ function attachController(video, initialSpeed) {
                     host.style.left = `${left}px`;
                  }
              }
+            }
         } else {
             // Normal Visible Video
             host.style.display = 'block';
@@ -614,7 +622,8 @@ document.addEventListener('mousedown', (e) => {
         e.target.tagName === 'INPUT' || 
         e.target.closest('a') || 
         e.target.closest(roleSelector) ||
-        e.target.closest('.vsc-controller-host')
+        e.target.closest('.vsc-controller-host') ||
+        e.target.closest('[aria-label="Volume slider"]')
     ) return;
 
     // 2. Find Video

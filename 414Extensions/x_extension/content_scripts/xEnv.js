@@ -24,11 +24,34 @@
             alwaysMuteEnabled = alwaysMute;
             
             if (typeof volumeLevel === 'number') {
+                const oldVolume = currentVolume;
                 currentVolume = volumeLevel;
+
+                // Real-time update: Apply to all videos if volume changed
+                // This ensures that dragging the popup slider immediately affects the video
+                if (Math.abs(oldVolume - currentVolume) > 0.001) {
+                     const videos = document.querySelectorAll('video');
+                     videos.forEach(v => applyOriginalVolume(v, currentVolume));
+                }
             }
             // console.log("X Env: Settings updated.", { isModuleEnabled, alwaysMuteEnabled, currentVolume });
         }
     });
+
+    function getVolumeSliderFromTarget(target) {
+        if (!target) return null;
+        // 1. Check if target IS or IS INSIDE the slider
+        let slider = target.closest('[aria-label*="Volume"], [data-testid="volumeSlider"], [data-testid="sound_slider"]');
+        if (slider) return slider;
+        
+        // 2. Check if target CONTAINS the slider (is the track/parent)
+        // We look for a direct child slider, or just a slider inside. 
+        // Given X's structure, the track is the parent.
+        if (target.querySelector) {
+            slider = target.querySelector('[aria-label*="Volume"], [data-testid="volumeSlider"], [data-testid="sound_slider"]');
+        }
+        return slider;
+    }
 
     // 1. CLICK LISTENER (User Intent & Volume Interaction)
     let isUserInteractingWithVolume = false;
@@ -40,12 +63,17 @@
     
     document.addEventListener('touchstart', (e) => {
         handleInteractionStart(e.target);
-    }, true);
+    }, { capture: true, passive: true });
+
+    document.addEventListener('pointerdown', (e) => {
+        handleInteractionStart(e.target);
+    }, { capture: true, passive: true });
 
     function handleInteractionStart(target) {
         if (!target) return;
-        // Check if interacting with volume slider
-        const volSlider = target.closest('[aria-label="Volume slider"]');
+        // Check if interacting with volume slider (Broadened)
+        const volSlider = getVolumeSliderFromTarget(target);
+
         if (volSlider) {
             isUserInteractingWithVolume = true;
             if (volumeInteractionTimeout) {
@@ -78,8 +106,68 @@
         }
     }
 
+    document.addEventListener('pointerup', handleInteractionEnd, { capture: true, passive: true });
+    
+    // CLICK INTERCEPT for Click-to-Pause (when Always Mute is active)
+    document.addEventListener('click', (e) => {
+        if (!isModuleEnabled || !alwaysMuteEnabled) return;
+
+        const target = e.target;
+
+        // 1. Explicitly Detect Volume Slider Interaction (Fixes "Click to Set")
+        // We catch this early to ensure the flag is set during the click handling phase
+        if (getVolumeSliderFromTarget(target)) {
+             isUserInteractingWithVolume = true;
+             handleInteractionStart(target); // Ensure unmute logic runs
+             return; // Let click propagate to X
+        }
+
+        // 2. Ignore Other Controls (Exclusions)
+        // This includes Scrubbers, Buttons, etc.
+        const excludedRoles = ['slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
+        const roleSelector = excludedRoles.map(role => `[role="${role}"]`).join(',');
+        
+        if (
+            target.tagName === 'BUTTON' || 
+            target.tagName === 'INPUT' || 
+            target.closest(roleSelector) || 
+            target.closest('[aria-label="Mute"]') || 
+            target.closest('[aria-label="Unmute"]') || 
+            target.closest('[aria-label*="Volume"]') || 
+            target.closest('[data-testid="volumeSlider"]') ||
+            target.closest('[data-testid="progressBar"]') || 
+            target.closest('[data-testid="scrubber"]') || 
+            target.closest('[aria-label="Seek slider"]') || 
+            target.closest('[aria-label="ProgressBar"]') ||
+            target.closest('[data-testid="playButton"]') || 
+            target.closest('[data-testid="pauseButton"]')
+        ) return;
+
+        const video = findRelatedVideo(target);
+        if (video) {
+            // GEOMETRIC CHECK: Ensure the click is actually INSIDE the video rect.
+            const rect = video.getBoundingClientRect();
+            const isInX = e.clientX >= rect.left && e.clientX <= rect.right;
+            const isInY = e.clientY >= rect.top && e.clientY <= rect.bottom;
+            
+            if (!isInX || !isInY) return; // Clicked outside video bounds
+
+            // Found a video click outside of controls, and Always Mute is ON.
+            // X.com default is to Unmute (if not previously interacted). We want to Pause/Play.
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (video.paused) {
+                video.play().catch(() => {});
+            } else {
+                video.pause();
+            }
+        }
+    }, true); // Capture phase to beat X's listeners
+
     document.addEventListener('mouseup', handleInteractionEnd, true);
-    document.addEventListener('touchend', handleInteractionEnd, true);
+    document.addEventListener('touchend', handleInteractionEnd, { capture: true, passive: true });
     document.addEventListener('click', (e) => {
         // We don't force reset here immediately anymore, we let the timeout handle it.
         // But we still track explicit unmute buttons.
@@ -87,27 +175,28 @@
         const target = e.target;
         const muteButton = target.closest('[aria-label="Mute"]');
         const unmuteButton = target.closest('[aria-label="Unmute"]');
-        const volSlider = target.closest('[aria-label="Volume slider"]');
+        // Broadened Slider Selector for Click Unmuting
+        const volSlider = getVolumeSliderFromTarget(target);
         
         // If clicking unmute or volume slider, user wants sound.
         if (unmuteButton || volSlider) {
-             // Interaction handles slider unmuting, but button might not trigger mousedown/touchstart logic if simple click?
-             // Actually click follows mousedown. But let's be safe.
+             const video = findRelatedVideo(unmuteButton || (volSlider ? target : null)); 
+             // Note: findRelatedVideo walks up. If volSlider was found via querySelector (down), 
+             // target might be the parent. findRelatedVideo(target) is correct.
              
-             const video = findRelatedVideo(unmuteButton || volSlider);
              if (video) {
                  // console.log("X Env: User allowed video.", video);
                  allowedUnmuted.add(video);
                  
-                 // Force update to match shadow state
-                 if (shadowMutedState.has(video)) {
-                     const desired = shadowMutedState.get(video);
-                     if (desired === false) {
-                         applyOriginalMuted(video, false);
-                     }
-                 }
-                 // Ensure volume is applied (X might reset it on unmute)
-                 if (video.volume !== currentVolume) {
+                 // Force Shadow State to match User Intent (Unmute)
+                 shadowMutedState.set(video, false);
+                 
+                 // Force Actual Unmute
+                 applyOriginalMuted(video, false);
+                 
+                 // If it was the Unmute BUTTON, we ensure we restore the desired volume level.
+                 // If it was the SLIDER, we DO NOT interfere, because the click itself sets the volume native.
+                 if (unmuteButton && video.volume !== currentVolume) {
                      applyOriginalVolume(video, currentVolume);
                  }
              }
