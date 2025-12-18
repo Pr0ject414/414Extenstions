@@ -247,8 +247,28 @@
 
     // --- TRIGGERS ---
 
+    let userInteracted = false;
+
+    // Detect user manual quality selection
+    document.addEventListener('click', (e) => {
+        if (!e.isTrusted) return; // Ignore programmatic clicks
+
+        // Check if the click happened inside the quality menu
+        // User provided screenshot confirms class 'ytp-quality-menu' on the panel
+        const qualityMenu = e.target.closest('.ytp-quality-menu');
+        if (qualityMenu) {
+            // Further verification: clicked a menu item?
+            const menuItem = e.target.closest('.ytp-menuitem');
+            if (menuItem) {
+                console.log("[YouTube AutoHD] User manually selected a quality. Pausing auto-quality.");
+                userInteracted = true;
+            }
+        }
+    }, { capture: true });
+
     async function applySettings() {
         if (!state.isExtensionEnabled) return;
+        if (userInteracted) return; // Do not override user choice
         
         const elVideo = getVisibleElement(SELECTORS.video);
         if (!elVideo) return;
@@ -290,7 +310,13 @@
                  shouldUpdate = true;
              }
              
-             if (shouldUpdate && state.isExtensionEnabled) applySettings();
+             if (shouldUpdate && state.isExtensionEnabled) {
+                 // If settings change, we assume user wants to re-apply them even if they manually changed quality before?
+                 // Or typically, new settings = FORCE apply.
+                 // Let's reset userInteracted so the new setting takes effect.
+                 userInteracted = false; 
+                 applySettings();
+             }
         });
 
         // Watch for page navigation / video load
@@ -304,6 +330,7 @@
         
         const handleNavigation = () => {
              if (location.pathname.startsWith('/watch')) {
+                 userInteracted = false; // Reset on new video
                  setTimeout(applySettings, 1000); // Wait for player to settle
              }
         };
@@ -333,7 +360,10 @@
         document.addEventListener('canplay', (e) => {
             if (e.target.tagName === 'VIDEO') {
                  // Debounce slightly
-                 setTimeout(applySettings, 500);
+                 setTimeout(() => {
+                    // Only apply if it's not a user interaction
+                    applySettings();
+                 }, 500);
             }
         }, { capture: true }); // Capture phase catches events from elements deep in DOM
 
