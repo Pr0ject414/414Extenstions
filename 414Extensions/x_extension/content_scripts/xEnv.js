@@ -168,6 +168,118 @@
 
     document.addEventListener('mouseup', handleInteractionEnd, true);
     document.addEventListener('touchend', handleInteractionEnd, { capture: true, passive: true });
+
+    // CLICK BURST TRACKER (Fixes double-click side effects)
+    let clickBurstState = {
+        video: null,
+        initialPaused: false,
+        lastTime: 0
+    };
+
+    document.addEventListener('pointerdown', (e) => {
+        // Track the video state at the START of a potential click sequence
+        const video = findRelatedVideo(e.target);
+        if (video) {
+            const now = Date.now();
+            // New burst or different video?
+            if (video !== clickBurstState.video || (now - clickBurstState.lastTime > 500)) {
+                clickBurstState.video = video;
+                clickBurstState.initialPaused = video.paused;
+                // console.log("X Env: Burst Start. Initial Paused:", video.paused);
+            }
+            clickBurstState.lastTime = now;
+        }
+    }, { capture: true, passive: true });
+
+    // DOUBLE CLICK FULLSCREEN
+    document.addEventListener('dblclick', (e) => {
+        if (!isModuleEnabled) return;
+
+        const target = e.target;
+        
+        // Use same exclusion logic as click listener to avoid double clicking controls
+        const excludedRoles = ['slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
+        const roleSelector = excludedRoles.map(role => `[role="${role}"]`).join(',');
+        
+        if (
+            target.tagName === 'BUTTON' || 
+            target.tagName === 'INPUT' || 
+            target.closest(roleSelector) || 
+            target.closest('[data-testid="volumeSlider"]') || 
+            target.closest('[data-testid="progressBar"]') || 
+            target.closest('[data-testid="scrubber"]') || 
+            target.closest('[aria-label="Seek slider"]')
+        ) return;
+
+        const video = findRelatedVideo(target);
+        if (video) {
+             const rect = video.getBoundingClientRect();
+             const isInX = e.clientX >= rect.left && e.clientX <= rect.right;
+             const isInY = e.clientY >= rect.top && e.clientY <= rect.bottom;
+             
+             if (!isInX || !isInY) return;
+
+             e.preventDefault();
+             e.stopPropagation();
+
+             // Use our tracker if valid, otherwise fallback to current state (risky)
+             let targetPausedState = video.paused;
+             if (clickBurstState.video === video && (Date.now() - clickBurstState.lastTime < 1000)) {
+                 targetPausedState = clickBurstState.initialPaused;
+                 // console.log("X Env: Using Burst State:", targetPausedState);
+             }
+
+             // Strategy 1: Try to find existing Fullscreen Button
+             // We look up from video to find the container, then search down for the button
+             // Or we just search near the video.
+             // X structure: Video -> (up) -> VideoPlayer -> (down) -> Button[aria-label="Enter full screen"]
+             
+             let container = video.parentElement;
+             let fsButton = null;
+             
+             // Traverse up to find a common container
+             for(let i=0; i<6; i++) {
+                 if(!container) break;
+                 // Look for buttons
+                 const openBtn = container.querySelector('[aria-label="Enter full screen"], [aria-label="Full screen"]');
+                 const closeBtn = container.querySelector('[aria-label="Exit full screen"]');
+                 
+                 if (openBtn && openBtn.offsetParent !== null) { // Check visibility roughly
+                     fsButton = openBtn;
+                     break;
+                 }
+                 if (closeBtn && closeBtn.offsetParent !== null) {
+                     fsButton = closeBtn;
+                     break;
+                 }
+                 container = container.parentElement;
+             }
+
+             if (fsButton) {
+                 fsButton.click();
+             } else {
+                 // Strategy 2: Native Fallback
+                 if (!document.fullscreenElement) {
+                     // Try to fullscreen the container if possible, else video
+                     if (video.parentElement) {
+                         video.parentElement.requestFullscreen().catch(() => video.requestFullscreen());
+                     } else {
+                         video.requestFullscreen(); 
+                     }
+                 } else {
+                     document.exitFullscreen();
+                 }
+             }
+
+             // Enforce State Preservation
+             setTimeout(() => {
+                 if (video.paused !== targetPausedState) {
+                     if (targetPausedState) video.pause();
+                     else video.play().catch(() => {});
+                 }
+             }, 200);
+        }
+    }, true);
     document.addEventListener('click', (e) => {
         // We don't force reset here immediately anymore, we let the timeout handle it.
         // But we still track explicit unmute buttons.
