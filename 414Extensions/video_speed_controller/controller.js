@@ -271,6 +271,11 @@ document.addEventListener('mousedown', (e) => {
 
 function attachController(video, initialSpeed) {
     if (video.dataset.vscAttached) return;
+
+    // Ignore YouTube TV preview videos to prevent ghost overlays in fullscreen
+    if (window.location.hostname === 'tv.youtube.com' && video.id === 'id-tenx-video') {
+        return;
+    }
     video.dataset.vscAttached = 'true';
     
     // Attempt Initial Anchor (if created right after click)
