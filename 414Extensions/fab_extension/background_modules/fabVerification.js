@@ -3,9 +3,9 @@ import * as FabConstants from './fabConstants.js';
 import * as FabState from './fabState.js'; // For verificationQueue, autoProcessingSuspended, etc.
 
 // For reading global conditions
-import * as AppState from '../../../shared_modules/appState.js';
+import * as AppState from '../../shared_modules/appState.js';
 // Import fetchWithBackoff from its new shared location
-import { fetchWithBackoff } from '../../../shared_modules/fetchUtils.js';
+import { fetchWithBackoff } from '../../shared_modules/fetchUtils.js';
 
 export function setupVerificationAlarm() {
     chrome.alarms.get(FabConstants.FAB_VERIFICATION_ALARM_NAME, (alarm) => {
