@@ -829,12 +829,12 @@ function createBtn(text, onClick) {
     btn.className = 'vsc-btn';
     btn.textContent = text;
     // Prevent focus stealing / native click propagation
-    btn.onmousedown = (e) => e.preventDefault();
-    btn.onclick = (e) => {
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
         onClick();
-    };
+    });
     return btn;
 }
 
