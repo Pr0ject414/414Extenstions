@@ -65,20 +65,17 @@ function registerWebRequestlistener() {
         ["responseHeaders", "extraHeaders"] // Add extraHeaders to ensure we see everything
     );
     isWebRequestlistenerRegistered = true;
-    console.log("FabBackground: WebRequest listener for 429s registered (Broadened).");
 }
 
 function unregisterWebRequestlistener() {
     if (!isWebRequestlistenerRegistered) return;
     chrome.webRequest.onHeadersReceived.removeListener(handle429);
     isWebRequestlistenerRegistered = false;
-    console.log("FabBackground: WebRequest listener for 429s unregistered.");
 }
 
 // --- Lifecycle Functions ---
 
 export async function init() {
-    console.log("FabBackground: Initializing...");
     await FabState.loadFabState();
     FabVerification.setupVerificationAlarm();
     onGlobalStateChange(); // Register webRequest listener if enabled
@@ -86,30 +83,24 @@ export async function init() {
     if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && AppState.fabModuleVisible && FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
         FabQueueManager.processFabTabQueue();
     }
-    console.log("FabBackground: Initialized.");
 }
 
 export async function onStartup() {
-    console.log("FabBackground: onStartup sequence.");
     // Covered by init() in main background.js
 }
 
 export async function onInstalled(details) {
-    console.log("FabBackground: onInstalled sequence. Reason:", details.reason);
     await FabState.loadFabState();
     FabVerification.setupVerificationAlarm();
 
     if (details.reason === "install" || details.reason === "update") {
         FabState.resetActiveTabs();
-        console.log("FabBackground: Active FAB processing tabs reset due to install/update.");
     }
 }
 
 // --- Event Handlers ---
 
 export function handleMessage(request, sender, sendResponse) {
-    // console.log("FabBackground: Received message", request.action); // Less noisy logging
-
     switch (request.action) {
         case "getFabGlobalStats": {
             let operationalStatus;
@@ -170,7 +161,6 @@ export function handleMessage(request, sender, sendResponse) {
             }, graceMs);
 
             FabState.addUrlToPending(url, timerId);
-            console.log(`FabBackground: Item ${url} is now pending for ${graceMs}ms.`);
             sendResponse({ status: "pending_grace_period" });
             return true;
         }
@@ -215,7 +205,6 @@ export function handleMessage(request, sender, sendResponse) {
             if (typeof request.enabled === 'boolean') {
                 FabState.setFabQueueProcessingEnabled(request.enabled);
                 FabState.saveFabState();
-                console.log(`FabBackground: FAB Queue Processing set to ${request.enabled}.`);
                 if (request.enabled && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && AppState.fabModuleVisible && !AppState.isRateLimited()) {
                     FabQueueManager.processFabTabQueue();
                 }
