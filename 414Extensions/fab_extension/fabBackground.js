@@ -16,7 +16,7 @@ export function onGlobalStateChange() {
     }
 }
 
-function handle429(details) {
+export function handle429(details) {
     if (details.statusCode === 429) {
         console.log("FabBackground (webRequest): Detected a 429 status code.");
         
