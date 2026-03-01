@@ -76,6 +76,7 @@ window.FabContentModules = window.FabContentModules || {};
     }
     
     let scanInterval = null;
+    let browsePageItems = null; // Live HTMLCollection for optimization
 
     FabContentModules.initializeAutoOpener = function(settings) {
         if (autoOpenerObserver) autoOpenerObserver.disconnect();
@@ -83,8 +84,14 @@ window.FabContentModules = window.FabContentModules || {};
 
         graceCyclesMs = settings.graceCyclesMs; // Load the grace period delay from the main content script settings
         
+        // Use a live HTMLCollection for better performance over querySelectorAll.
+        // It's maintained by the browser engine and doesn't require a full DOM scan on each call.
+        browsePageItems = document.getElementsByClassName('nTa5u2sc');
+
         const scanPage = () => {
-             document.querySelectorAll('div.nTa5u2sc').forEach(processItem);
+            // Convert to array or use Array.prototype.forEach since HTMLCollection
+            // might not have forEach in all environments (though usually fine in modern Chrome).
+            Array.prototype.forEach.call(browsePageItems, processItem);
         };
 
         // Initial Scan
@@ -93,7 +100,8 @@ window.FabContentModules = window.FabContentModules || {};
         // Periodic Re-scan (Safety Net)
         // This ensures that if the observer misses something or if the DOM settles in a way that reveals new items,
         // we catch them. It also keeps the "loop" going.
-        scanInterval = setInterval(scanPage, 2000);
+        // Throttled to 10 seconds to reduce background CPU usage as the MutationObserver is the primary trigger.
+        scanInterval = setInterval(scanPage, 10000);
 
         // Set up the observer to watch for new items that get added to the page as the user scrolls.
         autoOpenerObserver = new MutationObserver((mutations) => {
@@ -105,8 +113,8 @@ window.FabContentModules = window.FabContentModules || {};
                                 processItem(node);
                             }
                             // Also deep check in case a container was added
-                            if (node.querySelectorAll) {
-                                node.querySelectorAll('div.nTa5u2sc').forEach(processItem);
+                            if (node.getElementsByClassName) {
+                                Array.prototype.forEach.call(node.getElementsByClassName('nTa5u2sc'), processItem);
                             }
                         }
                     });
@@ -115,7 +123,7 @@ window.FabContentModules = window.FabContentModules || {};
         });
         
         autoOpenerObserver.observe(document.body, { childList: true, subtree: true });
-        console.log(`FabAutoOpener: Initialized with ${graceCyclesMs}ms visibility grace period and 2s periodic scan.`);
+        console.log(`FabAutoOpener: Initialized with ${graceCyclesMs}ms visibility grace period and 10s periodic scan.`);
     };
 
     FabContentModules.stopAutoOpener = function() {
