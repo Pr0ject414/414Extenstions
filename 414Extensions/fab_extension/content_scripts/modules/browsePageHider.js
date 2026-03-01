@@ -25,7 +25,6 @@ window.FabContentModules = window.FabContentModules || {};
                 setTimeout(() => {
                     // After 1.5 seconds, check if the item is still on the page.
                     if (document.body.contains(productItem)) {
-                        console.log(`FabHider: Grace period over. Hiding owned item.`);
                         productItem.style.display = 'none';
                         productItem.setAttribute('data-fab-hidden', 'true');
                         hiddenOwnedItemCount++;
@@ -59,7 +58,6 @@ window.FabContentModules = window.FabContentModules || {};
         });
         
         hiderObserver.observe(document.body, { childList: true, subtree: true });
-        console.log("FabBrowsePage Hider: Initialized with 1.5s grace period.");
     };
 
     FabContentModules.stopHider = function() {
@@ -68,7 +66,6 @@ window.FabContentModules = window.FabContentModules || {};
             hiderObserver = null;
         }
         pendingHideItems.clear();
-        console.log("FabBrowsePage Hider: Stopped.");
     };
 
     FabContentModules.getHiddenCount = function() {

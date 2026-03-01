@@ -37,7 +37,6 @@ window.FabContentModules = window.FabContentModules || {};
              );
              if (potentialMatch) {
                  listingData = potentialMatch;
-                 console.log("FabProductPage: Found listing data via fallback value search.");
              }
         }
         
