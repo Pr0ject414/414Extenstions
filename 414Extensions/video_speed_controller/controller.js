@@ -107,6 +107,8 @@ function checkBlacklistAndInit() {
 let pageObserver = null;
 let isInitialized = false;
 let isGloballyDisabled = true; // Default to true until checked
+const activeHosts = new Set();
+const attachedVideos = new Set();
 
 // Monitor Storage for Visibility/Enable changes
 chrome.storage.onChanged.addListener((changes, namespace) => {
@@ -174,13 +176,14 @@ function deinit() {
     document.removeEventListener('keydown', handleGlobalKeyDownInternal);
     
     // Remove UI from all videos
-    document.querySelectorAll('.vsc-controller-host').forEach(el => el.remove());
+    activeHosts.forEach(el => el.remove());
+    activeHosts.clear();
 
     // Clear Dataset attached flag so we can re-attach later
-    const selector = currentConfig.options.audio ? 'video, audio' : 'video';
-    document.querySelectorAll(selector).forEach(v => {
+    attachedVideos.forEach(v => {
         delete v.dataset.vscAttached;
     });
+    attachedVideos.clear();
     
     // Clear Maps
     // (WeakMaps clear themselves when elements die, but we can't iterate them to clear specific data 
@@ -277,6 +280,7 @@ function attachController(video, initialSpeed) {
         return;
     }
     video.dataset.vscAttached = 'true';
+    attachedVideos.add(video);
     
     // Attempt Initial Anchor (if created right after click)
     // REMOVED: This causes ghost overlays on X.com when "Load More" is clicked 
@@ -455,12 +459,15 @@ function attachController(video, initialSpeed) {
     
     // Append Host
     document.body.appendChild(host);
+    activeHosts.add(host);
     
     // Position Sync Loop
     function syncPosition() {
         // If disabled or disconnected, remove and stop
         if (isGloballyDisabled || !video.isConnected) {
             host.remove();
+            activeHosts.delete(host);
+            attachedVideos.delete(video);
             videoTargetSpeeds.delete(video);
             videoAnchors.delete(video);
             return;
@@ -891,8 +898,7 @@ function handleKeyDown(e) {
     if (!shortcut) return;
     
     if (shortcut.id === 'toggle') {
-        const hosts = document.querySelectorAll('.vsc-controller-host');
-        hosts.forEach(h => h.classList.toggle('vsc-hidden'));
+        activeHosts.forEach(h => h.classList.toggle('vsc-hidden'));
         document.body.classList.toggle('vsc-global-hidden');
     } 
     else if (shortcut.id === 'decrease') {
@@ -937,7 +943,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       currentConfig.options = { ...currentConfig.options, ...changes[VSC_STORAGE_KEYS.OPTIONS].newValue };
       // Apply immediate visual effects?
       // Opacity / Display default
-      document.querySelectorAll('.vsc-controller-host').forEach(host => {
+      activeHosts.forEach(host => {
           if (host.shadowRoot) {
             const wrapper = host.shadowRoot.querySelector('.vsc-controller');
             if (wrapper) wrapper.style.opacity = currentConfig.options.hideDefault ? '0' : currentConfig.options.opacity;
