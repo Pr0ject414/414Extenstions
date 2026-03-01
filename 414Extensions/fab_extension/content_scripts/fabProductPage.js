@@ -39,11 +39,9 @@
         if (isGloballyPaused || (!autoAddEnabled && !queueProcessingEnabled)) {
             return;
         }
-        console.log('FabProductPage: Script initiated.');
 
         // 1. Check UI first for a quick exit
         if (isAlreadyInLibraryUI()) {
-            console.log('FabProductPage: UI indicates item already in library. Closing.');
             setTimeout(() => chrome.runtime.sendMessage({ action: "closeFabTab" }), 250);
             return;
         }
@@ -60,7 +58,6 @@
         try {
             const ownership = await checkOwnership(listingId);
             if (ownership?.ownsFreePersonalLicense) {
-                console.log('FabProductPage: API confirms ownership. Closing.');
                 setTimeout(() => chrome.runtime.sendMessage({ action: "closeFabTab" }), 250);
                 return;
             }
@@ -71,7 +68,6 @@
             const addResponse = await addToLibrary(listingId, offerId, csrfToken);
             
             if (addResponse?.success) {
-                console.log('FabProductPage: Successfully added to library. Closing.');
                 setTimeout(() => chrome.runtime.sendMessage({ action: "closeFabTab" }), 250);
             } else {
                 console.error(`FabProductPage: Failed to add. Status: ${addResponse?.status}`);
@@ -103,7 +99,6 @@
                     setTimeout(attemptDirectFreeLicenseAdd, randomDelay); 
                 } else if (attempts >= maxAttempts) {
                     clearInterval(interval);
-                    console.log("FabProductPage: Timed out waiting for page data.");
                 }
             }, 200);
         };
@@ -152,7 +147,6 @@
 
         // 4. Make the initial attempt to run the logic.
         runAutoAddLogic();
-        console.log(`FabProductPage: Initialized. Paused: ${isGloballyPaused}, Auto-add: ${autoAddEnabled}, Queue-processing: ${queueProcessingEnabled}`);
     }
 
     // Ensure all required modules are loaded before initializing.

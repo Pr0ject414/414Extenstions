@@ -67,7 +67,6 @@
         const graceCycles = result[FAB_FREE_ITEM_GRACE_CYCLES_KEY] ?? 4;
         settings.graceCyclesMs = graceCycles * 1000;
 
-        console.log("FabBrowsePage Coordinator: Initializing with settings:", settings);
         // URL Monitoring logic to handle SPA navigation
         let lastUrl = location.href;
         let isRedirecting = false;
@@ -93,7 +92,6 @@
                     if (currentUrl.searchParams.get('is_free') !== '1') {
                         if (isRedirecting) return; // Prevent loop
 
-                        console.log("FAB Browse Page: 'Only Show Free' is enabled. Redirecting to filtered view...");
                         currentUrl.searchParams.set('is_free', '1');
                         isRedirecting = true;
                         window.location.href = currentUrl.href;
@@ -134,7 +132,6 @@
                 const wasPaused = isGloballyPaused;
                 isGloballyPaused = response?.rateLimited ?? false;
                 if (wasPaused !== isGloballyPaused) {
-                    console.log(`FabBrowsePage: Rate limit status updated to ${isGloballyPaused ? 'PAUSED' : 'ACTIVE'}`);
                     needsUpdate = true;
                 }
 
@@ -158,7 +155,5 @@
 
     if (typeof chrome.runtime.id !== "undefined") {
         initialize();
-    } else {
-        console.log("FabBrowsePage Coordinator: Extension context is not valid. Script will not run.");
     }
 })();

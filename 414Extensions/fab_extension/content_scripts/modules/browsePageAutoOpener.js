@@ -53,7 +53,6 @@ window.FabContentModules = window.FabContentModules || {};
                 }
 
                 // If we reach here, the item is still visible. It's time to hide it and queue it for opening.
-                console.log(`FabAutoOpener: Grace period over. Hiding and queueing item: ${itemUrl}`);
                 item.style.display = 'none';
                 item.setAttribute('data-fab-hidden', 'true');
 
@@ -115,7 +114,6 @@ window.FabContentModules = window.FabContentModules || {};
         });
         
         autoOpenerObserver.observe(document.body, { childList: true, subtree: true });
-        console.log(`FabAutoOpener: Initialized with ${graceCyclesMs}ms visibility grace period and 2s periodic scan.`);
     };
 
     FabContentModules.stopAutoOpener = function() {
@@ -128,6 +126,5 @@ window.FabContentModules = window.FabContentModules || {};
             scanInterval = null;
         }
         processedUrls.clear(); // Clear the tracking set
-        console.log("FabAutoOpener: Stopped.");
     };
 })();
