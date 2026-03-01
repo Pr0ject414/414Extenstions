@@ -4,7 +4,7 @@ import * as FabState from './fabState.js';
 import { addOpenedItemToVerificationQueue } from './fabVerification.js';
 
 // For reading global conditions
-import * as AppState from '../../../shared_modules/appState.js';
+import * as AppState from '../../shared_modules/appState.js';
 
 /**
  * A new, consolidated function to handle requests from content scripts.

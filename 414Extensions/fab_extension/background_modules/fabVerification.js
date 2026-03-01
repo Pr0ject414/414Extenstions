@@ -3,9 +3,9 @@ import * as FabConstants from './fabConstants.js';
 import * as FabState from './fabState.js'; // For verificationQueue, autoProcessingSuspended, etc.
 
 // For reading global conditions
-import * as AppState from '../../../shared_modules/appState.js';
+import * as AppState from '../../shared_modules/appState.js';
 // Import fetchWithBackoff from its new shared location
-import { fetchWithBackoff } from '../../../shared_modules/fetchUtils.js';
+import { fetchWithBackoff } from '../../shared_modules/fetchUtils.js';
 
 export function setupVerificationAlarm() {
     chrome.alarms.get(FabConstants.FAB_VERIFICATION_ALARM_NAME, (alarm) => {
@@ -36,6 +36,86 @@ export function markItemForVerificationOnTabClose(tabId) {
     return false;
 }
 
+async function verifySingleItem(item) {
+    if (!AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled) {
+        return false;
+    }
+
+    if (AppState.isRateLimited()) {
+        return false;
+    }
+
+    if (!item.listingId) {
+        console.warn("Verification: Skipping item with no listingId:", item);
+        item.status = 'verification_error_no_id';
+        return true;
+    }
+
+    console.log(`Verification: Checking ownership for listing ${item.listingId} from URL ${item.url}`);
+    try {
+        const response = await fetchWithBackoff(
+            `https://www.fab.com/i/listings/${item.listingId}/ownership`,
+            {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                credentials: 'omit'
+            }
+        );
+
+        let ownsFreePersonalLicense = false;
+        if (response.status === 429) {
+            console.error(`Verification: Persistent 429 for ${item.listingId} after retries. Global cool-down likely active (set by fetchWithBackoff).`);
+            item.status = 'verification_error_rate_limit';
+        } else if (response.ok) {
+            if (response.status === 204) {
+                console.log(`Verification: Ownership API for ${item.listingId}: No specific licenses owned (204).`);
+            } else {
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    const ownedLicenses = await response.json();
+                    ownsFreePersonalLicense = ownedLicenses.some(
+                        license => license.name && license.name.toLowerCase() === 'personal' && license.slug && license.slug.toLowerCase() === 'personal'
+                    );
+                } else {
+                    console.log(`Verification: Ownership API for ${item.listingId}: Response not JSON. Status: ${response.status}, Content-Type: ${contentType}`);
+                }
+            }
+        } else {
+            console.warn(`Verification: Ownership API call failed for ${item.listingId} with status: ${response.status} ${response.statusText}`);
+            item.status = 'verification_error_api_fail';
+        }
+
+        if (ownsFreePersonalLicense) {
+            console.log(`Verification: SUCCESS - Item ${item.listingId} is in library.`);
+            item.status = 'verified_owned';
+        } else if (![
+            'verification_error_rate_limit',
+            'verification_error_api_fail',
+            'verification_error_exception',
+            'verification_error_no_id'
+        ].includes(item.status)) {
+            console.error(`Verification: FAILED - Item ${item.listingId} was NOT found in library.`);
+            item.status = 'verification_failed';
+            FabState.setSuspended(true);
+
+            chrome.notifications.create(`fab-verify-fail-${item.listingId}-${Date.now()}`, {
+                type: 'basic',
+                iconUrl: chrome.runtime.getURL("icons/default_icon.png"),
+                title: 'FAB Helper - Verification Failed',
+                message: `Item ${item.listingId} was NOT found in your library. Automatic processing is now suspended. Please check manually.`,
+                priority: 2
+            });
+        }
+    } catch (error) {
+        console.error(`Verification: Exception during API call for ${item.listingId}:`, error);
+        item.status = 'verification_error_exception';
+    }
+    return true;
+}
+
 export async function handleVerificationAlarm() {
     // Correctly use AppState for global switches and rate limiting
     if (!AppState.globalMasterSwitchEnabled) {
@@ -49,7 +129,6 @@ export async function handleVerificationAlarm() {
 
     if (AppState.isRateLimited()) {
         console.log(`Verification: Paused due to global rate limit. Cool down until: ${new Date(AppState.rateLimitCoolDownUntil).toLocaleTimeString()}`);
-        // Assuming FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX is correctly defined in FabConstants
         const resumeAlarmName = FabConstants.FAB_VERIFICATION_ALARM_NAME + FabConstants.FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX;
         chrome.alarms.get(resumeAlarmName, (existingAlarm) => {
             if (!existingAlarm || (existingAlarm && existingAlarm.scheduledTime > AppState.rateLimitCoolDownUntil + 5000)) {
@@ -72,105 +151,26 @@ export async function handleVerificationAlarm() {
     console.log(`Verification: Processing ${itemsDueForVerification.length} item(s) for verification.`);
 
     let stateChangedDuringThisAlarmCycle = false;
+    const concurrencyLimit = 5;
+    const activePromises = [];
 
-    for (let i = 0; i < itemsDueForVerification.length; i++) {
-        const item = itemsDueForVerification[i];
-
-        // Correctly use AppState for global switches
-        if (!AppState.globalMasterSwitchEnabled) {
-            console.log(`Verification: Global Master switch turned OFF mid-batch. Pausing verification.`);
-            break;
-        }
-        if (!AppState.fabModuleEnabled) {
-            console.log(`Verification: FAB Module switch turned OFF mid-batch. Pausing FAB verification.`);
+    for (const item of itemsDueForVerification) {
+        if (!AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || AppState.isRateLimited()) {
+            console.log("Verification: Stopping verification batch due to switch toggle or rate limit.");
             break;
         }
 
-        if (i > 0) { // Delay between checks if processing multiple items
-            // Use configurable delay from FabState
-            await new Promise(resolve => setTimeout(resolve, FabState.fabDelayBetweenVerificationChecksMs));
+        const p = verifySingleItem(item).then(changed => {
+            if (changed) stateChangedDuringThisAlarmCycle = true;
+            activePromises.splice(activePromises.indexOf(p), 1);
+        });
+        activePromises.push(p);
+
+        if (activePromises.length >= concurrencyLimit) {
+            await Promise.race(activePromises);
         }
-
-        // Correctly use AppState for rate limiting check and state
-        if (AppState.isRateLimited()) {
-            console.log("Verification: Global rate limit hit during batch processing. Pausing current batch.");
-            const resumeAlarmName = FabConstants.FAB_VERIFICATION_ALARM_NAME + FabConstants.FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX;
-            chrome.alarms.get(resumeAlarmName, (existingAlarm) => {
-                if (!existingAlarm || (existingAlarm && existingAlarm.scheduledTime > AppState.rateLimitCoolDownUntil + 5000)) {
-                    chrome.alarms.create(resumeAlarmName, {
-                       when: AppState.rateLimitCoolDownUntil + 5000
-                   });
-                }
-            });
-            break; // Exit loop for this alarm cycle
-        }
-
-        if (!item.listingId) {
-            console.warn("Verification: Skipping item with no listingId:", item);
-            item.status = 'verification_error_no_id';
-            stateChangedDuringThisAlarmCycle = true;
-            continue;
-        }
-        console.log(`Verification: Checking ownership for listing ${item.listingId} from URL ${item.url}`);
-        try {
-            const response = await fetchWithBackoff(
-                `https://www.fab.com/i/listings/${item.listingId}/ownership`,
-                {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json, text/plain, */*',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    credentials: 'omit'
-                }
-                // fetchWithBackoff will use AppState internally to set global rate limits if needed
-            );
-
-            let ownsFreePersonalLicense = false;
-            if (response.status === 429) {
-                console.error(`Verification: Persistent 429 for ${item.listingId} after retries. Global cool-down likely active (set by fetchWithBackoff).`);
-                item.status = 'verification_error_rate_limit';
-            } else if (response.ok) {
-                if (response.status === 204) {
-                    console.log(`Verification: Ownership API for ${item.listingId}: No specific licenses owned (204).`);
-                } else {
-                    const contentType = response.headers.get("content-type");
-                    if (contentType && contentType.includes("application/json")) {
-                        const ownedLicenses = await response.json();
-                        ownsFreePersonalLicense = ownedLicenses.some(
-                            license => license.name && license.name.toLowerCase() === 'personal' && license.slug && license.slug.toLowerCase() === 'personal'
-                        );
-                    } else {
-                         console.log(`Verification: Ownership API for ${item.listingId}: Response not JSON. Status: ${response.status}, Content-Type: ${contentType}`);
-                    }
-                }
-            } else {
-                console.warn(`Verification: Ownership API call failed for ${item.listingId} with status: ${response.status} ${response.statusText}`);
-                item.status = 'verification_error_api_fail';
-            }
-
-            if (ownsFreePersonalLicense) {
-                console.log(`Verification: SUCCESS - Item ${item.listingId} is in library.`);
-                item.status = 'verified_owned';
-            } else if (item.status !== 'verification_error_rate_limit' && item.status !== 'verification_error_api_fail' && item.status !== 'verification_error_exception' && item.status !== 'verification_error_no_id') {
-                console.error(`Verification: FAILED - Item ${item.listingId} was NOT found in library.`);
-                item.status = 'verification_failed';
-                FabState.setSuspended(true); // Correctly uses FabState to set FAB-specific suspension
-
-                chrome.notifications.create(`fab-verify-fail-${item.listingId}-${Date.now()}`, {
-                    type: 'basic',
-                    iconUrl: chrome.runtime.getURL("icons/default_icon.png"), // Use chrome.runtime.getURL for icon path
-                    title: 'FAB Helper - Verification Failed',
-                    message: `Item ${item.listingId} was NOT found in your library. Automatic processing is now suspended. Please check manually.`,
-                    priority: 2
-                });
-            }
-        } catch (error) {
-            console.error(`Verification: Exception during API call for ${item.listingId}:`, error);
-            item.status = 'verification_error_exception';
-        }
-        stateChangedDuringThisAlarmCycle = true;
     }
+    await Promise.all(activePromises);
 
     // Correctly uses FabState for queue management
     const originalVQueueLength = FabState.verificationQueue.length;
