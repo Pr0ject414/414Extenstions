@@ -1,2 +1,4 @@
 414Extensions.zip
 *.7z
+node_modules/
+package-lock.json
