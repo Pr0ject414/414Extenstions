@@ -54,6 +54,8 @@ export function getListingIdFromUrl(fabUrl) {
     }
 }
 
+let processingScheduled = false;
+
 export async function processFabTabQueue() {
     if (!AppState.globalMasterSwitchEnabled) {
         console.log(`FabQueueManager: Global Master switch is OFF. Queue processing paused.`);
@@ -77,67 +79,67 @@ export async function processFabTabQueue() {
         return;
     }
 
-    let stateChangedInLoop = false;
-    while (FabState.activeFabProcessingTabs < FabState.fabMaxConcurrentTabs && FabState.getFabUrlQueueSize() > 0) {
-        if (!AppState.globalMasterSwitchEnabled || !AppState.fabModuleEnabled || !FabState.fabQueueProcessingEnabled) {
-            console.log(`FabQueueManager: A global or module switch was turned OFF mid-batch. Pausing.`);
+    if (FabState.activeFabProcessingTabs >= FabState.fabMaxConcurrentTabs || FabState.getFabUrlQueueSize() === 0) {
+        return;
+    }
+
+    let urlToOpen = null;
+    let listingId = null;
+
+    // Use a loop to skip URLs without a valid listingId
+    while (FabState.getFabUrlQueueSize() > 0) {
+        const nextUrl = FabState.getNextUrlFromFabQueue();
+        if (!nextUrl) break;
+
+        const nextId = getListingIdFromUrl(nextUrl);
+        if (nextId) {
+            urlToOpen = nextUrl;
+            listingId = nextId;
             break;
-        }
-
-        if (AppState.isRateLimited()) {
-            console.log(`FabQueueManager: Processing paused mid-batch due to global rate limit.`);
-            chrome.alarms.create(FabConstants.FAB_QUEUE_PROCESS_RETRY_ALARM_NAME, { when: AppState.rateLimitCoolDownUntil + 1000 });
-            break;
-        }
-        
-        const urlToOpen = FabState.getNextUrlFromFabQueue();
-
-        if (urlToOpen) {
-            stateChangedInLoop = true;
-
-            const listingId = getListingIdFromUrl(urlToOpen);
-
-            if (!listingId) {
-                console.error("FabQueueManager: Could not get listingId for URL, skipping:", urlToOpen);
-                continue;
-            }
-
-            FabState.incrementActiveTabs();
-
-            try {
-                // Use async/await for cleaner tab creation and error handling
-                const newTab = await chrome.tabs.create({ url: urlToOpen, active: false });
-                if (newTab && newTab.id) {
-                    console.log(`FabQueueManager: Opened ${urlToOpen} in new tab ID: ${newTab.id}. Listing ID: ${listingId}. Active tabs: ${FabState.activeFabProcessingTabs}`);
-                    addOpenedItemToVerificationQueue({
-                        url: urlToOpen,
-                        listingId: listingId,
-                        tabId: newTab.id,
-                        status: 'opened',
-                        openTime: Date.now()
-                    });
-                } else {
-                     console.error(`FabQueueManager: Tab creation failed for ${urlToOpen} (newTab or newTab.id is undefined).`);
-                     FabState.decrementActiveTabs(); // Decrement if no tab was created
-                }
-            } catch (error) {
-                console.error(`FabQueueManager: Error opening new tab for ${urlToOpen}:`, error);
-                FabState.decrementActiveTabs(); // Decrement on failure
-            }
-            
-            await FabState.saveFabState(); // Save state after each tab operation
-
-            if (FabState.getFabUrlQueueSize() > 0 && (FabState.activeFabProcessingTabs) < FabState.fabMaxConcurrentTabs) {
-                console.log(`FabQueueManager: Delaying ${FabState.fabDelayBetweenTabOpenMs / 1000}s before next tab open.`);
-                await new Promise(resolve => setTimeout(resolve, FabState.fabDelayBetweenTabOpenMs));
-            }
         } else {
-            break; // No more URLs in the queue
+            console.error("FabQueueManager: Could not get listingId for URL, skipping:", nextUrl);
         }
     }
 
-    // Save state once at the end if changes were made and the queue is now empty
-    if (stateChangedInLoop && FabState.getFabUrlQueueSize() === 0) {
+    if (!urlToOpen || !listingId) {
+        // Queue is empty after skipping invalid URLs
         await FabState.saveFabState();
+        return;
+    }
+
+    FabState.incrementActiveTabs();
+
+    try {
+        const newTab = await chrome.tabs.create({ url: urlToOpen, active: false });
+        if (newTab && newTab.id) {
+            console.log(`FabQueueManager: Opened ${urlToOpen} in new tab ID: ${newTab.id}. Listing ID: ${listingId}. Active tabs: ${FabState.activeFabProcessingTabs}`);
+            addOpenedItemToVerificationQueue({
+                url: urlToOpen,
+                listingId: listingId,
+                tabId: newTab.id,
+                status: 'opened',
+                openTime: Date.now()
+            });
+        } else {
+            console.error(`FabQueueManager: Tab creation failed for ${urlToOpen} (newTab or newTab.id is undefined).`);
+            FabState.decrementActiveTabs();
+        }
+    } catch (error) {
+        console.error(`FabQueueManager: Error opening new tab for ${urlToOpen}:`, error);
+        FabState.decrementActiveTabs();
+    }
+
+    await FabState.saveFabState();
+
+    // Schedule next processing step if needed
+    if (FabState.getFabUrlQueueSize() > 0 && FabState.activeFabProcessingTabs < FabState.fabMaxConcurrentTabs) {
+        if (!processingScheduled) {
+            processingScheduled = true;
+            console.log(`FabQueueManager: Delaying ${FabState.fabDelayBetweenTabOpenMs / 1000}s before next tab open.`);
+            setTimeout(() => {
+                processingScheduled = false;
+                processFabTabQueue();
+            }, FabState.fabDelayBetweenTabOpenMs);
+        }
     }
 }
