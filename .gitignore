@@ -1,3 +1,5 @@
 414Extensions.zip
 *.7z
 414Extensions/Jules.md
+node_modules/
+package-lock.json
