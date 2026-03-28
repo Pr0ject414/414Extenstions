@@ -174,13 +174,14 @@ function deinit() {
     document.removeEventListener('keydown', handleGlobalKeyDownInternal);
     
     // Remove UI from all videos
-    document.querySelectorAll('.vsc-controller-host').forEach(el => el.remove());
+    activeHosts.forEach(el => el.remove());
+    activeHosts.clear();
 
     // Clear Dataset attached flag so we can re-attach later
-    const selector = currentConfig.options.audio ? 'video, audio' : 'video';
-    document.querySelectorAll(selector).forEach(v => {
+    attachedVideos.forEach(v => {
         delete v.dataset.vscAttached;
     });
+    attachedVideos.clear();
     
     // Clear Maps
     // (WeakMaps clear themselves when elements die, but we can't iterate them to clear specific data 
@@ -261,6 +262,9 @@ const videoAnchors = new WeakMap();
 // Track override state per video
 const videoOverrideState = new WeakMap(); // { active: bool, originalSpeed: number }
 
+const activeHosts = new Set();
+const attachedVideos = new Set();
+
 // Global Interaction Tracking (to guess triggers)
 let lastInteraction = { element: null, time: 0 };
 document.addEventListener('mousedown', (e) => {
@@ -277,6 +281,7 @@ function attachController(video, initialSpeed) {
         return;
     }
     video.dataset.vscAttached = 'true';
+    attachedVideos.add(video);
     
     // Attempt Initial Anchor (if created right after click)
     // REMOVED: This causes ghost overlays on X.com when "Load More" is clicked 
@@ -294,6 +299,7 @@ function attachController(video, initialSpeed) {
     
     // Create Host
     const host = document.createElement('div');
+    activeHosts.add(host);
     host.className = 'vsc-controller-host';
     host.style.position = 'fixed';
     host.style.zIndex = '2147483647';
@@ -461,6 +467,9 @@ function attachController(video, initialSpeed) {
         // If disabled or disconnected, remove and stop
         if (isGloballyDisabled || !video.isConnected) {
             host.remove();
+            activeHosts.delete(host);
+            attachedVideos.delete(video);
+            delete video.dataset.vscAttached;
             videoTargetSpeeds.delete(video);
             videoAnchors.delete(video);
             return;
@@ -635,8 +644,7 @@ document.addEventListener('mousedown', (e) => {
     }
 
     // 2. Find Video
-    const selector = currentConfig.options.audio ? 'video, audio' : 'video';
-    const videos = Array.from(document.querySelectorAll(selector));
+    const videos = Array.from(attachedVideos);
     
     const targetVideo = videos.find(video => {
         if (e.target === video) return true;
@@ -731,8 +739,7 @@ document.addEventListener('keydown', (e) => {
         // If already overriding, ignore active holds (but handle repeats if we were pending)
         if (overrideTriggeredByKey) return;
 
-        const selector = currentConfig.options.audio ? 'video, audio' : 'video';
-        const videos = Array.from(document.querySelectorAll(selector));
+        const videos = Array.from(attachedVideos);
         
         // Helper to find target
         const getTarget = () => {
@@ -787,8 +794,7 @@ document.addEventListener('keyup', (e) => {
              spaceKeyPending = false;
              
              // Toggle Play/Pause Manually
-             const selector = currentConfig.options.audio ? 'video, audio' : 'video';
-             const videos = Array.from(document.querySelectorAll(selector));
+             const videos = Array.from(attachedVideos);
              // Toggle specific target or all? Usually site toggles active one.
              // Best guess: Find playing -> pause. Else find first visible -> play.
              const playing = videos.find(v => !v.paused);
@@ -802,8 +808,7 @@ document.addEventListener('keyup', (e) => {
          else if (overrideTriggeredByKey) {
              // Released after Hold -> Stop Override
              overrideTriggeredByKey = false;
-             const selector = currentConfig.options.audio ? 'video, audio' : 'video';
-             const videos = Array.from(document.querySelectorAll(selector));
+             const videos = Array.from(attachedVideos);
              videos.forEach(v => triggerOverride(v, false));
          }
     }
@@ -868,8 +873,7 @@ function handleKeyDown(e) {
         return;
     }
     
-    const selector = currentConfig.options.audio ? 'video, audio' : 'video';
-    const videos = Array.from(document.querySelectorAll(selector));
+    const videos = Array.from(attachedVideos);
     // Prioritize playing, then active/anchored
     let target = videos.find(v => !v.paused);
     if (!target) {
@@ -891,7 +895,7 @@ function handleKeyDown(e) {
     if (!shortcut) return;
     
     if (shortcut.id === 'toggle') {
-        const hosts = document.querySelectorAll('.vsc-controller-host');
+        const hosts = activeHosts;
         hosts.forEach(h => h.classList.toggle('vsc-hidden'));
         document.body.classList.toggle('vsc-global-hidden');
     } 
@@ -937,7 +941,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       currentConfig.options = { ...currentConfig.options, ...changes[VSC_STORAGE_KEYS.OPTIONS].newValue };
       // Apply immediate visual effects?
       // Opacity / Display default
-      document.querySelectorAll('.vsc-controller-host').forEach(host => {
+      activeHosts.forEach(host => {
           if (host.shadowRoot) {
             const wrapper = host.shadowRoot.querySelector('.vsc-controller');
             if (wrapper) wrapper.style.opacity = currentConfig.options.hideDefault ? '0' : currentConfig.options.opacity;
