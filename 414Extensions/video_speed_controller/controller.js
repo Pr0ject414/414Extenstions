@@ -48,7 +48,6 @@ let currentConfig = {
 // -----------------------------------------------------------------------------
 // BLACKLIST LOGIC
 // -----------------------------------------------------------------------------
-// ... (Blacklist logic remains similar, but trigger init with config load) ...
 
 function checkBlacklistAndInit() {
   const hostname = window.location.hostname;
@@ -83,11 +82,11 @@ function checkBlacklistAndInit() {
         console.error('Error parsing blacklist pattern:', pattern, e);
       }
     }
-    
+
     // 2. Load Config
-    if (result[VSC_STORAGE_KEYS.SHORTCUTS]) currentConfig.shortcuts = result[VSC_STORAGE_KEYS.SHORTCUTS];
+    if (result[VSC_STORAGE_KEYS.SHORTCUTS]) currentConfig.shortcuts = result[VSC_STORAGE_KEYS.SHORTCUTS];       
     if (result[VSC_STORAGE_KEYS.OPTIONS]) currentConfig.options = result[VSC_STORAGE_KEYS.OPTIONS];
-    
+
     // 3. Load Saved Speed
     let savedSpeed = 1.0;
     if (currentConfig.options.rememberSpeed) {
@@ -107,14 +106,23 @@ function checkBlacklistAndInit() {
 let pageObserver = null;
 let isInitialized = false;
 let isGloballyDisabled = true; // Default to true until checked
+const activeHosts = new Set();
+const attachedVideos = new Set();
+
+// Track target speeds for enforcement
+const videoTargetSpeeds = new WeakMap();
+// Track anchors for invisible players
+const videoAnchors = new WeakMap();
+// Track override state per video
+const videoOverrideState = new WeakMap(); // { active: bool, originalSpeed: number }
 
 // Monitor Storage for Visibility/Enable changes
 chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace !== 'local') return;
-    
+
     const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED];
     const isVisible = changes[VSC_STORAGE_KEYS.VISIBLE];
-    
+
     if (isEnabled || isVisible) {
         // Re-evaluate state
         chrome.storage.local.get([VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.VISIBLE], (result) => {
@@ -147,10 +155,10 @@ function init(savedSpeed) {
   if (isInitialized) return;
   isInitialized = true;
   debugLog('Initializing Video Speed Controller', currentConfig);
-  
+
   // Observer
   observeVideos(savedSpeed);
-  
+
   // Mouse Enter
   document.addEventListener('mouseenter', handleMouseEnter, true);
 
@@ -162,17 +170,17 @@ function deinit() {
     if (!isInitialized) return;
     isInitialized = false;
     debugLog('De-initializing VSC');
-    
+
     // Disconnect Observer
     if (pageObserver) {
         pageObserver.disconnect();
         pageObserver = null;
     }
-    
+
     // Remove Global Listeners
     document.removeEventListener('mouseenter', handleMouseEnter, true);
     document.removeEventListener('keydown', handleGlobalKeyDownInternal);
-    
+
     // Remove UI from all videos
     activeHosts.forEach(el => el.remove());
     activeHosts.clear();
@@ -182,13 +190,6 @@ function deinit() {
         delete v.dataset.vscAttached;
     });
     attachedVideos.clear();
-    
-    // Clear Maps
-    // (WeakMaps clear themselves when elements die, but we can't iterate them to clear specific data 
-    // without tracking the keys. However, removing the UI stops the enforcement loops because 
-    // `syncPosition` checks `host.isConnected` or `video.isConnected`. 
-    // BUT, the enforcement loop `requestAnimationFrame` might keep running if we don't stop it.
-    // The loop checks `!video.isConnected` OR `host`. Since we removed host, loop should die.)
 }
 
 function observeVideos(initialSpeed) {
@@ -196,10 +197,10 @@ function observeVideos(initialSpeed) {
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType !== 1) return;
-        
+
         const isAudio = node.nodeName === 'AUDIO';
         const isVideo = node.nodeName === 'VIDEO';
-        
+
         if (isVideo || (isAudio && currentConfig.options.audio)) {
           attachController(node, initialSpeed);
         } else {
@@ -210,7 +211,7 @@ function observeVideos(initialSpeed) {
       });
     });
   });
-  
+
   pageObserver.observe(document.body, { childList: true, subtree: true });
   // Initial scan
   const selector = currentConfig.options.audio ? 'video, audio' : 'video';
@@ -255,16 +256,6 @@ function onMouseUp() {
     document.removeEventListener('mouseup', onMouseUp);
 }
 
-// Track target speeds for enforcement
-const videoTargetSpeeds = new WeakMap();
-// Track anchors for invisible players
-const videoAnchors = new WeakMap();
-// Track override state per video
-const videoOverrideState = new WeakMap(); // { active: bool, originalSpeed: number }
-
-const activeHosts = new Set();
-const attachedVideos = new Set();
-
 // Global Interaction Tracking (to guess triggers)
 let lastInteraction = { element: null, time: 0 };
 document.addEventListener('mousedown', (e) => {
@@ -282,39 +273,34 @@ function attachController(video, initialSpeed) {
     }
     video.dataset.vscAttached = 'true';
     attachedVideos.add(video);
-    
-    // Attempt Initial Anchor (if created right after click)
-    // REMOVED: This causes ghost overlays on X.com when "Load More" is clicked 
-    // and invisible preload videos are added. We will wait for 'play' or visibility.
-    // tryAnchor(video);
-    
+
     // Apply initial speed if provided and valid
     if (initialSpeed && initialSpeed !== 1.0) {
         video.playbackRate = initialSpeed;
     }
-    
+
     // Set initial target for enforcement
     videoTargetSpeeds.set(video, video.playbackRate);
     videoOverrideState.set(video, { active: false, originalSpeed: null });
-    
+
     // Create Host
     const host = document.createElement('div');
     activeHosts.add(host);
     host.className = 'vsc-controller-host';
     host.style.position = 'fixed';
     host.style.zIndex = '2147483647';
-    host.style.pointerEvents = 'none'; 
+    host.style.pointerEvents = 'none';
     host.style.top = '-9999px';
     host.style.left = '-9999px';
-    
+
     // Shadow DOM
     const shadow = host.attachShadow({ mode: 'open' });
-    
+
     // Styles
     const style = document.createElement('style');
     style.textContent = `
       .vsc-controller {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;       
         background: rgba(0, 0, 0, ${currentConfig.options.opacity});
         border-radius: 4px;
         color: #fff;
@@ -326,14 +312,14 @@ function attachController(video, initialSpeed) {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        opacity: ${currentConfig.options.hideDefault ? '0' : currentConfig.options.opacity}; 
+        opacity: ${currentConfig.options.hideDefault ? '0' : currentConfig.options.opacity};
         user-select: none;
       }
       .vsc-controller:hover {
         opacity: 1;
         background: rgba(0, 0, 0, 0.8);
       }
-      
+
       .vsc-btn {
         width: ${currentConfig.options.buttonSize}px;
         height: ${currentConfig.options.buttonSize}px;
@@ -354,59 +340,59 @@ function attachController(video, initialSpeed) {
       .vsc-btn:active {
         transform: scale(0.95);
       }
-      
+
       .vsc-value {
         font-weight: bold;
         min-width: 30px;
         text-align: center;
       }
-      
+
       .vsc-controls {
         display: none;
         gap: 4px;
       }
-      
+
       .vsc-controller:hover .vsc-controls {
         display: flex;
       }
-      
+
       :host(.vsc-hidden) .vsc-controller {
           display: none;
       }
     `;
     shadow.appendChild(style);
-    
+
     // Container
     const container = document.createElement('div');
     container.className = 'vsc-controller';
-    
+
     // Indicator
     const valueDisplay = document.createElement('span');
     valueDisplay.className = 'vsc-value';
     valueDisplay.textContent = video.playbackRate.toFixed(1);
-    
+
     // Controls
     const controls = document.createElement('div');
     controls.className = 'vsc-controls';
-    
+
     const btnDecrease = createBtn('-', () => updateSpeed(video, -0.1));
     const btnIncrease = createBtn('+', () => updateSpeed(video, 0.1));
     const btnRewind = createBtn('<<', () => { video.currentTime -= 10; });
     const btnAdvance = createBtn('>>', () => { video.currentTime += 10; });
     const btnReset = createBtn('R', () => updateSpeed(video, 0, true));
-    
+
     controls.append(btnDecrease, btnIncrease, btnRewind, btnAdvance, btnReset);
     container.append(valueDisplay, controls);
     shadow.appendChild(container);
-    
+
     // Attach Drag
     container.addEventListener('mousedown', onMouseDown);
     container.style.cursor = 'move';
-    
+
     // -------------------------------------------------------------------------
     // EVENT LISTENERS (Video)
     // -------------------------------------------------------------------------
-    
+
     // Listen for 'play' to late-bind anchor (e.g. pre-loaded audio starts playing on click)
     video.addEventListener('play', () => {
         if (!videoAnchors.has(video)) {
@@ -419,15 +405,15 @@ function attachController(video, initialSpeed) {
     function handleRateChange() {
         // Update UI immediately for responsiveness
         valueDisplay.textContent = video.playbackRate.toFixed(1);
-        
+
         // Check override state [FIX 2: Enforcement Conflict]
         const overrideState = videoOverrideState.get(video);
         const isOverriding = overrideState && overrideState.active;
-        
+
         // Force Enforcement Logic
         if (currentConfig.options.forceLastSaved && !isOverriding) {
             const target = videoTargetSpeeds.get(video);
-            
+
             // If strictly different
             if (target && Math.abs(video.playbackRate - target) > 0.05) {
                 // Do NOT correct immediately (causes synchronous thrashing/warnings)
@@ -437,7 +423,7 @@ function attachController(video, initialSpeed) {
                      // Re-check after letting the dust settle
                      const currentOverride = videoOverrideState.get(video);
                      if (currentOverride && currentOverride.active) return;
-                     
+
                      if (Math.abs(video.playbackRate - target) > 0.05) {
                          debugLog("Enforcing speed", target, "over", video.playbackRate);
                          video.playbackRate = target;
@@ -445,7 +431,7 @@ function attachController(video, initialSpeed) {
                 }, 500); // 500ms grace period
             }
         }
-        
+
         // If override is active, ensure we stay at override speed
         if (isOverriding) {
             const desired = currentConfig.options.keySpeed || 2.0;
@@ -456,12 +442,12 @@ function attachController(video, initialSpeed) {
             }
         }
     }
-    
+
     video.addEventListener('ratechange', handleRateChange);
-    
+
     // Append Host
     document.body.appendChild(host);
-    
+
     // Position Sync Loop
     function syncPosition() {
         // If disabled or disconnected, remove and stop
@@ -496,7 +482,7 @@ function attachController(video, initialSpeed) {
         // 2. Regular Positioning and Visibility
         const rect = video.getBoundingClientRect();
         const isInvisible = (video.nodeName === 'AUDIO' || (rect.width === 0 && rect.height === 0) || video.offsetParent === null);
-        
+
         let shouldShow = true;
         let posTop = 0;
         let posLeft = 0;
@@ -509,7 +495,7 @@ function attachController(video, initialSpeed) {
                 const anchor = videoAnchors.get(video);
                 shouldShow = !video.paused || (video.paused && !!anchor);
 
-                const anchorRect = (anchor && anchor.isConnected) ? anchor.getBoundingClientRect() : null;
+                const anchorRect = (anchor && anchor.isConnected) ? anchor.getBoundingClientRect() : null;      
                 posTop = (anchorRect ? anchorRect.bottom : 0) + 10 + dragOffset.y;
                 posLeft = (anchorRect ? anchorRect.left : 10) + dragOffset.x;
             }
@@ -528,35 +514,35 @@ function attachController(video, initialSpeed) {
 
         requestAnimationFrame(syncPosition);
     }
-    
+
     requestAnimationFrame(syncPosition);
 }
 
 function triggerOverride(video, active) {
     const state = videoOverrideState.get(video) || { active: false, originalSpeed: null };
     const overrideSpeed = currentConfig.options.keySpeed || 2.0;
-    
+
     if (active) {
         if (state.active) return; // Already active
-        
+
         state.active = true;
         state.originalSpeed = video.playbackRate;
         videoOverrideState.set(video, state);
-        
+
         // Apply speed
         video.playbackRate = overrideSpeed;
-        
+
     } else {
         if (!state.active) return; // Not active
-        
+
         state.active = false;
         const restoreSpeed = state.originalSpeed || 1.0;
         state.originalSpeed = null;
         videoOverrideState.set(video, state);
-        
+
         // Restore speed
         video.playbackRate = restoreSpeed;
-        
+
         // Sync target speed so enforcement doesn't fight the restore
         videoTargetSpeeds.set(video, restoreSpeed);
     }
@@ -578,15 +564,15 @@ document.addEventListener('mousedown', (e) => {
     if (isGloballyDisabled) return;
 
     // 1. Basic Filters: Ignore clicks on interactive elements, controls, or our own UI
-    if (e.button !== 0) return; 
-    
+    if (e.button !== 0) return;
+
     const excludedRoles = ['button', 'slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
     const roleSelector = excludedRoles.map(role => `[role="${role}"]`).join(',');
-    
+
     if (
-        e.target.tagName === 'BUTTON' || 
-        e.target.tagName === 'INPUT' || 
-        e.target.closest('a') || 
+        e.target.tagName === 'BUTTON' ||
+        e.target.tagName === 'INPUT' ||
+        e.target.closest('a') ||
         e.target.closest(roleSelector) ||
         e.target.closest('.vsc-controller-host') ||
         e.target.closest('[aria-label="Volume slider"]')
@@ -608,7 +594,7 @@ document.addEventListener('mousedown', (e) => {
 
     // 2. Find Video
     const videos = Array.from(attachedVideos);
-    
+
     const targetVideo = videos.find(video => {
         if (e.target === video) return true;
         const rect = video.getBoundingClientRect();
@@ -621,13 +607,13 @@ document.addEventListener('mousedown', (e) => {
     if (targetVideo) {
         // Delay activation to distinguish click vs hold
         const delayMs = 500;
-        
+
         const timerId = setTimeout(() => {
             overrideTriggeredByMouse = true;
             shouldSuppressClick = true; // Prepare to kill the click
             triggerOverride(targetVideo, true);
         }, delayMs);
-        
+
         const onRelease = (e) => {
              // Blur Event
              if (e && e.type === 'blur' && e.target !== window) {
@@ -635,10 +621,10 @@ document.addEventListener('mousedown', (e) => {
              }
 
              clearTimeout(timerId);
-             
+
              if (overrideTriggeredByMouse) {
                  overrideTriggeredByMouse = false;
-                 
+
                  // Strategy: Allow mouseup to propagate (fixes UI stickiness)
                  // But FORCE video to play if the site paused it (fixes pause bug)
                  setTimeout(() => {
@@ -651,11 +637,11 @@ document.addEventListener('mousedown', (e) => {
                  if (!overrideTriggeredByKey) {
                      triggerOverride(targetVideo, false);
                  }
-                 
+
                  // we still suppress the following click just in case
                  setTimeout(() => shouldSuppressClick = false, 100);
              }
-             
+
              // Clean up all listeners
              document.removeEventListener('mouseup', onRelease, true);
              document.removeEventListener('dragend', onRelease, true);
@@ -663,7 +649,7 @@ document.addEventListener('mousedown', (e) => {
              window.removeEventListener('blur', onRelease, true);
              document.removeEventListener('mousemove', onMouseMoveCheck, true);
         };
-        
+
         // Dead Man's Switch: If mouse moves and buttons are 0, we missed the release.
         const onMouseMoveCheck = (e) => {
             if (e.buttons === 0) {
@@ -703,7 +689,7 @@ document.addEventListener('keydown', (e) => {
         if (overrideTriggeredByKey) return;
 
         const videos = Array.from(attachedVideos);
-        
+
         // Helper to find target
         const getTarget = () => {
             let t = videos.find(v => !v.paused);
@@ -746,7 +732,7 @@ document.addEventListener('keyup', (e) => {
 
     if (e.code === 'Space') {
          if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
-         
+
          // Always stop prop for Space if we are managing it
          e.stopImmediatePropagation();
          e.preventDefault();
@@ -755,7 +741,7 @@ document.addEventListener('keyup', (e) => {
              // Released before timer -> TAP
              clearTimeout(spaceTimer);
              spaceKeyPending = false;
-             
+
              // Toggle Play/Pause Manually
              const videos = Array.from(attachedVideos);
              // Toggle specific target or all? Usually site toggles active one.
@@ -784,7 +770,7 @@ function tryAnchor(video) {
     if (lastInteraction.element && (Date.now() - lastInteraction.time < 2000)) {
         const isInvisible = (video.nodeName === 'AUDIO' || (video.offsetWidth === 0 && video.offsetHeight === 0));
         // Also check if video is playing?
-        
+
         if (isInvisible) {
             debugLog('Anchoring invisible controller to:', lastInteraction.element);
             videoAnchors.set(video, lastInteraction.element);
@@ -815,13 +801,13 @@ function updateSpeed(video, diff, reset = false, targetValue = null) {
     } else {
         newRate = Math.max(0.1, Math.min(16, video.playbackRate + diff));
     }
-    
+
     const finalRate = parseFloat(newRate.toFixed(2));
     video.playbackRate = finalRate;
-    
+
     // Update our target so we don't fight ourselves
     videoTargetSpeeds.set(video, finalRate);
-    
+
     // Save speed to storage (Persistence)
     if (currentConfig.options.rememberSpeed) {
         chrome.storage.local.set({ [VSC_STORAGE_KEYS.SPEED]: finalRate });
@@ -835,7 +821,7 @@ function handleKeyDown(e) {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) {
         return;
     }
-    
+
     const videos = Array.from(attachedVideos);
     // Prioritize playing, then active/anchored
     let target = videos.find(v => !v.paused);
@@ -849,19 +835,18 @@ function handleKeyDown(e) {
         });
     }
     if (!target && videos.length > 0) target = videos[0];
-    
+
     if (!target) return;
-    
+
     const key = e.key.toLowerCase();
-    
+
     const shortcut = currentConfig.shortcuts.find(s => s.key.toLowerCase() === key);
     if (!shortcut) return;
-    
+
     if (shortcut.id === 'toggle') {
-        const hosts = activeHosts;
-        hosts.forEach(h => h.classList.toggle('vsc-hidden'));
+        activeHosts.forEach(h => h.classList.toggle('vsc-hidden'));
         document.body.classList.toggle('vsc-global-hidden');
-    } 
+    }
     else if (shortcut.id === 'decrease') {
         updateSpeed(target, -shortcut.value);
     }
@@ -888,7 +873,7 @@ checkBlacklistAndInit();
 // Storage Listener for Real-Time Updates
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace !== 'local') return;
-  
+
   // 1. Master Switch
   if (changes[VSC_STORAGE_KEYS.IS_ENABLED]) {
       const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED].newValue;
@@ -898,10 +883,10 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           checkBlacklistAndInit();
       }
   }
-  
+
   // 2. Options Update (Speed, Opacity, etc.)
   if (changes[VSC_STORAGE_KEYS.OPTIONS]) {
-      currentConfig.options = { ...currentConfig.options, ...changes[VSC_STORAGE_KEYS.OPTIONS].newValue };
+      currentConfig.options = { ...currentConfig.options, ...changes[VSC_STORAGE_KEYS.OPTIONS].newValue };      
       // Apply immediate visual effects?
       // Opacity / Display default
       activeHosts.forEach(host => {
@@ -913,35 +898,17 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           }
       });
   }
-  
+
   // 3. Blacklist Update
   if (changes[VSC_STORAGE_KEYS.BLACKLIST]) {
-       // if current site is now blacklisted, deinit.
-       // if current site was blacklisted but now isn't, init.
-       // Easiest is to re-run check logic.
-       // But if we are already init, we need to check if we should STOP.
-       // if we are stopped, check if we should START.
-       
-       // Force re-check
        if (isInitialized) {
-            checkBlacklistAndInit(); // Will handle disabling if needed? 
-            // Actually checkBlacklistAndInit calls init(). It doesn't deinit.
-            // We need logic to deinit if currently blacklisted.
-            
+            checkBlacklistAndInit(); 
+
             const hostname = window.location.hostname;
             const newBlacklist = changes[VSC_STORAGE_KEYS.BLACKLIST].newValue || '';
             let isBlacklisted = false;
-            // Quick check
-            // ... (Duping regex logic is annoying, maybe extract?)
-            // Just running checkBlacklistAndInit is safer if we Modify it to handle "Already Init -> Should Disable" case.
-            // For now, let's implement a naive check here or reloading page is acceptable for *blacklist* specifically? 
-            // User requested "popup changes" (speed/enable) to be instant. Blacklist slightly less critical but nice.
             
-            // Let's rely on standard reload for Blacklist to ensure cleanliness?
-            // User: "Making changes on the popup requires me to reload". Implies ALL changes.
-            
-            // Re-run full check.
-            deinit(); 
+            deinit();
             checkBlacklistAndInit();
        } else {
            checkBlacklistAndInit();
