@@ -161,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderShortcuts(shortcuts) {
         if (!vscShortcutsContainer) return;
-        vscShortcutsContainer.innerHTML = '';
+        vscShortcutsContainer.replaceChildren();
         
         shortcuts.forEach(sc => {
             const row = document.createElement('div');
