@@ -1,6 +1,6 @@
 // KylesChromeExtensions/fab_extension/background_modules/fabState.js
 import * as FabConstants from './fabConstants.js';
-import { loadStateFromStorage, saveStateToStorage } from '../../../shared_modules/storageUtils.js';
+import { loadStateFromStorage, saveStateToStorage } from '../../shared_modules/storageUtils.js';
 
 // --- FAB Specific State ---
 export let fabUrlQueue = [];
