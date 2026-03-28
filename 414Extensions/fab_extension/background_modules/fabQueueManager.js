@@ -26,7 +26,6 @@ export function addUrlToQueueAndProcess(url) {
         FabState.saveFabState();
 
         if (!FabState.fabQueueProcessingEnabled) {
-            console.log("FabQueueManager: Item queued but queue processing is disabled. URL:", url);
             return { status: "queued_processing_disabled" };
         }
         if (FabState.autoProcessingSuspended) {
