@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { saveToStorage, loadFromStorage, loadStateFromStorage, saveStateToStorage } from './storageUtils.js';
+import { saveToStorage, loadFromStorage, loadStateFromStorage, saveStateToStorage } from '../../shared_modules/storageUtils.js';
 
 global.chrome = {
     storage: {
@@ -29,7 +29,7 @@ describe('storageUtils', () => {
         it('should reject on error', async () => {
             chrome.runtime.lastError = { message: 'Save error' };
             chrome.storage.local.set.mockImplementation((obj, callback) => callback());
-            await expect(saveToStorage('testKey', 'testValue')).rejects.toEqual({ message: 'Save error' });
+            await expect(saveToStorage('testKey', 'testValue')).rejects.toEqual({ message: 'Save error' });     
         });
     });
 
@@ -62,6 +62,28 @@ describe('storageUtils', () => {
             chrome.storage.local.get.mockImplementation((keys, callback) => callback({}));
             await expect(loadStateFromStorage({ key: 'default' })).rejects.toEqual({ message: 'Load state error' });
         });
+
+        it('should handle keys with null or false values in storage correctly (not use default)', async () => {   
+            const keysWithDefaults = {
+                key1: 'default1',
+                key2: 'default2'
+            };
+            const storageResult = {
+                key1: null,
+                key2: false
+            };
+
+            chrome.storage.local.get.mockImplementation((keys, callback) => {
+                callback(storageResult);
+            });
+
+            const result = await loadStateFromStorage(keysWithDefaults);
+
+            expect(result).toEqual({
+                key1: null,
+                key2: false
+            });
+        });
     });
 
     describe('saveStateToStorage', () => {
@@ -75,7 +97,7 @@ describe('storageUtils', () => {
         it('should reject on error', async () => {
             chrome.runtime.lastError = { message: 'Save state error' };
             chrome.storage.local.set.mockImplementation((obj, callback) => callback());
-            await expect(saveStateToStorage({ key: 'val' })).rejects.toEqual({ message: 'Save state error' });
+            await expect(saveStateToStorage({ key: 'val' })).rejects.toEqual({ message: 'Save state error' });  
         });
     });
 });
