@@ -14,7 +14,6 @@ export function setupVerificationAlarm() {
                 delayInMinutes: 1, // Start after 1 minute
                 periodInMinutes: 1  // Check every 1 minute
             });
-            console.log("Verification: Main alarm created.");
         }
     });
 }
@@ -30,7 +29,6 @@ export function markItemForVerificationOnTabClose(tabId) {
     if (vQueueIndex > -1) {
         FabState.verificationQueue[vQueueIndex].status = 'pending_verification';
         FabState.verificationQueue[vQueueIndex].closeTime = Date.now();
-        console.log(`Verification: Item ${FabState.verificationQueue[vQueueIndex].listingId} (Tab ID: ${tabId}) marked for verification.`);
         return true;
     }
     return false;
@@ -39,16 +37,13 @@ export function markItemForVerificationOnTabClose(tabId) {
 export async function handleVerificationAlarm() {
     // Correctly use AppState for global switches and rate limiting
     if (!AppState.globalMasterSwitchEnabled) {
-        console.log(`Verification: Global Master switch is OFF. Verification alarm handling paused.`);
         return;
     }
     if (!AppState.fabModuleEnabled) {
-        console.log(`Verification: FAB Module switch is OFF. FAB verification alarm handling paused.`);
         return;
     }
 
     if (AppState.isRateLimited()) {
-        console.log(`Verification: Paused due to global rate limit. Cool down until: ${new Date(AppState.rateLimitCoolDownUntil).toLocaleTimeString()}`);
         // Assuming FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX is correctly defined in FabConstants
         const resumeAlarmName = FabConstants.FAB_VERIFICATION_ALARM_NAME + FabConstants.FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX;
         chrome.alarms.get(resumeAlarmName, (existingAlarm) => {
@@ -69,7 +64,6 @@ export async function handleVerificationAlarm() {
     if (itemsDueForVerification.length === 0) {
         return;
     }
-    console.log(`Verification: Processing ${itemsDueForVerification.length} item(s) for verification.`);
 
     let stateChangedDuringThisAlarmCycle = false;
 
@@ -78,11 +72,9 @@ export async function handleVerificationAlarm() {
 
         // Correctly use AppState for global switches
         if (!AppState.globalMasterSwitchEnabled) {
-            console.log(`Verification: Global Master switch turned OFF mid-batch. Pausing verification.`);
             break;
         }
         if (!AppState.fabModuleEnabled) {
-            console.log(`Verification: FAB Module switch turned OFF mid-batch. Pausing FAB verification.`);
             break;
         }
 
@@ -93,7 +85,6 @@ export async function handleVerificationAlarm() {
 
         // Correctly use AppState for rate limiting check and state
         if (AppState.isRateLimited()) {
-            console.log("Verification: Global rate limit hit during batch processing. Pausing current batch.");
             const resumeAlarmName = FabConstants.FAB_VERIFICATION_ALARM_NAME + FabConstants.FAB_VERIFICATION_RESUME_ALARM_NAME_SUFFIX;
             chrome.alarms.get(resumeAlarmName, (existingAlarm) => {
                 if (!existingAlarm || (existingAlarm && existingAlarm.scheduledTime > AppState.rateLimitCoolDownUntil + 5000)) {
@@ -111,7 +102,6 @@ export async function handleVerificationAlarm() {
             stateChangedDuringThisAlarmCycle = true;
             continue;
         }
-        console.log(`Verification: Checking ownership for listing ${item.listingId} from URL ${item.url}`);
         try {
             const response = await fetchWithBackoff(
                 `https://www.fab.com/i/listings/${item.listingId}/ownership`,
@@ -132,7 +122,7 @@ export async function handleVerificationAlarm() {
                 item.status = 'verification_error_rate_limit';
             } else if (response.ok) {
                 if (response.status === 204) {
-                    console.log(`Verification: Ownership API for ${item.listingId}: No specific licenses owned (204).`);
+                    // No specific licenses owned
                 } else {
                     const contentType = response.headers.get("content-type");
                     if (contentType && contentType.includes("application/json")) {
@@ -140,8 +130,6 @@ export async function handleVerificationAlarm() {
                         ownsFreePersonalLicense = ownedLicenses.some(
                             license => license.name && license.name.toLowerCase() === 'personal' && license.slug && license.slug.toLowerCase() === 'personal'
                         );
-                    } else {
-                         console.log(`Verification: Ownership API for ${item.listingId}: Response not JSON. Status: ${response.status}, Content-Type: ${contentType}`);
                     }
                 }
             } else {
@@ -150,7 +138,6 @@ export async function handleVerificationAlarm() {
             }
 
             if (ownsFreePersonalLicense) {
-                console.log(`Verification: SUCCESS - Item ${item.listingId} is in library.`);
                 item.status = 'verified_owned';
             } else if (item.status !== 'verification_error_rate_limit' && item.status !== 'verification_error_api_fail' && item.status !== 'verification_error_exception' && item.status !== 'verification_error_no_id') {
                 console.error(`Verification: FAILED - Item ${item.listingId} was NOT found in library.`);
@@ -203,9 +190,5 @@ export async function handleVerificationAlarm() {
              // FabState.setSuspended(shouldBeSuspended); // setSuspended is already called above when a failure occurs
         }
         await FabState.saveFabState(); // Correctly save FAB-specific state
-    }
-
-    if (FabState.autoProcessingSuspended) {
-        console.log("Verification: Auto-processing has been suspended due to failure(s).");
     }
 }
