@@ -11,7 +11,7 @@ window.FabContentModules = window.FabContentModules || {};
 
     function isItemFree(item) {
         // Find all potential "Free" text elements within the item card.
-        const candidates = item.querySelectorAll('.fabkit-Typography-root.fabkit-Typography--intent-primary');
+        const candidates = item.querySelectorAll('.fabkit-Typography-root.fabkit-Typography--intent-primary');  
         for (const el of candidates) {
             // Ensure we're not grabbing the price of a different item if the selector is too broad
             // and that it's not a link.
@@ -21,19 +21,19 @@ window.FabContentModules = window.FabContentModules || {};
         }
         return false;
     }
-    
+
     // Using your original function name: processItem
     function processItem(item) {
         // Stop if the item has already been hidden by another process
         if (item.getAttribute('data-fab-hidden') === 'true') return;
-        
-        const itemLinkElement = item.querySelector('a.fabkit-Typography-root.bc6TaIqU.fabkit-Focusable-root');
+
+        const itemLinkElement = item.querySelector('a.fabkit-Typography-root.bc6TaIqU.fabkit-Focusable-root');  
         if (!itemLinkElement) return;
 
         const itemUrl = itemLinkElement.href;
         // Stop if we don't have a URL or if we are already handling this URL
         if (!itemUrl || processedUrls.has(itemUrl)) return;
-        
+
         // Stop if the item is already marked as owned in the UI
         if (item.querySelector('i.fabkit-Icon--intent-success')) return;
 
@@ -43,7 +43,7 @@ window.FabContentModules = window.FabContentModules || {};
 
             // This setTimeout block creates the "grace period."
             setTimeout(() => {
-                // CORE LOGIC: After the grace period, we check if the item is still physically on the page.
+                // CORE LOGIC: After the grace period, we check if the item is still physically on the page.    
                 // If the user scrolled away quickly, the browser's virtual scrolling will have removed it from the DOM.
                 if (!document.body.contains(item)) {
                     // The user scrolled past. Abort processing and remove from our tracking set
@@ -52,7 +52,7 @@ window.FabContentModules = window.FabContentModules || {};
                     return;
                 }
 
-                // If we reach here, the item is still visible. It's time to hide it and queue it for opening.
+                // If we reach here, the item is still visible. It's time to hide it and queue it for opening.  
                 item.style.display = 'none';
                 item.setAttribute('data-fab-hidden', 'true');
 
@@ -73,26 +73,34 @@ window.FabContentModules = window.FabContentModules || {};
             }, graceCyclesMs); // Use the grace period duration passed from settings.
         }
     }
-    
+
     let scanInterval = null;
+    let browsePageItems = null; // Live HTMLCollection for optimization
 
     FabContentModules.initializeAutoOpener = function(settings) {
         if (autoOpenerObserver) autoOpenerObserver.disconnect();
         if (scanInterval) clearInterval(scanInterval);
 
         graceCyclesMs = settings.graceCyclesMs; // Load the grace period delay from the main content script settings
-        
+
+        // Use a live HTMLCollection for better performance over querySelectorAll.
+        // It's maintained by the browser engine and doesn't require a full DOM scan on each call.
+        browsePageItems = document.getElementsByClassName('nTa5u2sc');
+
         const scanPage = () => {
-             document.querySelectorAll('div.nTa5u2sc').forEach(processItem);
+            // Convert to array or use Array.prototype.forEach since HTMLCollection
+            // might not have forEach in all environments (though usually fine in modern Chrome).
+            Array.prototype.forEach.call(browsePageItems, processItem);
         };
 
         // Initial Scan
         scanPage();
-        
+
         // Periodic Re-scan (Safety Net)
         // This ensures that if the observer misses something or if the DOM settles in a way that reveals new items,
         // we catch them. It also keeps the "loop" going.
-        scanInterval = setInterval(scanPage, 2000);
+        // Throttled to 10 seconds to reduce background CPU usage as the MutationObserver is the primary trigger.
+        scanInterval = setInterval(scanPage, 10000);
 
         // Set up the observer to watch for new items that get added to the page as the user scrolls.
         autoOpenerObserver = new MutationObserver((mutations) => {
@@ -104,15 +112,15 @@ window.FabContentModules = window.FabContentModules || {};
                                 processItem(node);
                             }
                             // Also deep check in case a container was added
-                            if (node.querySelectorAll) {
-                                node.querySelectorAll('div.nTa5u2sc').forEach(processItem);
+                            if (node.getElementsByClassName) {
+                                Array.prototype.forEach.call(node.getElementsByClassName('nTa5u2sc'), processItem);
                             }
                         }
                     });
                 }
             }
         });
-        
+
         autoOpenerObserver.observe(document.body, { childList: true, subtree: true });
     };
 
