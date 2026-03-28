@@ -20,7 +20,7 @@ global.console = {
     error: jest.fn()
 };
 
-import { isRateLimited, setRateLimitCoolDown, rateLimitCoolDownUntil } from './appState.js';
+import { isRateLimited, setRateLimitCoolDown, rateLimitCoolDownUntil } from '../../shared_modules/appState.js';
 
 describe('appState - Rate Limiting', () => {
     beforeEach(() => {

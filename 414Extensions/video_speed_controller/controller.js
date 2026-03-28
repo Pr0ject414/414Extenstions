@@ -1,5 +1,7 @@
 const VSC_STORAGE_KEYS = {
-  SPEED: 'vsc_speed',
+  SPEED: 'vsc_speed', // Deprecated, migrable to Global Default
+  SITE_SPEEDS: 'vsc_site_speeds',
+  GLOBAL_DEFAULT_SPEED: 'vsc_global_default_speed',
   BLACKLIST: 'vsc_blacklist',
   IS_ENABLED: 'vsc_is_enabled',
   VISIBLE: 'isVscModuleVisible',
@@ -51,7 +53,16 @@ let currentConfig = {
 
 function checkBlacklistAndInit() {
   const hostname = window.location.hostname;
-  chrome.storage.local.get([VSC_STORAGE_KEYS.BLACKLIST, VSC_STORAGE_KEYS.SHORTCUTS, VSC_STORAGE_KEYS.OPTIONS, VSC_STORAGE_KEYS.SPEED, VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.VISIBLE], (result) => {
+  chrome.storage.local.get([
+      VSC_STORAGE_KEYS.BLACKLIST, 
+      VSC_STORAGE_KEYS.SHORTCUTS, 
+      VSC_STORAGE_KEYS.OPTIONS, 
+      VSC_STORAGE_KEYS.SITE_SPEEDS, 
+      VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED,
+      VSC_STORAGE_KEYS.SPEED, // For migration
+      VSC_STORAGE_KEYS.IS_ENABLED, 
+      VSC_STORAGE_KEYS.VISIBLE
+  ], (result) => {
     // 0. Master Switch & Visibility Check
     if (result[VSC_STORAGE_KEYS.IS_ENABLED] === false || result[VSC_STORAGE_KEYS.VISIBLE] === false) {
         debugLog('VSC is disabled globally or hidden.');
@@ -87,11 +98,31 @@ function checkBlacklistAndInit() {
     if (result[VSC_STORAGE_KEYS.SHORTCUTS]) currentConfig.shortcuts = result[VSC_STORAGE_KEYS.SHORTCUTS];       
     if (result[VSC_STORAGE_KEYS.OPTIONS]) currentConfig.options = result[VSC_STORAGE_KEYS.OPTIONS];
 
-    // 3. Load Saved Speed
-    let savedSpeed = 1.0;
+    // 3. Migration & Speed Loading
+    let siteSpeeds = result[VSC_STORAGE_KEYS.SITE_SPEEDS] || {};
+    let globalDefault = result[VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED];
+    let oldGlobal = result[VSC_STORAGE_KEYS.SPEED];
+
+    // Migrate oldGlobal to globalDefault if it exists and default doesn't
+    if (oldGlobal !== undefined && globalDefault === undefined) {
+        globalDefault = oldGlobal;
+        chrome.storage.local.set({ [VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED]: globalDefault });
+        // Optional: chrome.storage.local.remove(VSC_STORAGE_KEYS.SPEED);
+    }
+
+    let savedSpeed = DEFAULT_SPEED; // 1.0
+
     if (currentConfig.options.rememberSpeed) {
-        savedSpeed = result[VSC_STORAGE_KEYS.SPEED];
-        if (!savedSpeed || typeof savedSpeed !== 'number') savedSpeed = 1.0;
+        // Priority 1: Site specific
+        if (siteSpeeds[hostname] !== undefined) {
+            savedSpeed = siteSpeeds[hostname];
+        } 
+        // Priority 2: Global Default
+        else if (globalDefault !== undefined) {
+            savedSpeed = globalDefault;
+        }
+
+        if (typeof savedSpeed !== 'number') savedSpeed = DEFAULT_SPEED;
     }
 
     init(savedSpeed);
@@ -810,7 +841,12 @@ function updateSpeed(video, diff, reset = false, targetValue = null) {
 
     // Save speed to storage (Persistence)
     if (currentConfig.options.rememberSpeed) {
-        chrome.storage.local.set({ [VSC_STORAGE_KEYS.SPEED]: finalRate });
+        const hostname = window.location.hostname;
+        chrome.storage.local.get([VSC_STORAGE_KEYS.SITE_SPEEDS], (result) => {
+            const siteSpeeds = result[VSC_STORAGE_KEYS.SITE_SPEEDS] || {};
+            siteSpeeds[hostname] = finalRate;
+            chrome.storage.local.set({ [VSC_STORAGE_KEYS.SITE_SPEEDS]: siteSpeeds });
+        });
     }
 }
 
@@ -869,6 +905,15 @@ function handleKeyDown(e) {
 
 // Start
 checkBlacklistAndInit();
+
+if (typeof window !== 'undefined') {
+    window.VSC = {
+        updateSpeed,
+        VSC_STORAGE_KEYS,
+        DEFAULT_VSC_OPTIONS,
+        checkBlacklistAndInit
+    };
+}
 
 // Storage Listener for Real-Time Updates
 chrome.storage.onChanged.addListener((changes, namespace) => {

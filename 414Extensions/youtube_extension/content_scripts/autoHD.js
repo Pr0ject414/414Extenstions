@@ -375,4 +375,11 @@
         init();
     }
 
+    if (typeof window !== 'undefined') {
+        window.YouTubeAutoHD = {
+            parseQualityLabel,
+            state
+        };
+    }
+
 })();

@@ -497,4 +497,14 @@
 
     console.log("X Env: Prototype hijacking applied (Mute & Volume).");
 
+    if (typeof window !== 'undefined') {
+        window.XEnv = {
+            allowedUnmuted,
+            shadowMutedState,
+            get isModuleEnabled() { return isModuleEnabled; },
+            get alwaysMuteEnabled() { return alwaysMuteEnabled; },
+            get currentVolume() { return currentVolume; }
+        };
+    }
+
 })();
