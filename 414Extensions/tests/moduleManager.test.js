@@ -1,82 +1,141 @@
-import test from 'node:test';
-import assert from 'node:assert';
 import { ModuleManager } from '../shared_modules/moduleManager.js';
+import { jest } from '@jest/globals';
 
-test('ModuleManager.initializeAll()', async (t) => {
-    await t.test('should call init on all registered modules with an init function', async () => {
-        const manager = new ModuleManager();
-        let init1Called = false;
-        let init2Called = false;
+describe('ModuleManager', () => {
+    let moduleManager;
 
-        manager.register({
-            init: async () => { init1Called = true; }
-        }, { actions: ['action1'] });
-
-        manager.register({
-            init: async () => { init2Called = true; }
-        }, { actions: ['action2'] });
-
-        await manager.initializeAll();
-
-        assert.strictEqual(init1Called, true, 'First module init was not called');
-        assert.strictEqual(init2Called, true, 'Second module init was not called');
+    beforeEach(() => {
+        moduleManager = new ModuleManager();
     });
 
-    await t.test('should handle modules without an init function', async () => {
-        const manager = new ModuleManager();
-        let init1Called = false;
+    describe('register', () => {
+        it('should successfully register a valid module', () => {
+            const mockModule = { handleMessage: jest.fn() };
+            const config = { actions: ['action1', 'action2'] };
 
-        manager.register({
-            init: async () => { init1Called = true; }
-        }, { actions: ['action1'] });
+            moduleManager.register(mockModule, config);
 
-        manager.register({
-            // No init function
-        }, { actions: ['action2'] });
+            expect(moduleManager.modules).toHaveLength(1);
+            expect(moduleManager.modules[0].handler).toBe(mockModule);
+            expect(moduleManager.modules[0].actions).toEqual(new Set(config.actions));
+        });
 
-        await manager.initializeAll();
+        it('should not register if module is missing', () => {
+            const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+            const config = { actions: ['action1'] };
 
-        assert.strictEqual(init1Called, true, 'Module with init was not called');
+            moduleManager.register(null, config);
+
+            expect(moduleManager.modules).toHaveLength(0);
+            expect(consoleSpy).toHaveBeenCalledWith(
+                "ModuleManager: Invalid module registration.",
+                null,
+                config
+            );
+            consoleSpy.mockRestore();
+        });
+
+        it('should not register if config is missing', () => {
+            const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+            const mockModule = { handleMessage: jest.fn() };
+
+            moduleManager.register(mockModule, null);
+
+            expect(moduleManager.modules).toHaveLength(0);
+            expect(consoleSpy).toHaveBeenCalledWith(
+                "ModuleManager: Invalid module registration.",
+                mockModule,
+                null
+            );
+            consoleSpy.mockRestore();
+        });
+
+        it('should not register if config.actions is not an array', () => {
+            const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+            const mockModule = { handleMessage: jest.fn() };
+            const config = { actions: 'not-an-array' };
+
+            moduleManager.register(mockModule, config);
+
+            expect(moduleManager.modules).toHaveLength(0);
+            expect(consoleSpy).toHaveBeenCalledWith(
+                "ModuleManager: Invalid module registration.",
+                mockModule,
+                config
+            );
+            consoleSpy.mockRestore();
+        });
     });
 
-    await t.test('should await asynchronous init calls', async () => {
-        const manager = new ModuleManager();
-        let executionOrder = [];
+    describe('initializeAll', () => {
+        it('should call init on all registered modules with an init function', async () => {
+            let init1Called = false;
+            let init2Called = false;
 
-        manager.register({
-            init: async () => {
-                await new Promise(resolve => setTimeout(resolve, 50));
-                executionOrder.push('module1');
-            }
-        }, { actions: ['action1'] });
+            moduleManager.register({
+                init: async () => { init1Called = true; }
+            }, { actions: ['action1'] });
 
-        manager.register({
-            init: async () => {
-                executionOrder.push('module2');
-            }
-        }, { actions: ['action2'] });
+            moduleManager.register({
+                init: async () => { init2Called = true; }
+            }, { actions: ['action2'] });
 
-        await manager.initializeAll();
+            await moduleManager.initializeAll();
 
-        assert.deepStrictEqual(executionOrder, ['module1', 'module2'], 'Modules did not finish in correct order');
-    });
+            expect(init1Called).toBe(true);
+            expect(init2Called).toBe(true);
+        });
 
-    await t.test('should work when no modules are registered', async () => {
-        const manager = new ModuleManager();
-        await manager.initializeAll();
-        // Should not throw and finish successfully
-        assert.ok(true);
-    });
+        it('should handle modules without an init function', async () => {
+            let init1Called = false;
 
-    await t.test('should handle synchronous init functions', async () => {
-        const manager = new ModuleManager();
-        let initCalled = false;
+            moduleManager.register({
+                init: async () => { init1Called = true; }
+            }, { actions: ['action1'] });
 
-        manager.register({
-            init: () => { initCalled = true; }
-        }, { actions: ['action1'] });
+            moduleManager.register({
+                // No init function
+            }, { actions: ['action2'] });
 
-        await manager.initializeAll();
-        assert.strictEqual(initCalled, true);
+            await moduleManager.initializeAll();
+
+            expect(init1Called).toBe(true);
+        });
+
+        it('should await asynchronous init calls', async () => {
+            let executionOrder = [];
+
+            moduleManager.register({
+                init: async () => {
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    executionOrder.push('module1');
+                }
+            }, { actions: ['action1'] });
+
+            moduleManager.register({
+                init: async () => {
+                    executionOrder.push('module2');
+                }
+            }, { actions: ['action2'] });
+
+            await moduleManager.initializeAll();
+
+            expect(executionOrder).toEqual(['module1', 'module2']);
+        });
+
+        it('should work when no modules are registered', async () => {
+            await expect(moduleManager.initializeAll()).resolves.toBeUndefined();
+        });
+
+        it('should handle synchronous init functions', async () => {
+            let initCalled = false;
+
+            moduleManager.register({
+                init: () => { initCalled = true; }
+            }, { actions: ['action1'] });
+
+            await moduleManager.initializeAll();
+            expect(initCalled).toBe(true);
+        });
     });
 });
