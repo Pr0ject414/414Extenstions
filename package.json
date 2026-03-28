@@ -1,0 +1,12 @@
+{
+  "name": "414-extensions",
+  "version": "1.0.0",
+  "description": "Extensions for Automating Annoying Tasks",
+  "type": "module",
+  "scripts": {
+    "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest"
+  },
+  "devDependencies": {
+    "jest": "^30.1.3"
+  }
+}
