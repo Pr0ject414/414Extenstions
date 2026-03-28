@@ -18,8 +18,6 @@ export function onGlobalStateChange() {
 
 function handle429(details) {
     if (details.statusCode === 429) {
-        console.log("FabBackground (webRequest): Detected a 429 status code.");
-        
         let coolDownUntil = Date.now() + AppState.globalMaxDelayMs; // Default fallback
 
         // Attempt to parse Retry-After header
@@ -39,9 +37,6 @@ function handle429(details) {
                     coolDownUntil = dateVal;
                 }
             }
-            console.log(`FabBackground: Parsed Retry-After/RateLimit-Reset header: ${val}. Cooldown until ${new Date(coolDownUntil).toISOString()}`);
-        } else {
-            console.log("FabBackground: No Retry-After header found. Using default global cooldown.");
         }
 
         if (AppState.setRateLimitCoolDown(coolDownUntil)) {
@@ -51,7 +46,6 @@ function handle429(details) {
             chrome.alarms.create(FabConstants.FAB_RATE_LIMIT_EXPIRY_ALARM_NAME, {
                 when: coolDownUntil
             });
-            console.log(`FabBackground: Scheduled wake-up alarm for ${new Date(coolDownUntil).toISOString()}`);
             
             // The global coordinator will broadcast the state change to content scripts
         }
@@ -65,20 +59,17 @@ function registerWebRequestlistener() {
         ["responseHeaders", "extraHeaders"] // Add extraHeaders to ensure we see everything
     );
     isWebRequestlistenerRegistered = true;
-    console.log("FabBackground: WebRequest listener for 429s registered (Broadened).");
 }
 
 function unregisterWebRequestlistener() {
     if (!isWebRequestlistenerRegistered) return;
     chrome.webRequest.onHeadersReceived.removeListener(handle429);
     isWebRequestlistenerRegistered = false;
-    console.log("FabBackground: WebRequest listener for 429s unregistered.");
 }
 
 // --- Lifecycle Functions ---
 
 export async function init() {
-    console.log("FabBackground: Initializing...");
     await FabState.loadFabState();
     FabVerification.setupVerificationAlarm();
     onGlobalStateChange(); // Register webRequest listener if enabled
@@ -86,30 +77,24 @@ export async function init() {
     if (AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && AppState.fabModuleVisible && FabState.fabQueueProcessingEnabled && !AppState.isRateLimited()) {
         FabQueueManager.processFabTabQueue();
     }
-    console.log("FabBackground: Initialized.");
 }
 
 export async function onStartup() {
-    console.log("FabBackground: onStartup sequence.");
     // Covered by init() in main background.js
 }
 
 export async function onInstalled(details) {
-    console.log("FabBackground: onInstalled sequence. Reason:", details.reason);
     await FabState.loadFabState();
     FabVerification.setupVerificationAlarm();
 
     if (details.reason === "install" || details.reason === "update") {
         FabState.resetActiveTabs();
-        console.log("FabBackground: Active FAB processing tabs reset due to install/update.");
     }
 }
 
 // --- Event Handlers ---
 
 export function handleMessage(request, sender, sendResponse) {
-    // console.log("FabBackground: Received message", request.action); // Less noisy logging
-
     switch (request.action) {
         case "getFabGlobalStats": {
             let operationalStatus;
@@ -170,7 +155,6 @@ export function handleMessage(request, sender, sendResponse) {
             }, graceMs);
 
             FabState.addUrlToPending(url, timerId);
-            console.log(`FabBackground: Item ${url} is now pending for ${graceMs}ms.`);
             sendResponse({ status: "pending_grace_period" });
             return true;
         }
@@ -215,7 +199,6 @@ export function handleMessage(request, sender, sendResponse) {
             if (typeof request.enabled === 'boolean') {
                 FabState.setFabQueueProcessingEnabled(request.enabled);
                 FabState.saveFabState();
-                console.log(`FabBackground: FAB Queue Processing set to ${request.enabled}.`);
                 if (request.enabled && AppState.globalMasterSwitchEnabled && AppState.fabModuleEnabled && AppState.fabModuleVisible && !AppState.isRateLimited()) {
                     FabQueueManager.processFabTabQueue();
                 }
@@ -227,7 +210,6 @@ export function handleMessage(request, sender, sendResponse) {
         }
 
         case "item_add_rate_limited": {
-            console.log(`FabBackground: Content script reported rate limit for ${request.listingId}. Applying global cool-down.`);
             if (AppState.setRateLimitCoolDown(Date.now() + AppState.globalMaxDelayMs)) {
                 AppState.saveGlobalState();
                 // The global coordinator will broadcast the state change automatically
@@ -253,7 +235,6 @@ export async function handleAlarm(alarm) {
             FabQueueManager.processFabTabQueue();
         }
     } else if (alarm.name === FabConstants.FAB_RATE_LIMIT_EXPIRY_ALARM_NAME) {
-        console.log("FabBackground: Rate limit cooldown expired. Alarm fired.");
         if (FabState.fabQueueProcessingEnabled) {
              FabQueueManager.processFabTabQueue();
         }

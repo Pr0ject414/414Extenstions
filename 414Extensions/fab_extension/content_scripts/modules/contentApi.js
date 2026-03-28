@@ -102,4 +102,6 @@ window.FabContentModules = window.FabContentModules || {};
             return { success: false, status: -1 };
         }
     };
+window.FabContentModules.addToLibrary = FabContentModules.addToLibrary;
+
 })();

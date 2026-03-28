@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const vscSaveSpeedBtn = document.getElementById('vscSaveSpeedBtn');
     const vscAddBlacklistBtn = document.getElementById('vscAddBlacklistBtn');
     const vscPopupStatus = document.getElementById('vscPopupStatus');
+    const vscGlobalDefaultDisplay = document.getElementById('vscGlobalDefaultDisplay');
+    const vscSetCurrentAsGlobalBtn = document.getElementById('vscSetCurrentAsGlobalBtn');
     
     // --- Visibility Toggle Elements ---
     const visibilityVolumeToggle = document.getElementById('visibilityVolumeToggle');
@@ -67,17 +69,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const VSC_STORAGE_KEYS = {
       BLACKLIST: 'vsc_blacklist',
       IS_ENABLED: 'vsc_is_enabled',
-      OPTIONS: 'vsc_options'
+      OPTIONS: 'vsc_options',
+      SITE_SPEEDS: 'vsc_site_speeds',
+      GLOBAL_DEFAULT_SPEED: 'vsc_global_default_speed'
     };
     
     // --- Load VSC State ---
-    chrome.storage.local.get([VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.OPTIONS], (result) => {
+    chrome.storage.local.get([VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.OPTIONS, VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED], (result) => {
         // Default Enabled if not present
         const isVscEnabled = result[VSC_STORAGE_KEYS.IS_ENABLED] !== false;
         if (vscPowerToggle) vscPowerToggle.checked = isVscEnabled;
         
         const vscOptions = result[VSC_STORAGE_KEYS.OPTIONS] || {};
         if (vscPopupKeySpeed) vscPopupKeySpeed.value = vscOptions.keySpeed || 2.0;
+
+        if (vscGlobalDefaultDisplay) {
+            const globalDefault = result[VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED] || 1.0;
+            vscGlobalDefaultDisplay.textContent = globalDefault.toFixed(1);
+        }
     });
 
    // --- Global Event Listeners ---
@@ -297,6 +306,40 @@ document.addEventListener('DOMContentLoaded', () => {
                         vscPopupStatus.className = "status-message error";
                     }
                 }
+            });
+        });
+    }
+
+    if (vscSetCurrentAsGlobalBtn) {
+        vscSetCurrentAsGlobalBtn.addEventListener('click', () => {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (!tabs || tabs.length === 0) return;
+                const tabId = tabs[0].id;
+                
+                chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    func: () => {
+                        const video = document.querySelector('video');
+                        return video ? video.playbackRate : null;
+                    }
+                }, (results) => {
+                    if (results && results[0] && results[0].result !== null) {
+                        const currentSpeed = results[0].result;
+                        chrome.storage.local.set({ [VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED]: currentSpeed }, () => {
+                            if (vscGlobalDefaultDisplay) vscGlobalDefaultDisplay.textContent = currentSpeed.toFixed(1);
+                            if (vscPopupStatus) {
+                                vscPopupStatus.textContent = `Global Default set to ${currentSpeed.toFixed(1)}`;
+                                vscPopupStatus.className = "status-message success";
+                                setTimeout(() => vscPopupStatus.textContent = "", 2000);
+                            }
+                        });
+                    } else {
+                        if (vscPopupStatus) {
+                            vscPopupStatus.textContent = "No video found on page";
+                            vscPopupStatus.className = "status-message error";
+                        }
+                    }
+                });
             });
         });
     }

@@ -1,6 +1,6 @@
 // KylesChromeExtensions/shared_modules/moduleManager.js
 
-class ModuleManager {
+export class ModuleManager {
     constructor() {
         this.modules = [];
     }

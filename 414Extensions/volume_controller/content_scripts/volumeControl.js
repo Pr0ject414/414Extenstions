@@ -1,4 +1,3 @@
-
 // KylesChromeExtensions/volume_controller/content_scripts/volumeControl.js
 (function() {
     if (window.hasVolumeControlInjected) return;
@@ -9,10 +8,9 @@
 
     chrome.storage.local.get([GLOBAL_MASTER_SWITCH_ENABLED_KEY, VOLUME_MODULE_VISIBLE_KEY], (result) => {
         if (result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] === false || result[VOLUME_MODULE_VISIBLE_KEY] === false) {
-            console.log("VolumeControl: Disabled globally or hidden. Exiting.");
             return;
         }
-        
+
         startVolumeControl();
     });
 
@@ -30,9 +28,9 @@
                 gainNode = audioCtx.createGain();
                 gainNode.connect(audioCtx.destination);
                 gainNode.gain.value = currentVolume;
-                console.log("VolumeControl: AudioContext initialized. State:", audioCtx.state);
+                // console.log("VolumeControl: AudioContext initialized. State:", audioCtx.state);
             } catch (e) {
-                console.error("VolumeControl: Failed to initialize AudioContext", e);
+                // console.error("VolumeControl: Failed to initialize AudioContext", e);
             }
         }
         return audioCtx;
@@ -43,7 +41,7 @@
     const unlockAudio = () => {
         if (audioCtx && audioCtx.state === 'suspended') {
             audioCtx.resume().then(() => {
-                console.log("VolumeControl: AudioContext resumed via user gesture.");
+                // console.log("VolumeControl: AudioContext resumed via user gesture.");
                 unlockEvents.forEach(evt => document.removeEventListener(evt, unlockAudio, true));
             });
         }
@@ -51,7 +49,7 @@
     unlockEvents.forEach(evt => document.addEventListener(evt, unlockAudio, true));
 
     function ensureCORS(mediaElement) {
-        // We no longer programmatically set crossOrigin because it can break 
+        // We no longer programmatically set crossOrigin because it can break
         // playback if the server doesn't support CORS headers (like Google's assets).
         // We just return the CORS state for decision making.
         const src = mediaElement.currentSrc || mediaElement.src || (mediaElement.querySelector('source') && mediaElement.querySelector('source').src);
@@ -78,7 +76,7 @@
         }
 
         if (mediaSources.has(mediaElement) && mediaSources.get(mediaElement) !== null) return;
-        
+
         try {
             initAudioContext();
             // Try to attach
@@ -87,8 +85,8 @@
             mediaSources.set(mediaElement, source);
             // console.log("VolumeControl: Attached to media element", mediaElement);
         } catch (e) {
-            console.error("VolumeControl: Failed to attach to media element", e);
-            mediaSources.set(mediaElement, null); 
+            // console.error("VolumeControl: Failed to attach to media element", e);
+            mediaSources.set(mediaElement, null);
         }
     }
 
@@ -111,7 +109,7 @@
                     if (node.tagName === 'AUDIO' || node.tagName === 'VIDEO') {
                         attachToMedia(node);
                     } else {
-                        node.querySelectorAll && node.querySelectorAll('audio, video').forEach(attachToMedia);
+                        node.querySelectorAll && node.querySelectorAll('audio, video').forEach(attachToMedia);  
                     }
                 }
             });
@@ -130,7 +128,7 @@
         scanForMedia();
     }
 
-    // Polling fallback for complex SPAs (like Instagram) where Observer might miss rapid changes 
+    // Polling fallback for complex SPAs (like Instagram) where Observer might miss rapid changes
     // or if elements are added in specific ways.
     setInterval(scanForMedia, 2000);
 
@@ -153,7 +151,7 @@
                 if (audioCtx && audioCtx.state === 'suspended') {
                     audioCtx.resume().catch(() => {});
                 }
-                console.log(`VolumeControl: Set volume to ${currentVolume}`);
+                // console.log(`VolumeControl: Set volume to ${currentVolume}`);
             }
         } else if (request.action === "getVolume") {
             sendResponse({ volume: currentVolume });

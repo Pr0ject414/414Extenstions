@@ -36,6 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const vscOpacityInput = document.getElementById('vscOpacity');
     const vscButtonSizeInput = document.getElementById('vscButtonSize');
     const vscKeySpeedInput = document.getElementById('vscKeySpeed');
+    const vscGlobalDefaultSpeedInput = document.getElementById('vscGlobalDefaultSpeed');
+    const vscClearSiteSpeedsButton = document.getElementById('vscClearSiteSpeeds'); // We'll add this to HTML if needed or just handle if exists
 
     // Visibility Settings Elements
     const visibilityVolumeToggle = document.getElementById('visibilityVolumeToggle');
@@ -69,7 +71,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const VSC_STORAGE_KEYS = {
         BLACKLIST: 'vsc_blacklist',
         SHORTCUTS: 'vsc_shortcuts',
-        OPTIONS: 'vsc_options'
+        OPTIONS: 'vsc_options',
+        SITE_SPEEDS: 'vsc_site_speeds',
+        GLOBAL_DEFAULT_SPEED: 'vsc_global_default_speed'
     };
     
     // Default Shortcuts Config
@@ -119,7 +123,8 @@ document.addEventListener('DOMContentLoaded', () => {
             [FAB_SETTINGS_STORAGE_KEYS.FAB_FREE_ITEM_GRACE_CYCLES]: 4,
             [VSC_STORAGE_KEYS.BLACKLIST]: '',
             [VSC_STORAGE_KEYS.SHORTCUTS]: DEFAULT_VSC_SHORTCUTS,
-            [VSC_STORAGE_KEYS.OPTIONS]: DEFAULT_VSC_OPTIONS
+            [VSC_STORAGE_KEYS.OPTIONS]: DEFAULT_VSC_OPTIONS,
+            [VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED]: 1.0
         };
 
 
@@ -150,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (vscOpacityInput) vscOpacityInput.value = vscOptions.opacity || 0.3;
             if (vscButtonSizeInput) vscButtonSizeInput.value = vscOptions.buttonSize || 14;
             if (vscKeySpeedInput) vscKeySpeedInput.value = vscOptions.keySpeed || 2.0;
+            if (vscGlobalDefaultSpeedInput) vscGlobalDefaultSpeedInput.value = result[VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED] || 1.0;
 
             if (visibilityVolumeToggle) visibilityVolumeToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.VOLUME_MODULE_VISIBLE] !== false;
             if (visibilityVscToggle) visibilityVscToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.VSC_MODULE_VISIBLE] !== false;
@@ -161,7 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderShortcuts(shortcuts) {
         if (!vscShortcutsContainer) return;
-        vscShortcutsContainer.innerHTML = '';
+        vscShortcutsContainer.replaceChildren();
         
         shortcuts.forEach(sc => {
             const row = document.createElement('div');
@@ -326,7 +332,8 @@ document.addEventListener('DOMContentLoaded', () => {
              const settings = {
                  [VSC_STORAGE_KEYS.BLACKLIST]: blacklistValue,
                  [VSC_STORAGE_KEYS.SHORTCUTS]: shortcuts,
-                 [VSC_STORAGE_KEYS.OPTIONS]: options
+                 [VSC_STORAGE_KEYS.OPTIONS]: options,
+                 [VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED]: parseFloat(vscGlobalDefaultSpeedInput.value)
              };
              
              chrome.storage.local.set(settings, () => {
@@ -336,6 +343,16 @@ document.addEventListener('DOMContentLoaded', () => {
                      showStatusMessage(vscStatusMessage, 'VSC settings saved!', 'success');
                  }
              });
+        });
+    }
+
+    if (vscClearSiteSpeedsButton) {
+        vscClearSiteSpeedsButton.addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear all site-specific speed preferences?')) {
+                chrome.storage.local.remove(VSC_STORAGE_KEYS.SITE_SPEEDS, () => {
+                    showStatusMessage(vscStatusMessage, 'All site speeds cleared!', 'success');
+                });
+            }
         });
     }
     
@@ -350,6 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
              vscOpacityInput.value = DEFAULT_VSC_OPTIONS.opacity;
              vscButtonSizeInput.value = DEFAULT_VSC_OPTIONS.buttonSize;
              vscKeySpeedInput.value = DEFAULT_VSC_OPTIONS.keySpeed;
+             if (vscGlobalDefaultSpeedInput) vscGlobalDefaultSpeedInput.value = 1.0;
              showStatusMessage(vscStatusMessage, 'Restored defaults (Hit Save to apply)!', 'warning');
         });
     }
