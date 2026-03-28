@@ -474,95 +474,58 @@ function attachController(video, initialSpeed) {
             videoAnchors.delete(video);
             return;
         }
-        
-        // Fullscreen Handling
+
         const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
-        if (fsElement) {
-            // Check if THIS video is part of the fullscreen element
-            const isRelatedToFS = (video === fsElement || fsElement.contains(video));
-            
-            if (isRelatedToFS) {
-                if (host.parentNode !== fsElement) {
-                    fsElement.appendChild(host);
-                }
-                // Ensure it's not hidden if it was previously hidden by another FS video
-                if (host.classList.contains('vsc-fs-hidden')) {
-                    host.classList.remove('vsc-fs-hidden');
-                    host.style.display = 'block';
-                }
-            } else {
-                // Another video is FS, hide this one
-                if (!host.classList.contains('vsc-fs-hidden')) {
-                    host.classList.add('vsc-fs-hidden');
-                    host.style.display = 'none';
-                }
-                // Keep it in body if hidden
-                if (host.parentNode !== document.body) {
-                    document.body.appendChild(host);
-                }
-                requestAnimationFrame(syncPosition);
-                return; // Skip the rest of positioning
-            }
-        } else {
-            // No fullscreen, ensure visible and in body
-            if (host.classList.contains('vsc-fs-hidden')) {
-                host.classList.remove('vsc-fs-hidden');
-                host.style.display = 'block';
-            }
-            if (host.parentNode !== document.body) {
-                document.body.appendChild(host);
-            }
+        const isRelatedToFS = !!(fsElement && (video === fsElement || fsElement.contains(video)));
+        const anotherVideoFS = !!(fsElement && !isRelatedToFS);
+
+        // 1. Fullscreen Handling
+        const targetParent = isRelatedToFS ? fsElement : document.body;
+        if (host.parentNode !== targetParent) {
+            targetParent.appendChild(host);
         }
-        
-        // Get Rect
+
+        host.classList.toggle('vsc-fs-hidden', anotherVideoFS);
+
+        if (anotherVideoFS) {
+            host.style.display = 'none';
+            requestAnimationFrame(syncPosition);
+            return;
+        }
+
+        // 2. Regular Positioning and Visibility
         const rect = video.getBoundingClientRect();
-        
-        // Check Visibility / Anchoring
         const isInvisible = (video.nodeName === 'AUDIO' || (rect.width === 0 && rect.height === 0) || video.offsetParent === null);
         
+        let shouldShow = true;
+        let posTop = 0;
+        let posLeft = 0;
+
         if (isInvisible) {
-             const anchor = videoAnchors.get(video);
-             
-             // VISIBILITY RULES FOR INVISIBLE PLAYERS:
-             // 1. If AUDIO -> Follow Anchor Logic
-             // 2. If VIDEO -> HIDE (Fix for X.com ghost overlays from preload videos)
-             
-             if (video.nodeName === 'VIDEO') {
-                 host.style.display = 'none';
-             } else {
-                 // AUDIO LOGIC
-                 const shouldShow = !video.paused || (video.paused && !!anchor);
-                 
-                 if (!shouldShow) {
-                     host.style.display = 'none';
-                 } else {
-                     host.style.display = 'block';
-                 
-                 // Positioning
-                     if (anchor && anchor.isConnected) {
-                        const anchorRect = anchor.getBoundingClientRect();
-                        const top = anchorRect.bottom + 10 + dragOffset.y;
-                        const left = anchorRect.left + dragOffset.x;
-                        host.style.top = `${top}px`;
-                        host.style.left = `${left}px`;
-                     } else {
-                    // Fallback to top-left if no anchor or anchor lost
-                        const top = 10 + dragOffset.y;
-                        const left = 10 + dragOffset.x;
-                        host.style.top = `${top}px`;
-                        host.style.left = `${left}px`;
-                     }
-                 }
+            if (video.nodeName === 'VIDEO') {
+                shouldShow = false;
+            } else {
+                // AUDIO LOGIC
+                const anchor = videoAnchors.get(video);
+                shouldShow = !video.paused || (video.paused && !!anchor);
+
+                const anchorRect = (anchor && anchor.isConnected) ? anchor.getBoundingClientRect() : null;
+                posTop = (anchorRect ? anchorRect.bottom : 0) + 10 + dragOffset.y;
+                posLeft = (anchorRect ? anchorRect.left : 10) + dragOffset.x;
             }
         } else {
             // Normal Visible Video
-            host.style.display = 'block';
-            const top = rect.top + 10 + dragOffset.y;
-            const left = rect.left + 10 + dragOffset.x;
-            host.style.top = `${top}px`;
-            host.style.left = `${left}px`;
+            shouldShow = true;
+            posTop = rect.top + 10 + dragOffset.y;
+            posLeft = rect.left + 10 + dragOffset.x;
         }
-        
+
+        host.style.display = shouldShow ? 'block' : 'none';
+        if (shouldShow) {
+            host.style.top = `${posTop}px`;
+            host.style.left = `${posLeft}px`;
+        }
+
         requestAnimationFrame(syncPosition);
     }
     
