@@ -28,7 +28,6 @@
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (chrome.runtime.lastError) {
-            console.log("FabBrowsePage Coordinator: Runtime error on message.", chrome.runtime.lastError.message);
             return;
         }
 
@@ -132,7 +131,6 @@
                 const wasPaused = isGloballyPaused;
                 isGloballyPaused = response?.rateLimited ?? false;
                 if (wasPaused !== isGloballyPaused) {
-                    console.log(`FabBrowsePage: Rate limit status updated to ${isGloballyPaused ? 'PAUSED' : 'ACTIVE'}`);
                     needsUpdate = true;
                 }
 
