@@ -10,7 +10,9 @@
     "tabs",
     "alarms",
     "notifications",
-    "webRequest"
+    "webRequest",
+    "contextMenus",
+    "downloads"
   ],
   "host_permissions": [
     "*://*.fab.com/*",

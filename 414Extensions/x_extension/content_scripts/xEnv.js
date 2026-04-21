@@ -36,6 +36,16 @@
             }
             // console.log("X Env: Settings updated.", { isModuleEnabled, alwaysMuteEnabled, currentVolume });
         }
+        
+        // Listen for Background Events (Context Menu)
+        if (event.data && event.data.type === 'X_BACKGROUND_EVENT') {
+            const { action } = event.data.payload;
+            if (action === 'X_TRIGGER_DOWNLOAD_FROM_CONTEXT') {
+                handleContextMenuDownload();
+            }
+        }
+
+        // Listen for Save Volume from itself (already exists)
     });
 
     function getVolumeSliderFromTarget(target) {
@@ -168,7 +178,24 @@
 
     document.addEventListener('mouseup', handleInteractionEnd, true);
     document.addEventListener('touchend', handleInteractionEnd, { capture: true, passive: true });
-
+    
+    // CONTEXT MENU TRACKING
+    let lastRightClickedVideo = null;
+    document.addEventListener('contextmenu', (e) => {
+        if (!isModuleEnabled) return;
+        const target = e.target;
+        const video = findRelatedVideo(target);
+        if (video) {
+            lastRightClickedVideo = video;
+        } else {
+            const container = target.closest('[data-testid="videoPlayer"], [data-testid="videoComponent"]');
+            if (container) {
+                lastRightClickedVideo = container.querySelector('video');
+            }
+        }
+        // We no longer stop propagation here, allowing X's custom menu to show.
+    }, true); // Capture phase
+    
     // CLICK BURST TRACKER (Fixes double-click side effects)
     let clickBurstState = {
         video: null,
@@ -496,6 +523,272 @@
     };
 
     console.log("X Env: Prototype hijacking applied (Mute & Volume).");
+
+    // --- DOWNLOAD LOGIC ---
+
+    function handleContextMenuDownload() {
+        // Find the video that is currently playing or recent
+        const videos = Array.from(document.querySelectorAll('video'));
+        const playing = videos.find(v => !v.paused);
+        const target = playing || videos[0];
+        if (target) {
+            triggerDownload(target);
+        }
+    }
+
+    function triggerDownload(video) {
+        const metadata = extractVideoMetadata(video);
+        if (metadata && metadata.url) {
+            window.postMessage({
+                type: 'X_DOWNLOAD_REQUEST',
+                payload: {
+                    url: metadata.url,
+                    filename: `X_Video_${metadata.id}.mp4`,
+                    isM3U8: !!metadata.isM3U8
+                }
+            }, '*');
+        } else {
+            // Fallback: Open Tweet in downloader
+            const tweetId = findTweetId(video);
+            if (tweetId) {
+                window.open(`https://twitsave.com/info?url=https://x.com/i/status/${tweetId}`, '_blank');
+            } else {
+                alert("Could not find video URL. Please try again or refresh.");
+            }
+        }
+    }
+
+    function extractVideoMetadata(video) {
+        try {
+            // 1. Recursive React search for variants
+            let current = video;
+            for (let i = 0; i < 15; i++) {
+                if (!current) break;
+                
+                const reactKeys = Object.keys(current).filter(k => k.startsWith('__reactFiber$') || k.startsWith('__reactProps$'));
+                for (const key of reactKeys) {
+                    const props = current[key];
+                    const variants = findVariantsInProps(props);
+                    if (variants && variants.length > 0) {
+                        const allVariants = variants.map(v => ({
+                            url: v.url,
+                            type: v.contentType || v.content_type || "",
+                            bitrate: v.bitrate || 0
+                        })).filter(v => v.url && (v.type.includes('video/mp4') || v.type.includes('application/x-mpegURL') || v.url.includes('.m3u8')));
+
+                        if (allVariants.length > 0) {
+                            // Sort by bitrate desc
+                            allVariants.sort((a, b) => b.bitrate - a.bitrate);
+                            const tweetId = findTweetId(video);
+                            return { 
+                                url: allVariants[0].url, 
+                                id: tweetId || Date.now(),
+                                isM3U8: allVariants[0].url.includes('.m3u8') || allVariants[0].type.includes('mpegURL')
+                            };
+                        }
+                    }
+                }
+                current = current.parentElement;
+            }
+        } catch (e) {
+            console.error("X Env: Error extracting metadata", e);
+        }
+        return null;
+    }
+
+    function findVariantsInProps(obj, seen = new WeakSet(), depth = 0) {
+        if (!obj || depth > 6 || seen.has(obj)) return null;
+        seen.add(obj);
+
+        if (Array.isArray(obj.variants)) return obj.variants;
+        
+        // Skip common large/circular React keys to prevent freezes
+        const skipKeys = ['return', 'sibling', 'stateNode', 'alternate', '_owner', 'child'];
+        
+        for (const key in obj) {
+            if (skipKeys.includes(key)) continue;
+            
+            try {
+                const val = obj[key];
+                if (val && typeof val === 'object') {
+                    const result = findVariantsInProps(val, seen, depth + 1);
+                    if (result) return result;
+                }
+            } catch (e) {
+                // Ignore restricted property access
+            }
+        }
+        return null;
+    }
+
+    function findTweetId(element) {
+        // Check URL first
+        const match = window.location.pathname.match(/\/status\/(\d+)/);
+        if (match) return match[1];
+
+        // Check DOM (article tag) up from video
+        let current = element;
+        for (let i = 0; i < 20; i++) {
+            if (!current) break;
+            if (current.tagName === 'ARTICLE') {
+                const links = current.querySelectorAll('a[href*="/status/"]');
+                for (const link of links) {
+                    const m = link.href.match(/\/status\/(\d+)/);
+                    if (m) return m[1];
+                }
+            }
+            current = current.parentElement;
+        }
+        return null;
+    }
+
+    // --- UI INJECTION ---
+
+    const DOWNLOAD_ICON_SVG = `
+        <svg viewBox="0 0 24 24" aria-hidden="true" style="width: 20px; height: 20px; fill: currentColor;">
+            <g><path d="M12 16.5l-5.5-5.5h3.5v-9h4v9h3.5L12 16.5zm-9 2h18v2H3v-2z"></path></g>
+        </svg>
+    `;
+
+    function injectDownloadButtons() {
+        // Find all video player containers
+        const players = document.querySelectorAll('[data-testid="videoPlayer"], [data-testid="videoComponent"]');
+        
+        players.forEach(player => {
+            // 1. Check if this player already has our button anywhere inside
+            if (player.querySelector('.vsc-download-btn')) return;
+
+            // 2. Find the best container for the button
+            // Priority 1: The right-side control group (where settings/fullscreen live)
+            // Priority 2: Any standard control bar container
+            const container = player.querySelector('.r-633pao') || 
+                              player.querySelector('.r-ero68b.r-17s6mgv.r-1awozwy.r-18u37iz') ||
+                              player.querySelector('.r-18u37iz.r-1wtj0ep.r-13qz1uu');
+
+            if (!container) return;
+
+            // Ensure container is actually visible (not a hidden transition node)
+            if (container.offsetParent === null && !player.querySelector('video')) return;
+
+            const btn = document.createElement('button');
+            btn.className = 'vsc-download-btn r-sdzlij r-1phboty r-rs99b7 r-lrvibr r-2yi16 r-1qi8awa r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l';
+            btn.style.cssText = 'background: transparent; border: none; cursor: pointer; color: white; display: flex; align-items: center; justify-content: center; padding: 0 5px;';
+            btn.innerHTML = `
+                <div dir="ltr" class="css-146c3p1 r-qvutc0 r-37j5jr r-q4m81j r-a023e6 r-rjixqe r-b88u0q r-1awozwy r-6koalj r-18u37iz r-16y2uox r-bcqeeo r-1777fci">
+                    ${DOWNLOAD_ICON_SVG}
+                </div>
+            `;
+            
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const video = findRelatedVideo(btn);
+                if (video) triggerDownload(video);
+            });
+
+            // Append after "Video Settings" if available, otherwise just append to the group
+            const settingsBtn = container.querySelector('[aria-label="Video Settings"]');
+            if (settingsBtn && settingsBtn.parentElement) {
+                settingsBtn.parentElement.after(btn);
+            } else {
+                container.appendChild(btn);
+            }
+        });
+    }
+
+    // Run injection loop
+    setInterval(injectDownloadButtons, 2000);
+
+    // --- CUSTOM MENU INJECTION ---
+
+    function injectIntoCustomMenu(mutations) {
+        mutations.forEach(mutation => {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType !== 1) return;
+
+                // X's menu items usually have role="menuitem"
+                const menuItems = node.querySelectorAll ? node.querySelectorAll('[role="menuitem"]') : [];
+                // Also check the node itself if it's the menu item
+                const itemsToProcess = Array.from(menuItems);
+                if (node.getAttribute && node.getAttribute('role') === 'menuitem') itemsToProcess.push(node);
+
+                itemsToProcess.forEach(item => {
+                    if (item.classList.contains('vsc-menu-processed')) return;
+                    item.classList.add('vsc-menu-processed');
+
+                    const text = item.textContent || "";
+                    if (text.includes("Copy video address")) {
+                        // Found the right menu! Inject our Download button.
+                        injectDownloadItem(item);
+                    }
+                });
+            });
+        });
+    }
+
+    function injectDownloadItem(referenceItem) {
+        // Clone the reference item (Copy video address)
+        const newItem = referenceItem.cloneNode(true);
+        newItem.classList.remove('vsc-menu-processed');
+        
+        // Update text
+        const textEl = newItem.querySelector('span');
+        if (textEl) {
+            textEl.textContent = "Download Video";
+        } else {
+            // Fallback if structure is different
+            newItem.textContent = "Download Video";
+        }
+
+        // Add Click Listener
+        newItem.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Trigger download for the video we tracked during right-click
+            if (lastRightClickedVideo) {
+                triggerDownload(lastRightClickedVideo);
+            } else {
+                // Fallback to finding playing video
+                handleContextMenuDownload();
+            }
+
+            // Close the menu (X usually closes it on click, but we'll try to find the container and remove it)
+            const menuContainer = newItem.closest('[role="menu"]') || newItem.parentElement;
+            if (menuContainer) {
+                // We'll just let it be, X usually handles the closing.
+            }
+        });
+
+        // Add hover effect matching X
+        newItem.addEventListener('mouseover', () => {
+            newItem.style.backgroundColor = 'rgba(255,255,255,0.1)';
+        });
+        newItem.addEventListener('mouseout', () => {
+            newItem.style.backgroundColor = 'transparent';
+        });
+
+        // Insert after reference item
+        referenceItem.after(newItem);
+    }
+
+    const menuObserver = new MutationObserver(injectIntoCustomMenu);
+    
+    function startMenuObserver() {
+        if (document.body) {
+            menuObserver.observe(document.body, { childList: true, subtree: true });
+        } else {
+            // Use a temporary observer to wait for body if document_start is too early
+            const bodyWaitObserver = new MutationObserver((mutations, obs) => {
+                if (document.body) {
+                    menuObserver.observe(document.body, { childList: true, subtree: true });
+                    obs.disconnect();
+                }
+            });
+            bodyWaitObserver.observe(document.documentElement, { childList: true });
+        }
+    }
+    startMenuObserver();
 
     if (typeof window !== 'undefined') {
         window.XEnv = {

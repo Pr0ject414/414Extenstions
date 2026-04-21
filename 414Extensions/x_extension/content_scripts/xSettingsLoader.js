@@ -52,9 +52,10 @@
         }
     });
 
-    // Listen for Save Requests from Main World
+    // Listen for Messages from Main World
     window.addEventListener('message', (event) => {
         if (event.source !== window) return;
+        
         if (event.data && event.data.type === 'X_SAVE_VOLUME') {
             const newVolume = event.data.payload;
             if (typeof newVolume === 'number' && newVolume >= 0 && newVolume <= 1) {
@@ -69,6 +70,22 @@
                 }
             }
         }
+
+        if (event.data && event.data.type === 'X_DOWNLOAD_REQUEST') {
+            chrome.runtime.sendMessage({
+                action: 'X_START_DOWNLOAD',
+                payload: event.data.payload
+            });
+        }
+    });
+    
+    // Listen for Messages from Background Script (Bridge to MAIN world)
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        // Forward all messages from background to MAIN world
+        window.postMessage({
+            type: 'X_BACKGROUND_EVENT',
+            payload: request
+        }, '*');
     });
 
 })();

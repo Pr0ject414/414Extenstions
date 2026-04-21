@@ -14,6 +14,11 @@ const SPEED_STEP = 0.1;
 const REWIND_TIME = 10;
 const ADVANCE_TIME = 10;
 
+// Helper to check if extension context is valid
+function isExtValid() {
+  return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
+}
+
 // Helper logging
 function debugLog(...args) {
     // console.log('[VSC]', ...args);
@@ -52,6 +57,7 @@ let currentConfig = {
 // -----------------------------------------------------------------------------
 
 function checkBlacklistAndInit() {
+  if (!isExtValid()) return;
   const hostname = window.location.hostname;
   chrome.storage.local.get([
       VSC_STORAGE_KEYS.BLACKLIST, 
@@ -63,6 +69,7 @@ function checkBlacklistAndInit() {
       VSC_STORAGE_KEYS.IS_ENABLED, 
       VSC_STORAGE_KEYS.VISIBLE
   ], (result) => {
+    if (chrome.runtime.lastError) return;
     // 0. Master Switch & Visibility Check
     if (result[VSC_STORAGE_KEYS.IS_ENABLED] === false || result[VSC_STORAGE_KEYS.VISIBLE] === false) {
         debugLog('VSC is disabled globally or hidden.');
@@ -106,7 +113,9 @@ function checkBlacklistAndInit() {
     // Migrate oldGlobal to globalDefault if it exists and default doesn't
     if (oldGlobal !== undefined && globalDefault === undefined) {
         globalDefault = oldGlobal;
-        chrome.storage.local.set({ [VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED]: globalDefault });
+        if (isExtValid()) {
+            chrome.storage.local.set({ [VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED]: globalDefault });
+        }
         // Optional: chrome.storage.local.remove(VSC_STORAGE_KEYS.SPEED);
     }
 
@@ -148,27 +157,31 @@ const videoAnchors = new WeakMap();
 const videoOverrideState = new WeakMap(); // { active: bool, originalSpeed: number }
 
 // Monitor Storage for Visibility/Enable changes
-chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace !== 'local') return;
+if (isExtValid()) {
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace !== 'local') return;
+        if (!isExtValid()) return;
 
-    const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED];
-    const isVisible = changes[VSC_STORAGE_KEYS.VISIBLE];
+        const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED];
+        const isVisible = changes[VSC_STORAGE_KEYS.VISIBLE];
 
-    if (isEnabled || isVisible) {
-        // Re-evaluate state
-        chrome.storage.local.get([VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.VISIBLE], (result) => {
-             const disabled = result[VSC_STORAGE_KEYS.IS_ENABLED] === false || result[VSC_STORAGE_KEYS.VISIBLE] === false;
-             if (disabled !== isGloballyDisabled) {
-                 isGloballyDisabled = disabled;
-                 if (isGloballyDisabled) {
-                     deinit();
-                 } else {
-                     checkBlacklistAndInit();
+        if (isEnabled || isVisible) {
+            // Re-evaluate state
+            chrome.storage.local.get([VSC_STORAGE_KEYS.IS_ENABLED, VSC_STORAGE_KEYS.VISIBLE], (result) => {
+                 if (chrome.runtime.lastError) return;
+                 const disabled = result[VSC_STORAGE_KEYS.IS_ENABLED] === false || result[VSC_STORAGE_KEYS.VISIBLE] === false;
+                 if (disabled !== isGloballyDisabled) {
+                     isGloballyDisabled = disabled;
+                     if (isGloballyDisabled) {
+                         deinit();
+                     } else {
+                         checkBlacklistAndInit();
+                     }
                  }
-             }
-        });
-    }
-});
+            });
+        }
+    });
+}
 
 // Named Handlers for removal
 const handleMouseEnter = (e) => {
@@ -418,6 +431,7 @@ function attachController(video, initialSpeed) {
 
     // Attach Drag
     container.addEventListener('mousedown', onMouseDown);
+    container.addEventListener('contextmenu', (e) => e.stopPropagation(), true); // Allow native menu
     container.style.cursor = 'move';
 
     // -------------------------------------------------------------------------
@@ -854,9 +868,10 @@ function updateSpeed(video, diff, reset = false, targetValue = null) {
     videoTargetSpeeds.set(video, finalRate);
 
     // Save speed to storage (Persistence)
-    if (currentConfig.options.rememberSpeed) {
+    if (currentConfig.options.rememberSpeed && isExtValid()) {
         const hostname = window.location.hostname;
         chrome.storage.local.get([VSC_STORAGE_KEYS.SITE_SPEEDS], (result) => {
+            if (chrome.runtime.lastError || !isExtValid()) return;
             const siteSpeeds = result[VSC_STORAGE_KEYS.SITE_SPEEDS] || {};
             siteSpeeds[hostname] = finalRate;
             chrome.storage.local.set({ [VSC_STORAGE_KEYS.SITE_SPEEDS]: siteSpeeds });
@@ -948,47 +963,50 @@ if (typeof window !== 'undefined') {
 }
 
 // Storage Listener for Real-Time Updates
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace !== 'local') return;
+if (isExtValid()) {
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace !== 'local') return;
+        if (!isExtValid()) return;
 
-  // 1. Master Switch
-  if (changes[VSC_STORAGE_KEYS.IS_ENABLED]) {
-      const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED].newValue;
-      if (isEnabled === false) {
-          deinit();
-      } else {
-          checkBlacklistAndInit();
-      }
-  }
+        // 1. Master Switch
+        if (changes[VSC_STORAGE_KEYS.IS_ENABLED]) {
+            const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED].newValue;
+            if (isEnabled === false) {
+                deinit();
+            } else {
+                checkBlacklistAndInit();
+            }
+        }
 
-  // 2. Options Update (Speed, Opacity, etc.)
-  if (changes[VSC_STORAGE_KEYS.OPTIONS]) {
-      currentConfig.options = { ...currentConfig.options, ...changes[VSC_STORAGE_KEYS.OPTIONS].newValue };      
-      // Apply immediate visual effects?
-      // Opacity / Display default
-      activeHosts.forEach(host => {
-          if (host.shadowRoot) {
-            const wrapper = host.shadowRoot.querySelector('.vsc-controller');
-            if (wrapper) wrapper.style.opacity = currentConfig.options.hideDefault ? '0' : currentConfig.options.opacity;
-            // Background update requires re-render of style or direct manipulation
-            // wrapper.style.background = `rgba(0, 0, 0, ${currentConfig.options.opacity})`;
-          }
-      });
-  }
+        // 2. Options Update (Speed, Opacity, etc.)
+        if (changes[VSC_STORAGE_KEYS.OPTIONS]) {
+            currentConfig.options = { ...currentConfig.options, ...changes[VSC_STORAGE_KEYS.OPTIONS].newValue };      
+            // Apply immediate visual effects?
+            // Opacity / Display default
+            activeHosts.forEach(host => {
+                if (host.shadowRoot) {
+                    const wrapper = host.shadowRoot.querySelector('.vsc-controller');
+                    if (wrapper) wrapper.style.opacity = currentConfig.options.hideDefault ? '0' : currentConfig.options.opacity;
+                    // Background update requires re-render of style or direct manipulation
+                    // wrapper.style.background = `rgba(0, 0, 0, ${currentConfig.options.opacity})`;
+                }
+            });
+        }
 
-  // 3. Blacklist Update
-  if (changes[VSC_STORAGE_KEYS.BLACKLIST]) {
-       if (isInitialized) {
-            checkBlacklistAndInit(); 
+        // 3. Blacklist Update
+        if (changes[VSC_STORAGE_KEYS.BLACKLIST]) {
+            if (isInitialized) {
+                    checkBlacklistAndInit(); 
 
-            const hostname = window.location.hostname;
-            const newBlacklist = changes[VSC_STORAGE_KEYS.BLACKLIST].newValue || '';
-            let isBlacklisted = false;
-            
-            deinit();
-            checkBlacklistAndInit();
-       } else {
-           checkBlacklistAndInit();
-       }
-  }
-});
+                    const hostname = window.location.hostname;
+                    const newBlacklist = changes[VSC_STORAGE_KEYS.BLACKLIST].newValue || '';
+                    let isBlacklisted = false;
+                    
+                    deinit();
+                    checkBlacklistAndInit();
+            } else {
+                checkBlacklistAndInit();
+            }
+        }
+    });
+}

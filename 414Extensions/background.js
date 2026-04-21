@@ -5,6 +5,7 @@ import * as LanguageManager from './shared_modules/languageManager.js';
 
 import * as FabBackground from './fab_extension/fabBackground.js';
 import * as YouTubeBackground from './youtube_extension/youtubeBackground.js';
+import * as XBackground from './x_extension/xBackground.js';
 import { VolumeBackground } from './volume_controller/volumeBackground.js';
 
 // --- Module Registration ---
@@ -25,6 +26,11 @@ moduleManager.register(YouTubeBackground, {
 moduleManager.register(VolumeBackground, {
     actions: [
         "getStoredVolume", "updateVolume", "getCurrentVolumeForPopup"
+    ]
+});
+moduleManager.register(XBackground, {
+    actions: [
+        "X_START_DOWNLOAD"
     ]
 });
 
