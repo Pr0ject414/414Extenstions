@@ -36,6 +36,9 @@
         qualities: {} 
     };
 
+    let isApplying = false;
+    let applyTimeout = null;
+
     // --- UTILS ---
 
     function getVisibleElement(selector) {
@@ -162,20 +165,34 @@
         
         // Click it!
         // Check if already selected?
-        // YouTube usually marks selected item with aria-checked or separate icon. 
-        // We might simply click it to be sure.
+        // YouTube marks selected item with aria-checked="true"
         if (best && best.el) {
+             const isSelected = best.el.getAttribute('aria-checked') === 'true';
+             if (isSelected) {
+                 console.log(`[YouTube AutoHD] Quality already set to: ${best.label}. Skipping click.`);
+                 return;
+             }
+             
              console.log(`[YouTube AutoHD] Applying quality: ${best.label}`);
              best.el.click();
         }
     }
 
     async function performQualityChange(elVideo) {
+        if (isApplying) return;
+        isApplying = true;
+
         const elPlayer = getPlayerDiv(elVideo);
-        if (!elPlayer) return;
+        if (!elPlayer) {
+            isApplying = false;
+            return;
+        }
 
         const elSettingsBtn = elPlayer.querySelector(SELECTORS.buttonSettings);
-        if (!elSettingsBtn) return;
+        if (!elSettingsBtn) {
+            isApplying = false;
+            return;
+        }
 
         // Helper to hide menu
         const addStyle = () => {
@@ -192,7 +209,7 @@
              `;
              (document.head || document.documentElement).appendChild(style);
              return style;
-        };
+         };
 
         const removeStyle = () => {
              const style = document.getElementById('ythd-hide-menu');
@@ -242,6 +259,7 @@
             // Always restore visibility
             // Wait longer to ensure any close animations finish so we don't see a "ghost" menu closing
             setTimeout(removeStyle, 500); 
+            isApplying = false;
         }
     }
 
@@ -269,16 +287,16 @@
     async function applySettings() {
         if (!state.isExtensionEnabled) return;
         if (userInteracted) return; // Do not override user choice
+        if (isApplying) return; // Already in progress
         
         const elVideo = getVisibleElement(SELECTORS.video);
         if (!elVideo) return;
         
-        // Check if we need to change?
-        // It's hard to read current quality without opening menu. 
-        // So we might blindly try to set it on new video load.
-        
-        // We can use the 'canplay' event or similar.
-        await performQualityChange(elVideo);
+        // Debounce applySettings to avoid rapid-fire triggers (like during scrubbing or navigation transitions)
+        if (applyTimeout) clearTimeout(applyTimeout);
+        applyTimeout = setTimeout(async () => {
+             await performQualityChange(elVideo);
+        }, 300);
     }
 
     function init() {
