@@ -723,9 +723,22 @@ document.addEventListener('keydown', (e) => {
 
         // Helper to find target
         const getTarget = () => {
-            let t = videos.find(v => !v.paused);
-            if (!t) t = videos.find(v => v.getBoundingClientRect().width > 0);
-            return t;
+             // 1. Priority: Fullscreen Video
+             const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+             if (fsElement) {
+                 if (fsElement.nodeName === 'VIDEO' || (currentConfig.options.audio && fsElement.nodeName === 'AUDIO')) {
+                     return fsElement;
+                 }
+                 const fsVideo = videos.find(v => fsElement.contains(v));
+                 if (fsVideo) return fsVideo;
+             }
+
+             // 2. Priority: Playing Video
+             let t = videos.find(v => !v.paused);
+             if (t) return t;
+
+             // 3. Priority: Visible Video
+             return videos.find(v => v.getBoundingClientRect().width > 0);
         };
 
         // If we are pending (waiting to decide Tap vs Hold) and getting repeats, confirm Hold now
@@ -774,7 +787,8 @@ document.addEventListener('keyup', (e) => {
              spaceKeyPending = false;
 
              // Toggle Play/Pause Manually
-             const videos = Array.from(attachedVideos);
+             const selector = currentConfig.options.audio ? 'video, audio' : 'video';
+             const videos = Array.from(document.querySelectorAll(selector));
              // Toggle specific target or all? Usually site toggles active one.
              // Best guess: Find playing -> pause. Else find first visible -> play.
              const playing = videos.find(v => !v.paused);
@@ -857,10 +871,28 @@ function handleKeyDown(e) {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) {
         return;
     }
-
-    const videos = Array.from(attachedVideos);
+    
+    const selector = currentConfig.options.audio ? 'video, audio' : 'video';
+    const videos = Array.from(document.querySelectorAll(selector));
     // Prioritize playing, then active/anchored
-    let target = videos.find(v => !v.paused);
+    let target = null;
+
+    // 1. Priority: Fullscreen
+    const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsElement) {
+         if (fsElement.nodeName === 'VIDEO' || (currentConfig.options.audio && fsElement.nodeName === 'AUDIO')) {
+             target = fsElement;
+         } else {
+             target = videos.find(v => fsElement.contains(v));
+         }
+    }
+
+    // 2. Playing
+    if (!target) {
+        target = videos.find(v => !v.paused);
+    }
+
+    // 3. Visible / Anchored
     if (!target) {
         // Find visible or anchored video
         target = videos.find(v => {
