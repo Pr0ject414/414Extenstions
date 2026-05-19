@@ -73,6 +73,15 @@
     },
     {
       "run_at": "document_start",
+      "js": ["volume_controller/content_scripts/volumeMainWorld.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "run_at": "document_start",
       "js": ["volume_controller/content_scripts/volumeControl.js"],
       "matches": [
         "<all_urls>"

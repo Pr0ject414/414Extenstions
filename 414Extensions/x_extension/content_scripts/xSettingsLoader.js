@@ -59,15 +59,19 @@
         if (event.data && event.data.type === 'X_SAVE_VOLUME') {
             const newVolume = event.data.payload;
             if (typeof newVolume === 'number' && newVolume >= 0 && newVolume <= 1) {
-                try {
-                    chrome.storage.local.set({ [X_VOLUME_LEVEL_KEY]: newVolume });
-                } catch (error) {
+                chrome.storage.local.get([X_VOLUME_LEVEL_KEY], (res) => {
+                    if (res[X_VOLUME_LEVEL_KEY] !== newVolume) {
+                        try {
+                            chrome.storage.local.set({ [X_VOLUME_LEVEL_KEY]: newVolume });
+                        } catch (error) {
                     // Ignore "Context invalidated" errors which happen if the extension
                     // was reloaded while this page is still open.
-                    if (!error.message.includes("Extension context invalidated")) {
-                        console.error("[X Settings] Storage set error:", error);
+                            if (!error.message.includes("Extension context invalidated")) {
+                                console.error("[X Settings] Storage set error:", error);
+                            }
+                        }
                     }
-                }
+                });
             }
         }
 

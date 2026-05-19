@@ -25,13 +25,17 @@
             
             if (typeof volumeLevel === 'number') {
                 const oldVolume = currentVolume;
-                currentVolume = volumeLevel;
+                
+                // Only update our internal state from settings if the user is NOT 
+                // currently dragging the slider. This prevents race conditions.
+                if (!isUserInteractingWithVolume) {
+                    currentVolume = volumeLevel;
 
-                // Real-time update: Apply to all videos if volume changed
-                // This ensures that dragging the popup slider immediately affects the video
-                if (Math.abs(oldVolume - currentVolume) > 0.001) {
-                     const videos = document.querySelectorAll('video');
-                     videos.forEach(v => applyOriginalVolume(v, currentVolume));
+                    // Real-time update: Apply to all videos if volume changed significantly
+                    if (Math.abs(oldVolume - currentVolume) > 0.001) {
+                         const videos = document.querySelectorAll('video');
+                         videos.forEach(v => applyOriginalVolume(v, currentVolume));
+                    }
                 }
             }
             // console.log("X Env: Settings updated.", { isModuleEnabled, alwaysMuteEnabled, currentVolume });
@@ -457,14 +461,19 @@
 
                 if (isUserInteractingWithVolume) {
                     // User is dragging the slider. Update our Source of Truth.
-                    currentVolume = value;
+                    // But first, let's make sure we aren't being fed a "default" 1.0 by the site
+                    // immediately after an interaction (common X behavior).
+                    if (value === 1.0 && currentVolume < 0.95 && !allowedUnmuted.has(this)) {
+                         // Skip saving this to storage, it's likely a site reset
+                    } else {
+                        currentVolume = value;
+                        // Save to storage
+                        window.postMessage({
+                            type: 'X_SAVE_VOLUME',
+                            payload: currentVolume
+                        }, '*');
+                    }
                     originalVolumeDescriptor.set.call(this, value); 
-                    
-                    // Save to storage (throttling might be good, but explicit msg is fine for now)
-                    window.postMessage({
-                        type: 'X_SAVE_VOLUME',
-                        payload: currentVolume
-                    }, '*');
                 } else {
                     // Site is trying to set volume (e.g. on new video load, or auto-adjustment).
                     // We IGNORE the site's value and Force our stored value.
