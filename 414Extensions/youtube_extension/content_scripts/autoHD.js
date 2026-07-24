@@ -37,6 +37,7 @@
     };
 
     let isApplying = false;
+    let qualityApplied = false;
     let applyTimeout = null;
 
     // --- UTILS ---
@@ -196,6 +197,7 @@
 
         // Helper to hide menu
         const addStyle = () => {
+             if (document.getElementById('ythd-hide-menu')) return;
              const style = document.createElement('style');
              style.id = 'ythd-hide-menu';
              style.innerHTML = `
@@ -208,12 +210,6 @@
                  }
              `;
              (document.head || document.documentElement).appendChild(style);
-             return style;
-         };
-
-        const removeStyle = () => {
-             const style = document.getElementById('ythd-hide-menu');
-             if (style) style.remove();
         };
 
         addStyle(); // execute immediately
@@ -242,6 +238,7 @@
                 
                 // 3. Select Quality
                 changeQuality();
+                qualityApplied = true;
             }
             
             // Ensure menu is closed if it remained open
@@ -256,9 +253,10 @@
         } catch (e) {
             console.error("[YouTube AutoHD] Error during quality change:", e);
         } finally {
-            // Always restore visibility
-            // Wait longer to ensure any close animations finish so we don't see a "ghost" menu closing
-            setTimeout(removeStyle, 500); 
+            // Wait for the menu closing animations to finish before removing style and releasing lock
+            await new Promise(r => setTimeout(r, 500));
+            const style = document.getElementById('ythd-hide-menu');
+            if (style) style.remove();
             isApplying = false;
         }
     }
@@ -287,6 +285,7 @@
     async function applySettings() {
         if (!state.isExtensionEnabled) return;
         if (userInteracted) return; // Do not override user choice
+        if (qualityApplied) return; // Already applied quality for current video
         if (isApplying) return; // Already in progress
         
         const elVideo = getVisibleElement(SELECTORS.video);
@@ -329,11 +328,12 @@
              }
              
              if (shouldUpdate && state.isExtensionEnabled) {
-                 // If settings change, we assume user wants to re-apply them even if they manually changed quality before?
-                 // Or typically, new settings = FORCE apply.
-                 // Let's reset userInteracted so the new setting takes effect.
-                 userInteracted = false; 
-                 applySettings();
+                  // If settings change, we assume user wants to re-apply them even if they manually changed quality before?
+                  // Or typically, new settings = FORCE apply.
+                  // Let's reset userInteracted so the new setting takes effect.
+                  userInteracted = false; 
+                  qualityApplied = false;
+                  applySettings();
              }
         });
 
@@ -349,6 +349,7 @@
         const handleNavigation = () => {
              if (location.pathname.startsWith('/watch')) {
                  userInteracted = false; // Reset on new video
+                 qualityApplied = false;  // Reset applied flag on new video
                  setTimeout(applySettings, 1000); // Wait for player to settle
              }
         };

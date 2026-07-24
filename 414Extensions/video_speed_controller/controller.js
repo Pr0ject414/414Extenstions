@@ -665,6 +665,11 @@ document.addEventListener('mousedown', (e) => {
                  return;
              }
 
+             // Ignore mouseleave events from child elements of the document
+             if (e && e.type === 'mouseleave' && e.target !== document && e.target !== document.documentElement) {
+                 return;
+             }
+
              clearTimeout(timerId);
 
              if (overrideTriggeredByMouse) {
@@ -673,7 +678,7 @@ document.addEventListener('mousedown', (e) => {
                  // Strategy: Allow mouseup to propagate (fixes UI stickiness)
                  // But FORCE video to play if the site paused it (fixes pause bug)
                  setTimeout(() => {
-                     if (targetVideo.paused) {
+                     if (targetVideo.paused && !targetVideo.ended) {
                          targetVideo.play().catch(() => {});
                      }
                  }, 50); // Small delay to let site's mouseup handler run first

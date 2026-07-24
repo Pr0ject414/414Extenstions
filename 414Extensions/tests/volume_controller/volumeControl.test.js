@@ -80,11 +80,16 @@ describe('volumeControl.js', () => {
     });
 
     it('should update volume when receiving setVolume message', () => {
+        const postMessageSpy = jest.spyOn(window, 'postMessage');
         const listeners = mockChrome.runtime.onMessage.addListener.mock.calls;
         const listener = listeners[listeners.length - 1][0];
         
         listener({ action: 'setVolume', volume: 0.5 });
-        expect(currentGainValue).toBe(0.5);
+        expect(postMessageSpy).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'SET_VOLUME_BOOST', volume: 0.5 }),
+            '*'
+        );
+        postMessageSpy.mockRestore();
     });
 
     it('should respond to getVolume message', () => {

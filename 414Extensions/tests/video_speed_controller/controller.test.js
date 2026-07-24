@@ -18,6 +18,9 @@ describe('video_speed_controller/controller.js', () => {
         const scriptContent = fs.readFileSync(scriptPath, 'utf8');
 
         global.chrome = {
+            runtime: {
+                id: 'mock-extension-id'
+            },
             storage: {
                 local: {
                     get: jest.fn(),

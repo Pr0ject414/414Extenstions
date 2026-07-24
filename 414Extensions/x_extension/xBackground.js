@@ -5,11 +5,11 @@ const CONTEXT_MENU_ID = "x_download_video";
 
 // --- Lifecycle Functions ---
 export async function init() {
-    createContextMenu();
+    // Context menu creation is handled in onInstalled
 }
 
 export async function onStartup() {
-    createContextMenu();
+    // Context menu creation is handled in onInstalled
 }
 
 export async function onInstalled(details) {
@@ -26,6 +26,10 @@ function createContextMenu() {
             title: "Download Video",
             contexts: ["video", "image"], // Twitter sometimes wraps videos in images or overlays
             documentUrlPatterns: ["*://twitter.com/*", "*://x.com/*"]
+        }, () => {
+            if (chrome.runtime.lastError) {
+                // Ignore duplicate ID or other creation errors
+            }
         });
     });
 }

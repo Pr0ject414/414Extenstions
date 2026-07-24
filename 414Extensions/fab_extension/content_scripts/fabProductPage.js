@@ -33,6 +33,11 @@
     });
 
     async function attemptDirectFreeLicenseAdd() {
+        // Guard check: Ensure we are still on a listing page (handles SPA/client-side navigation cases)
+        if (!window.location.pathname.includes('/listings/')) {
+            return;
+        }
+
         // Final check before executing the core logic.
         // We run if EITHER auto-add is explicitly enabled OR if we are processing the queue.
         // If queue processing is on, the user expects items to be added and closed.
@@ -81,6 +86,9 @@
 
     // A wrapper function to decide if and when to run the main logic.
     function runAutoAddLogic() {
+        // Guard check: Ensure we are on a listing page before setting up check intervals
+        if (!window.location.pathname.includes('/listings/')) return;
+
         if (isGloballyPaused || (!autoAddEnabled && !queueProcessingEnabled)) return;
 
         const checkAndRun = () => {
