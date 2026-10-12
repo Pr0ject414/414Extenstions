@@ -30,7 +30,11 @@ moduleManager.register(VolumeBackground, {
 });
 moduleManager.register(XBackground, {
     actions: [
-        "X_START_DOWNLOAD"
+        "X_START_DOWNLOAD",
+        "X_CAPTURE_HEADERS",
+        "X_FETCH_USER_INFO",
+        "X_GET_LOCATION_STATS",
+        "X_CLEAR_LOCATION_CACHE"
     ]
 });
 

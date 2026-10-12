@@ -799,6 +799,77 @@
     }
     startMenuObserver();
 
+    // --- GraphQL Header Interceptor for X Location ---
+    let headersCaptured = false;
+    const API_PATTERN = /x\.com\/i\/api\/graphql/;
+
+    function extractAndPostHeaders(headers) {
+        if (headersCaptured) return;
+        let auth = null, csrf = null;
+        const headerObj = {};
+
+        if (headers instanceof Headers) {
+            headers.forEach((val, key) => {
+                headerObj[key] = val;
+                if (key.toLowerCase() === 'authorization') auth = val;
+                if (key.toLowerCase() === 'x-csrf-token') csrf = val;
+            });
+        } else if (headers && typeof headers === 'object') {
+            for (const [key, val] of Object.entries(headers)) {
+                headerObj[key] = val;
+                if (key.toLowerCase() === 'authorization') auth = val;
+                if (key.toLowerCase() === 'x-csrf-token') csrf = val;
+            }
+        }
+
+        if (auth && csrf) {
+            headersCaptured = true;
+            window.postMessage({
+                type: 'X_CAPTURE_HEADERS',
+                payload: { headers: headerObj }
+            }, '*');
+        }
+    }
+
+    const origFetch = window.fetch;
+    window.fetch = function(input, init) {
+        try {
+            const url = typeof input === 'string' ? input : input?.url;
+            if (url && API_PATTERN.test(url) && init?.headers) {
+                extractAndPostHeaders(init.headers);
+            }
+        } catch (e) {}
+        return origFetch.apply(this, arguments);
+    };
+
+    const origXHROpen = XMLHttpRequest.prototype.open;
+    const origXHRSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+    const origXHRSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function(method, url) {
+        try {
+            this._xUrl = url;
+            this._xHeaders = {};
+        } catch (e) {}
+        return origXHROpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+        try {
+            if (this._xHeaders) this._xHeaders[name] = value;
+        } catch (e) {}
+        return origXHRSetHeader.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function() {
+        try {
+            if (this._xUrl && API_PATTERN.test(this._xUrl) && this._xHeaders) {
+                extractAndPostHeaders(this._xHeaders);
+            }
+        } catch (e) {}
+        return origXHRSend.apply(this, arguments);
+    };
+
     if (typeof window !== 'undefined') {
         window.XEnv = {
             allowedUnmuted,

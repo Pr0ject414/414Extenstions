@@ -81,6 +81,13 @@
                 payload: event.data.payload
             });
         }
+
+        if (event.data && event.data.type === 'X_CAPTURE_HEADERS') {
+            chrome.runtime.sendMessage({
+                action: 'X_CAPTURE_HEADERS',
+                payload: event.data.payload
+            });
+        }
     });
     
     // Listen for Messages from Background Script (Bridge to MAIN world)

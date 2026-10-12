@@ -308,6 +308,109 @@ document.addEventListener('mousedown', (e) => {
     lastInteraction = { element: target, time: Date.now() };
 }, true);
 
+/**
+ * Computes visibility status and visible intersection bounds for a DOM element.
+ * @param {HTMLElement} el 
+ * @returns {{ isVisible: boolean, visibleTop: number, visibleLeft: number, visibleBottom: number, visibleRight: number }}
+ */
+function getElementVisibilityInfo(el) {
+    const defaultInfo = { isVisible: false, visibleTop: 0, visibleLeft: 0, visibleBottom: 0, visibleRight: 0 };
+    if (!el || !el.isConnected) return defaultInfo;
+
+    // 1. CSS check: checkVisibility API or fallback style checks
+    if (typeof el.checkVisibility === 'function') {
+        if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+            return defaultInfo;
+        }
+    } else {
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') {
+            return defaultInfo;
+        }
+    }
+
+    // 2. Geometry check
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return defaultInfo;
+
+    // 3. Viewport bounds check
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+
+    if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) {
+        return defaultInfo;
+    }
+
+    let visibleTop = rect.top;
+    let visibleBottom = rect.bottom;
+    let visibleLeft = rect.left;
+    let visibleRight = rect.right;
+
+    // Clamp initial bounds to viewport
+    visibleTop = Math.max(visibleTop, 0);
+    visibleBottom = Math.min(visibleBottom, viewportHeight);
+    visibleLeft = Math.max(visibleLeft, 0);
+    visibleRight = Math.min(visibleRight, viewportWidth);
+
+    // 4. Ancestor scroll/overflow clipping check (scroll containers, chat windows, modals, etc.)
+    let parent = el.parentElement || (el.parentNode && el.parentNode.host);
+    while (parent && parent !== document.body && parent !== document.documentElement) {
+        const parentStyle = window.getComputedStyle(parent);
+
+        if (
+            parentStyle.display === 'none' ||
+            parentStyle.visibility === 'hidden' ||
+            parentStyle.visibility === 'collapse' ||
+            parentStyle.opacity === '0'
+        ) {
+            return defaultInfo;
+        }
+
+        const overflowY = parentStyle.overflowY;
+        const overflowX = parentStyle.overflowX;
+        const isClipping = (
+            overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden' || overflowY === 'clip' ||
+            overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden' || overflowX === 'clip'
+        );
+
+        if (isClipping) {
+            const parentRect = parent.getBoundingClientRect();
+            visibleTop = Math.max(visibleTop, parentRect.top);
+            visibleBottom = Math.min(visibleBottom, parentRect.bottom);
+            visibleLeft = Math.max(visibleLeft, parentRect.left);
+            visibleRight = Math.min(visibleRight, parentRect.right);
+
+            if (visibleBottom - visibleTop < 25 || visibleRight - visibleLeft < 25) {
+                return defaultInfo;
+            }
+        }
+
+        parent = parent.parentElement || (parent.parentNode && parent.parentNode.host);
+    }
+
+    if (visibleBottom - visibleTop < 25 || visibleRight - visibleLeft < 25) {
+        return defaultInfo;
+    }
+
+    return {
+        isVisible: true,
+        visibleTop,
+        visibleLeft,
+        visibleBottom,
+        visibleRight
+    };
+}
+
+function isElementVisibleOnScreen(el) {
+    return getElementVisibilityInfo(el).isVisible;
+}
+
+function isVideoVisibleOnScreen(video) {
+    if (!video || !video.isConnected) return false;
+    if (video.nodeName === 'AUDIO') return false;
+    return isElementVisibleOnScreen(video);
+}
+
 function attachController(video, initialSpeed) {
     if (video.dataset.vscAttached) return;
 
@@ -429,8 +532,13 @@ function attachController(video, initialSpeed) {
     container.append(valueDisplay, controls);
     shadow.appendChild(container);
 
-    // Attach Drag
+    // Attach Drag & Reset
     container.addEventListener('mousedown', onMouseDown);
+    container.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        dragOffset = { x: 0, y: 0 };
+    });
     container.addEventListener('contextmenu', (e) => e.stopPropagation(), true); // Allow native menu
     container.style.cursor = 'move';
 
@@ -493,6 +601,8 @@ function attachController(video, initialSpeed) {
     // Append Host
     document.body.appendChild(host);
 
+    let wasFS = false;
+
     // Position Sync Loop
     function syncPosition() {
         // If disabled or disconnected, remove and stop
@@ -510,6 +620,18 @@ function attachController(video, initialSpeed) {
         const isRelatedToFS = !!(fsElement && (video === fsElement || fsElement.contains(video)));
         const anotherVideoFS = !!(fsElement && !isRelatedToFS);
 
+        const rect = video.getBoundingClientRect();
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        const isMaximized = (rect.width >= vw * 0.85 && rect.height >= vh * 0.85);
+        const isFS = isRelatedToFS || isMaximized;
+
+        // Reset drag offset when entering or exiting fullscreen/maximized view
+        if (isFS !== wasFS) {
+            wasFS = isFS;
+            dragOffset = { x: 0, y: 0 };
+        }
+
         // 1. Fullscreen Handling
         const targetParent = isRelatedToFS ? fsElement : document.body;
         if (host.parentNode !== targetParent) {
@@ -525,30 +647,43 @@ function attachController(video, initialSpeed) {
         }
 
         // 2. Regular Positioning and Visibility
-        const rect = video.getBoundingClientRect();
-        const isInvisible = (video.nodeName === 'AUDIO' || (rect.width === 0 && rect.height === 0) || video.offsetParent === null);
+        const isAudio = video.nodeName === 'AUDIO';
 
-        let shouldShow = true;
+        let shouldShow = false;
         let posTop = 0;
         let posLeft = 0;
 
-        if (isInvisible) {
-            if (video.nodeName === 'VIDEO') {
-                shouldShow = false;
-            } else {
-                // AUDIO LOGIC
-                const anchor = videoAnchors.get(video);
-                shouldShow = !video.paused || (video.paused && !!anchor);
+        if (isAudio) {
+            const anchor = videoAnchors.get(video);
+            const anchorInfo = anchor ? getElementVisibilityInfo(anchor) : null;
+            const anchorVisible = anchorInfo ? anchorInfo.isVisible : false;
+            shouldShow = !video.paused || (video.paused && anchorVisible);
 
-                const anchorRect = (anchor && anchor.isConnected) ? anchor.getBoundingClientRect() : null;      
-                posTop = (anchorRect ? anchorRect.bottom : 0) + 10 + dragOffset.y;
-                posLeft = (anchorRect ? anchorRect.left : 10) + dragOffset.x;
-            }
-        } else {
-            // Normal Visible Video
-            shouldShow = true;
+            const anchorRect = (anchor && anchor.isConnected) ? anchor.getBoundingClientRect() : null;
+            const refTop = (anchorInfo && anchorInfo.isVisible) ? anchorInfo.visibleBottom : (anchorRect ? anchorRect.bottom : 0);
+            const refLeft = (anchorInfo && anchorInfo.isVisible) ? anchorInfo.visibleLeft : (anchorRect ? anchorRect.left : 10);
+            posTop = refTop + 10 + dragOffset.y;
+            posLeft = refLeft + dragOffset.x;
+        } else if (isFS) {
+            // Fullscreen or Maximized: position cleanly relative to top-left of video
+            shouldShow = isElementVisibleOnScreen(video) || (rect.width > 0 && rect.height > 0);
             posTop = rect.top + 10 + dragOffset.y;
             posLeft = rect.left + 10 + dragOffset.x;
+        } else {
+            // Normal Feed / Inline Video: Lock 1:1 relative to video coordinates (default top-left or custom dragged position)
+            const visInfo = getElementVisibilityInfo(video);
+            posTop = rect.top + 10 + dragOffset.y;
+            posLeft = rect.left + 10 + dragOffset.x;
+
+            // Hide overlay when its position on the video is scrolled out of view or under sticky headers
+            const isPosVisible = (
+                visInfo.isVisible &&
+                posTop >= visInfo.visibleTop - 5 &&
+                posTop <= visInfo.visibleBottom - 15 &&
+                posLeft >= visInfo.visibleLeft - 5 &&
+                posLeft <= visInfo.visibleRight - 15
+            );
+            shouldShow = isPosVisible;
         }
 
         host.style.display = shouldShow ? 'block' : 'none';
@@ -757,7 +892,7 @@ document.addEventListener('keydown', (e) => {
              if (t) return t;
 
              // 3. Priority: Visible Video
-             return videos.find(v => v.getBoundingClientRect().width > 0);
+             return videos.find(v => isVideoVisibleOnScreen(v));
         };
 
         // If we are pending (waiting to decide Tap vs Hold) and getting repeats, confirm Hold now
@@ -814,7 +949,7 @@ document.addEventListener('keyup', (e) => {
              if (playing) {
                  playing.pause();
              } else {
-                 const visible = videos.find(v => v.getBoundingClientRect().width > 0);
+                 const visible = videos.find(v => isVideoVisibleOnScreen(v));
                  if (visible) visible.play().catch(()=>{});
              }
          }
@@ -916,9 +1051,11 @@ function handleKeyDown(e) {
     if (!target) {
         // Find visible or anchored video
         target = videos.find(v => {
-            if (v.offsetParent !== null) return true;
-            // Check anchor
-            if (videoAnchors.has(v)) return true;
+            if (v.nodeName === 'VIDEO') return isVideoVisibleOnScreen(v);
+            if (videoAnchors.has(v)) {
+                const anchor = videoAnchors.get(v);
+                return isElementVisibleOnScreen(anchor);
+            }
             return false;
         });
     }
@@ -963,7 +1100,10 @@ if (typeof window !== 'undefined') {
         updateSpeed,
         VSC_STORAGE_KEYS,
         DEFAULT_VSC_OPTIONS,
-        checkBlacklistAndInit
+        checkBlacklistAndInit,
+        getElementVisibilityInfo,
+        isElementVisibleOnScreen,
+        isVideoVisibleOnScreen
     };
 }
 

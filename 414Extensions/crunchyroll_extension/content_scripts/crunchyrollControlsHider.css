@@ -1,0 +1,17 @@
+/* Crunchyroll Helper - Hide Player Controls When Speeding Up (Option 2 Total Hiding) */
+
+.cr-speed-controls-hidden,
+.cr-speed-controls-hidden * {
+  cursor: none !important;
+}
+
+.cr-speed-controls-hidden [data-testid="top-gradient"],
+.cr-speed-controls-hidden [data-testid="top-controls-autohide"],
+.cr-speed-controls-hidden [data-testid="bottom-controls-autohide"],
+.cr-speed-controls-hidden [data-testid="ratings-advisories-overlay"],
+.cr-speed-controls-hidden button[data-testid="skip-intro-button"],
+.cr-speed-controls-hidden button[data-variant] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 150ms ease !important;
+}

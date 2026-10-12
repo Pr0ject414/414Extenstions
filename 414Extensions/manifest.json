@@ -12,7 +12,8 @@
     "notifications",
     "webRequest",
     "contextMenus",
-    "downloads"
+    "downloads",
+    "cookies"
   ],
   "host_permissions": [
     "*://*.fab.com/*",
@@ -65,8 +66,13 @@
         "*://twitter.com/*",
         "*://x.com/*"
       ],
+      "css": [
+        "x_extension/content_scripts/xLocation.css"
+      ],
       "js": [
-        "x_extension/content_scripts/xSettingsLoader.js"
+        "x_extension/content_scripts/xSettingsLoader.js",
+        "x_extension/content_scripts/xLocationUI.js",
+        "x_extension/content_scripts/xObserver.js"
       ],
       "world": "ISOLATED",
       "all_frames": true
@@ -114,6 +120,19 @@
         "fab_extension/content_scripts/modules/browsePageHider.js",
         "fab_extension/content_scripts/modules/browsePageAutoOpener.js",
         "fab_extension/content_scripts/fabBrowsePage.js"
+      ]
+    },
+    {
+      "run_at": "document_idle",
+      "matches": [
+        "*://*.crunchyroll.com/*"
+      ],
+      "css": [
+        "crunchyroll_extension/content_scripts/crunchyrollControlsHider.css"
+      ],
+      "js": [
+        "crunchyroll_extension/content_scripts/crunchyrollEndSlateCloser.js",
+        "crunchyroll_extension/content_scripts/crunchyrollControlsHider.js"
       ]
     }
   ],

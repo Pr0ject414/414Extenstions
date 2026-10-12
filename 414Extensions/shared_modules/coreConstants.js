@@ -15,6 +15,17 @@ export const X_MODULE_ENABLED_KEY = 'isXModuleEnabled';
 export const X_ALWAYS_MUTE_KEY = 'isXAlwaysMuteEnabled';
 // Volume Persistence Key
 export const X_VOLUME_LEVEL_KEY = 'xVolumeLevel';
+// Location & Device Feature Keys for X
+export const X_LOCATION_MODULE_ENABLED_KEY = 'isXLocationEnabled';
+export const X_PREFER_DEVICE_FLAG_KEY = 'preferDeviceFlag';
+export const X_SHOW_VPN_WARN_KEY = 'showVpnWarn';
+export const X_ENABLE_COMMUNITY_CACHE_KEY = 'enableCommunityCache';
+export const X_BLOCKED_COUNTRIES_KEY = 'blockedCountries';
+
+// Master On/Off Switch for the Crunchyroll Module
+export const CRUNCHYROLL_MODULE_ENABLED_KEY = 'isCrunchyrollModuleEnabled';
+export const CRUNCHYROLL_AUTO_CLOSE_END_SLATE_KEY = 'isCrunchyrollAutoCloseEndSlateEnabled';
+export const CRUNCHYROLL_HIDE_CONTROLS_ON_SPEED_KEY = 'isCrunchyrollHideControlsOnSpeedEnabled';
 
 // Global rate limiting
 export const RATE_LIMIT_COOL_DOWN_UNTIL_KEY = 'rateLimitCoolDownUntil';
@@ -25,6 +36,7 @@ export const VSC_MODULE_VISIBLE_KEY = 'isVscModuleVisible';
 export const FAB_MODULE_VISIBLE_KEY = 'isFabModuleVisible';
 export const YOUTUBE_MODULE_VISIBLE_KEY = 'isYouTubeModuleVisible';
 export const X_MODULE_VISIBLE_KEY = 'isXModuleVisible';
+export const CRUNCHYROLL_MODULE_VISIBLE_KEY = 'isCrunchyrollModuleVisible';
 
 // Configurable global network settings keys (values loaded from storage)
 export const GLOBAL_MAX_RETRIES_KEY = 'maxRetries';

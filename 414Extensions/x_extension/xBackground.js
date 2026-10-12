@@ -1,18 +1,27 @@
 // KylesChromeExtensions/x_extension/xBackground.js
 import * as AppState from '../shared_modules/appState.js';
+import { XLocationApiClient } from './xLocationApi.js';
+import { locationCache } from './xLocationCache.js';
+import { XCloudCacheClient } from './xCloudCache.js';
 
 const CONTEXT_MENU_ID = "x_download_video";
+const apiClient = new XLocationApiClient();
+const cloudCache = new XCloudCacheClient();
 
 // --- Lifecycle Functions ---
 export async function init() {
-    // Context menu creation is handled in onInstalled
+    await locationCache.init();
+    await apiClient.loadHeadersFromStorage();
 }
 
 export async function onStartup() {
-    // Context menu creation is handled in onInstalled
+    await locationCache.init();
+    await apiClient.loadHeadersFromStorage();
 }
 
 export async function onInstalled(details) {
+    await locationCache.init();
+    await apiClient.loadHeadersFromStorage();
     createContextMenu();
 }
 
@@ -66,6 +75,69 @@ export function handleMessage(request, sender, sendResponse) {
         }
         return true; 
     }
+
+    if (request.action === "X_CAPTURE_HEADERS") {
+        const success = apiClient.setHeaders(request.payload.headers);
+        sendResponse({ success });
+        return true;
+    }
+
+    if (request.action === "X_FETCH_USER_INFO") {
+        const { screenName } = request.payload;
+        if (!screenName) {
+            sendResponse({ success: false, error: "Missing screenName" });
+            return true;
+        }
+
+        // 1. Check local LRU cache
+        const cached = locationCache.get(screenName);
+        if (cached) {
+            sendResponse({ success: true, data: cached, fromCache: true });
+            return true;
+        }
+
+        // 2. Check Community Cloud Cache (Batched lookup)
+        cloudCache.lookup(screenName).then(cloudData => {
+            if (cloudData) {
+                locationCache.set(screenName, cloudData);
+                sendResponse({ success: true, data: cloudData, fromCloud: true });
+                return;
+            }
+
+            // 3. Fallback to X GraphQL API
+            apiClient.fetchUserInfo(screenName).then(data => {
+                locationCache.set(screenName, data);
+                cloudCache.contribute(screenName, data);
+                sendResponse({ success: true, data, fromCache: false });
+            }).catch(err => {
+                sendResponse({ success: false, error: err.message || err.code || "Failed to fetch user info" });
+            });
+        }).catch(err => {
+            // Fallback to X GraphQL API if cloud cache query fails
+            apiClient.fetchUserInfo(screenName).then(data => {
+                locationCache.set(screenName, data);
+                cloudCache.contribute(screenName, data);
+                sendResponse({ success: true, data, fromCache: false });
+            }).catch(err2 => {
+                sendResponse({ success: false, error: err2.message || err2.code || "Failed to fetch user info" });
+            });
+        });
+
+        return true;
+    }
+
+    if (request.action === "X_GET_LOCATION_STATS") {
+        sendResponse({ success: true, stats: locationCache.getStats() });
+        return true;
+    }
+
+    if (request.action === "X_CLEAR_LOCATION_CACHE") {
+        locationCache.clear().then(() => {
+            sendResponse({ success: true });
+        });
+        return true;
+    }
+
     return false;
 }
 

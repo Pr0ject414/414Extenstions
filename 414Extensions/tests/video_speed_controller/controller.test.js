@@ -156,4 +156,76 @@ describe('video_speed_controller/controller.js', () => {
              }));
         });
     });
+
+    describe('visibility detection', () => {
+        let container, video;
+
+        beforeEach(() => {
+            document.body.innerHTML = '';
+            container = document.createElement('div');
+            container.style.width = '400px';
+            container.style.height = '400px';
+            container.style.overflowY = 'auto';
+            document.body.appendChild(container);
+
+            video = document.createElement('video');
+            container.appendChild(video);
+        });
+
+        it('should return false for disconnected elements', () => {
+            const disconnectedVideo = document.createElement('video');
+            expect(VSC.isVideoVisibleOnScreen(disconnectedVideo)).toBe(false);
+        });
+
+        it('should detect video visible inside container and viewport', () => {
+            // Mock getBoundingClientRect
+            video.getBoundingClientRect = () => ({
+                top: 100, bottom: 300, left: 50, right: 350, width: 300, height: 200
+            });
+            container.getBoundingClientRect = () => ({
+                top: 0, bottom: 400, left: 0, right: 400, width: 400, height: 400
+            });
+
+            expect(VSC.isVideoVisibleOnScreen(video)).toBe(true);
+
+            const visInfo = VSC.getElementVisibilityInfo(video);
+            expect(visInfo.isVisible).toBe(true);
+            expect(visInfo.visibleTop).toBe(100);
+        });
+
+        it('should return false when video is scrolled out of overflow container (scrolled off top)', () => {
+            // Video is at top -100 to 50 in viewport, but container top is 100
+            video.getBoundingClientRect = () => ({
+                top: -100, bottom: 50, left: 50, right: 350, width: 300, height: 150
+            });
+            container.getBoundingClientRect = () => ({
+                top: 100, bottom: 500, left: 0, right: 400, width: 400, height: 400
+            });
+
+            expect(VSC.isVideoVisibleOnScreen(video)).toBe(false);
+        });
+
+        it('should return false when video is completely off-screen in main viewport', () => {
+            video.getBoundingClientRect = () => ({
+                top: -500, bottom: -300, left: 50, right: 350, width: 300, height: 200
+            });
+
+            expect(VSC.isVideoVisibleOnScreen(video)).toBe(false);
+        });
+
+        it('should clamp visibleTop when top of video is partially scrolled under container top edge', () => {
+            // Video top is 50px, but container top is 100px
+            video.getBoundingClientRect = () => ({
+                top: 50, bottom: 300, left: 50, right: 350, width: 300, height: 250
+            });
+            container.getBoundingClientRect = () => ({
+                top: 100, bottom: 500, left: 0, right: 400, width: 400, height: 400
+            });
+
+            const visInfo = VSC.getElementVisibilityInfo(video);
+            expect(visInfo.isVisible).toBe(true);
+            expect(visInfo.visibleTop).toBe(100); // Clamped to container top
+        });
+    });
 });
+

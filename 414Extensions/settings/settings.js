@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const visibilityFabToggle = document.getElementById('visibilityFabToggle');
     const visibilityYouTubeToggle = document.getElementById('visibilityYouTubeToggle');
     const visibilityXToggle = document.getElementById('visibilityXToggle');
+    const visibilityCrunchyrollToggle = document.getElementById('visibilityCrunchyrollToggle');
 
     // Storage Keys (Must match those defined in coreConstants.js and fabConstants.js)
     const GLOBAL_SETTINGS_STORAGE_KEYS = {
@@ -56,7 +57,8 @@ document.addEventListener('DOMContentLoaded', () => {
         VSC_MODULE_VISIBLE: 'isVscModuleVisible',
         FAB_MODULE_VISIBLE: 'isFabModuleVisible',
         YOUTUBE_MODULE_VISIBLE: 'isYouTubeModuleVisible',
-        X_MODULE_VISIBLE: 'isXModuleVisible'
+        X_MODULE_VISIBLE: 'isXModuleVisible',
+        CRUNCHYROLL_MODULE_VISIBLE: 'isCrunchyrollModuleVisible'
     };
 
     const FAB_SETTINGS_STORAGE_KEYS = {
@@ -162,6 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (visibilityFabToggle) visibilityFabToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.FAB_MODULE_VISIBLE] !== false;
             if (visibilityYouTubeToggle) visibilityYouTubeToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE] !== false;
             if (visibilityXToggle) visibilityXToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.X_MODULE_VISIBLE] !== false;
+            if (visibilityCrunchyrollToggle) visibilityCrunchyrollToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.CRUNCHYROLL_MODULE_VISIBLE] !== false;
         });
     }
 
@@ -249,7 +252,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 [GLOBAL_SETTINGS_STORAGE_KEYS.VSC_MODULE_VISIBLE]: visibilityVscToggle.checked,
                 [GLOBAL_SETTINGS_STORAGE_KEYS.FAB_MODULE_VISIBLE]: visibilityFabToggle.checked,
                 [GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE]: visibilityYouTubeToggle.checked,
-                [GLOBAL_SETTINGS_STORAGE_KEYS.X_MODULE_VISIBLE]: visibilityXToggle.checked
+                [GLOBAL_SETTINGS_STORAGE_KEYS.X_MODULE_VISIBLE]: visibilityXToggle.checked,
+                [GLOBAL_SETTINGS_STORAGE_KEYS.CRUNCHYROLL_MODULE_VISIBLE]: visibilityCrunchyrollToggle.checked
             };
             chrome.storage.local.set(settings, () => {
                 if (chrome.runtime.lastError) {

@@ -60,12 +60,40 @@
         };
     }
 
+    const internalContexts = new Set();
+
+    function resumeAllContexts() {
+        allAudioContexts.forEach(ctx => {
+            if (ctx && ctx.state === 'suspended') {
+                ctx.resume().catch(() => {});
+            }
+        });
+        internalContexts.forEach(ctx => {
+            if (ctx && ctx.state === 'suspended') {
+                ctx.resume().catch(() => {});
+            }
+            if (ctx && ctx.state === 'closed') {
+                internalContexts.delete(ctx);
+            }
+        });
+    }
+
+    ['click', 'keydown', 'pointerdown', 'touchstart'].forEach(type => {
+        window.addEventListener(type, resumeAllContexts, { capture: true, passive: true });
+    });
+
     // --- 4. MEDIA ELEMENT TRACKING ---
     const originalPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function() {
         allMediaElements.add(this);
         syncElementVolume(this);
-        return originalPlay.apply(this, arguments);
+        resumeAllContexts();
+
+        const playPromise = originalPlay.apply(this, arguments);
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {});
+        }
+        return playPromise;
     };
 
     function syncElementVolume(el) {
@@ -96,7 +124,11 @@
             gain.gain.value = currentVolume;
             source.connect(gain);
             gain.connect(ctx.destination);
+            internalContexts.add(ctx);
             elementContexts.set(el, { ctx, gain });
+            if (ctx.state === 'suspended') {
+                ctx.resume().catch(() => {});
+            }
         } catch (e) {
             // Already attached to another context, or CORS issue.
             // In this case, our AudioContext hijack might already be covering it,

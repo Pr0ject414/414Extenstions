@@ -1,0 +1,159 @@
+/* 414Extensions/x_extension/content_scripts/xLocation.css */
+
+/* Inline Badge Layout */
+.x-location-inline-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+    font-size: 0.9em;
+    user-select: none;
+}
+
+.x-location-flag {
+    font-size: 1.1em;
+    line-height: 1;
+    cursor: default;
+}
+
+.x-location-device-icon {
+    display: inline-flex;
+    align-items: center;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+:root[data-x-theme="light"] .x-location-device-icon {
+    color: rgba(0, 0, 0, 0.6);
+}
+
+.x-location-info-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: currentColor;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.x-location-info-btn:hover {
+    background: rgba(34, 211, 238, 0.3);
+    transform: scale(1.1);
+}
+
+.x-location-vpn-warn {
+    display: inline-flex;
+    align-items: center;
+    color: #FFB23E;
+    margin-left: 2px;
+}
+
+/* Glass Hovercard Dossier */
+#x-location-hovercard-root {
+    position: absolute;
+    z-index: 1000000;
+    width: 280px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(20, 23, 28, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+    color: #E9EDF0;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(6px);
+    transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+}
+
+:root[data-x-theme="light"] #x-location-hovercard-root {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.08);
+    color: #0C1A22;
+}
+
+#x-location-hovercard-root.visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.x-hovercard-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+:root[data-x-theme="light"] .x-hovercard-header {
+    border-bottom-color: rgba(0, 0, 0, 0.1);
+}
+
+.x-hovercard-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.x-hovercard-title {
+    font-weight: 700;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.x-hovercard-handle {
+    font-size: 12px;
+    color: rgba(233, 237, 240, 0.6);
+}
+
+:root[data-x-theme="light"] .x-hovercard-handle {
+    color: rgba(12, 26, 34, 0.6);
+}
+
+.x-hovercard-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.x-hovercard-row:last-child {
+    margin-bottom: 0;
+}
+
+.x-hovercard-icon {
+    display: inline-flex;
+    align-items: center;
+    color: #22D3EE;
+    width: 18px;
+}
+
+:root[data-x-theme="light"] .x-hovercard-icon {
+    color: #0E7490;
+}
+
+.x-hovercard-label {
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+.x-hovercard-val {
+    flex: 1;
+    word-break: break-word;
+}

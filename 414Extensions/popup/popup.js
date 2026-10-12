@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const visibilityFabToggle = document.getElementById('visibilityFabToggle');
     const visibilityYouTubeToggle = document.getElementById('visibilityYouTubeToggle');
     const visibilityXToggle = document.getElementById('visibilityXToggle');
+    const visibilityCrunchyrollToggle = document.getElementById('visibilityCrunchyrollToggle');
 
     // --- X Module Elements ---
     const xModulePowerToggle = document.getElementById('xModulePowerToggle');
@@ -36,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const FAB_MODULE_VISIBLE_KEY = 'isFabModuleVisible';
     const YOUTUBE_MODULE_VISIBLE_KEY = 'isYouTubeModuleVisible';
     const X_MODULE_VISIBLE_KEY = 'isXModuleVisible';
+    const CRUNCHYROLL_MODULE_VISIBLE_KEY = 'isCrunchyrollModuleVisible';
     const X_MODULE_ENABLED_KEY = 'isXModuleEnabled';
     const X_ALWAYS_MUTE_KEY = 'isXAlwaysMuteEnabled';
 
@@ -47,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
         FAB_MODULE_VISIBLE_KEY,
         YOUTUBE_MODULE_VISIBLE_KEY,
         X_MODULE_VISIBLE_KEY,
+        CRUNCHYROLL_MODULE_VISIBLE_KEY,
         X_MODULE_ENABLED_KEY,
         X_ALWAYS_MUTE_KEY
     ], (result) => {
@@ -57,9 +60,130 @@ document.addEventListener('DOMContentLoaded', () => {
         if (visibilityFabToggle) visibilityFabToggle.checked = result[FAB_MODULE_VISIBLE_KEY] !== false;
         if (visibilityYouTubeToggle) visibilityYouTubeToggle.checked = result[YOUTUBE_MODULE_VISIBLE_KEY] !== false;
         if (visibilityXToggle) visibilityXToggle.checked = result[X_MODULE_VISIBLE_KEY] !== false;
+        if (visibilityCrunchyrollToggle) visibilityCrunchyrollToggle.checked = result[CRUNCHYROLL_MODULE_VISIBLE_KEY] !== false;
 
         if (xModulePowerToggle) xModulePowerToggle.checked = result[X_MODULE_ENABLED_KEY] !== false;
         if (xAlwaysMuteToggle) xAlwaysMuteToggle.checked = result[X_ALWAYS_MUTE_KEY] !== false;
+
+        const xLocationToggle = document.getElementById('xLocationToggle');
+        const xCachedCountDisplay = document.getElementById('xCachedCountDisplay');
+        const xClearCacheBtn = document.getElementById('xClearCacheBtn');
+
+        if (xLocationToggle) {
+            chrome.storage.local.get(['isXLocationEnabled'], (res) => {
+                xLocationToggle.checked = res.isXLocationEnabled !== false;
+            });
+            xLocationToggle.addEventListener('change', () => {
+                chrome.storage.local.set({ isXLocationEnabled: xLocationToggle.checked });
+            });
+        }
+
+        if (xCachedCountDisplay) {
+            chrome.runtime.sendMessage({ action: 'X_GET_LOCATION_STATS' }, (res) => {
+                if (res && res.success && res.stats) {
+                    xCachedCountDisplay.textContent = res.stats.totalCached || 0;
+                }
+            });
+        }
+
+        if (xClearCacheBtn) {
+            xClearCacheBtn.addEventListener('click', () => {
+                chrome.runtime.sendMessage({ action: 'X_CLEAR_LOCATION_CACHE' }, (res) => {
+                    if (res && res.success) {
+                        if (xCachedCountDisplay) xCachedCountDisplay.textContent = '0';
+                    }
+                });
+            });
+        }
+
+        const COUNTRY_FLAGS_MAP = {
+            'Afghanistan': '🇦🇫', 'Albania': '🇦🇱', 'Algeria': '🇩🇿', 'Andorra': '🇦🇩', 'Angola': '🇦🇴',
+            'Argentina': '🇦🇷', 'Armenia': '🇦🇲', 'Australia': '🇦🇺', 'Austria': '🇦🇹', 'Azerbaijan': '🇦🇿',
+            'Bahamas': '🇧🇸', 'Bahrain': '🇧🇭', 'Bangladesh': '🇧🇩', 'Barbados': '🇧🇧', 'Belarus': '🇧🇾',
+            'Belgium': '🇧🇪', 'Belize': '🇧🇿', 'Benin': '🇧🇯', 'Bhutan': '🇧🇹', 'Bolivia': '🇧🇴',
+            'Bosnia and Herzegovina': '🇧🇦', 'Botswana': '🇧🇼', 'Brazil': '🇧🇷', 'Brunei': '🇧🇳',
+            'Bulgaria': '🇧🇬', 'Burkina Faso': '🇧🇫', 'Burundi': '🇧🇮', 'Cambodia': '🇰🇭', 'Cameroon': '🇨🇲',
+            'Canada': '🇨🇦', 'Chile': '🇨🇱', 'China': '🇨🇳', 'Colombia': '🇨🇴', 'Costa Rica': '🇨🇷',
+            'Croatia': '🇭🇷', 'Cuba': '🇨🇺', 'Cyprus': '🇨🇾', 'Czech Republic': '🇨🇿', 'Denmark': '🇩🇰',
+            'Dominican Republic': '🇩🇴', 'Ecuador': '🇪🇨', 'Egypt': '🇪🇬', 'El Salvador': '🇸🇻',
+            'England': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'Estonia': '🇪🇪', 'Ethiopia': '🇪🇹', 'Finland': '🇫🇮', 'France': '🇫🇷',
+            'Georgia': '🇬🇪', 'Germany': '🇩🇪', 'Ghana': '🇬🇭', 'Greece': '🇬🇷', 'Guatemala': '🇬🇹',
+            'Haiti': '🇭🇹', 'Honduras': '🇭🇳', 'Hong Kong': '🇭🇰', 'Hungary': '🇭🇺', 'Iceland': '🇮🇸',
+            'India': '🇮🇳', 'Indonesia': '🇮🇩', 'Iran': '🇮🇷', 'Iraq': '🇮🇶', 'Ireland': '🇮🇪',
+            'Israel': '🇮🇱', 'Italy': '🇮🇹', 'Jamaica': '🇯🇲', 'Japan': '🇯🇵', 'Jordan': '🇯🇴',
+            'Kazakhstan': '🇰🇿', 'Kenya': '🇰🇪', 'Kuwait': '🇰🇼', 'Latvia': '🇱🇻', 'Lebanon': '🇱🇧',
+            'Lithuania': '🇱🇹', 'Luxembourg': '🇱🇺', 'Malaysia': '🇲🇾', 'Maldives': '🇲🇻', 'Malta': '🇲🇹',
+            'Mexico': '🇲🇽', 'Moldova': '🇲🇩', 'Monaco': '🇲🇨', 'Mongolia': '🇲🇳', 'Montenegro': '🇲🇪',
+            'Morocco': '🇲🇦', 'Nepal': '🇳🇵', 'Netherlands': '🇳🇱', 'New Zealand': '🇳🇿', 'Nicaragua': '🇳🇮',
+            'Nigeria': '🇳🇬', 'North Korea': '🇰🇵', 'Norway': '🇳🇴', 'Oman': '🇴🇲', 'Pakistan': '🇵🇰',
+            'Palestine': '🇵🇸', 'Panama': '🇵🇦', 'Paraguay': '🇵🇾', 'Peru': '🇵🇪', 'Philippines': '🇵🇭',
+            'Poland': '🇵🇱', 'Portugal': '🇵🇹', 'Puerto Rico': '🇵🇷', 'Qatar': '🇶🇦', 'Romania': '🇷🇴',
+            'Russia': '🇷🇺', 'Saudi Arabia': '🇸🇦', 'Scotland': '🏴󠁧󠁢󠁳󠁣󠁴󠁿', 'Senegal': '🇸🇳', 'Serbia': '🇷🇸',
+            'Singapore': '🇸🇬', 'Slovakia': '🇸🇰', 'Slovenia': '🇸🇮', 'South Africa': '🇿🇦', 'South Korea': '🇰🇷',
+            'Spain': '🇪🇸', 'Sri Lanka': '🇱🇰', 'Sudan': '🇸🇩', 'Sweden': '🇸🇪', 'Switzerland': '🇨🇭',
+            'Syria': '🇸🇾', 'Taiwan': '🇹🇼', 'Thailand': '🇹🇭', 'Tunisia': '🇹🇳', 'Turkey': '🇹🇷',
+            'Uganda': '🇺🇬', 'Ukraine': '🇺🇦', 'United Arab Emirates': '🇦🇪', 'United Kingdom': '🇬🇧',
+            'United States': '🇺🇸', 'Uruguay': '🇺🇾', 'Uzbekistan': '🇺🇿', 'Venezuela': '🇻🇪',
+            'Vietnam': '🇻🇳', 'Wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿', 'Yemen': '🇾🇪', 'Zimbabwe': '🇿🇼'
+        };
+
+        const xCountrySelect = document.getElementById('xCountrySelect');
+        const xAddCountryBtn = document.getElementById('xAddCountryBtn');
+        const xBlockedChipsContainer = document.getElementById('xBlockedChipsContainer');
+
+        if (xCountrySelect && xBlockedChipsContainer) {
+            const sortedNames = Object.keys(COUNTRY_FLAGS_MAP).sort();
+            sortedNames.forEach(country => {
+                const opt = document.createElement('option');
+                opt.value = country;
+                opt.textContent = `${COUNTRY_FLAGS_MAP[country]} ${country}`;
+                xCountrySelect.appendChild(opt);
+            });
+
+            let currentBlocked = [];
+
+            function renderBlockedChips() {
+                xBlockedChipsContainer.innerHTML = '';
+                if (currentBlocked.length === 0) {
+                    xBlockedChipsContainer.innerHTML = '<span style="font-size: 0.8em; color: #888;">No countries blocked yet.</span>';
+                    return;
+                }
+
+                currentBlocked.forEach(country => {
+                    const chip = document.createElement('span');
+                    chip.style.cssText = 'display: inline-flex; align-items: center; gap: 4px; background: rgba(211,47,47,0.25); border: 1px solid rgba(211,47,47,0.5); border-radius: 12px; padding: 2px 8px; font-size: 0.8em; color: #ff8a80;';
+                    const flag = COUNTRY_FLAGS_MAP[country] || '🌐';
+                    chip.innerHTML = `${flag} ${country} <span class="chip-remove" style="cursor: pointer; font-weight: bold; margin-left: 4px; color: #fff;">&times;</span>`;
+
+                    chip.querySelector('.chip-remove').addEventListener('click', () => {
+                        currentBlocked = currentBlocked.filter(c => c !== country);
+                        chrome.storage.local.set({ blockedCountries: currentBlocked }, () => {
+                            renderBlockedChips();
+                        });
+                    });
+
+                    xBlockedChipsContainer.appendChild(chip);
+                });
+            }
+
+            chrome.storage.local.get(['blockedCountries'], (res) => {
+                currentBlocked = res.blockedCountries || [];
+                renderBlockedChips();
+            });
+
+            if (xAddCountryBtn) {
+                xAddCountryBtn.addEventListener('click', () => {
+                    const selected = xCountrySelect.value;
+                    if (selected && !currentBlocked.includes(selected)) {
+                        currentBlocked.push(selected);
+                        chrome.storage.local.set({ blockedCountries: currentBlocked }, () => {
+                            renderBlockedChips();
+                            xCountrySelect.value = '';
+                        });
+                    }
+                });
+            }
+        }
 
         refreshTabVisibility();
         setDependentModulesState();
@@ -116,7 +240,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { el: visibilityVscToggle, key: VSC_MODULE_VISIBLE_KEY },
         { el: visibilityFabToggle, key: FAB_MODULE_VISIBLE_KEY },
         { el: visibilityYouTubeToggle, key: YOUTUBE_MODULE_VISIBLE_KEY },
-        { el: visibilityXToggle, key: X_MODULE_VISIBLE_KEY }
+        { el: visibilityXToggle, key: X_MODULE_VISIBLE_KEY },
+        { el: visibilityCrunchyrollToggle, key: CRUNCHYROLL_MODULE_VISIBLE_KEY }
     ].forEach(({ el, key }) => {
         if (el) {
             el.addEventListener('change', () => {
@@ -416,6 +541,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'fab-controls': visibilityFabToggle?.checked !== false,
             'youtube-controls': visibilityYouTubeToggle?.checked !== false,
             'x-controls': visibilityXToggle?.checked !== false,
+            'crunchyroll-controls': visibilityCrunchyrollToggle?.checked !== false,
             'general-settings': true // Always visible
         };
 

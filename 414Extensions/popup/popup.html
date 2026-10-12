@@ -25,6 +25,7 @@
             <button class="tab-button" data-tab="fab-controls">FAB Helper</button>
             <button class="tab-button" data-tab="youtube-controls">YouTube Helper</button>
             <button class="tab-button" data-tab="x-controls">X (Twitter)</button>
+            <button class="tab-button" data-tab="crunchyroll-controls">Crunchyroll</button>
             <button class="tab-button" data-tab="general-settings">General</button>
         </nav>
 
@@ -239,6 +240,66 @@
             <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: 5px;">
                 Ensures videos start muted. Sound is enabled only when you explicitly unmute or adjust volume.
             </p>
+
+            <h3 class="sub-heading" style="margin-top: 15px;">Account Location & Device Signals</h3>
+            <div class="setting">
+                <label for="xLocationToggle">Show Country & Device Badges:</label>
+                <label class="switch">
+                    <input type="checkbox" id="xLocationToggle" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="setting" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
+                <label for="xCountrySelect" style="margin-bottom: 5px;">Filter / Hide Posts by Country:</label>
+                <div style="display: flex; gap: 6px; width: 100%;">
+                    <select id="xCountrySelect" style="flex: 1; padding: 5px; border-radius: 4px; border: 1px solid #444; background: #333; color: white;">
+                        <option value="">-- Select Country to Block --</option>
+                    </select>
+                    <button id="xAddCountryBtn" style="padding: 5px 12px; cursor: pointer; background: #d32f2f; border: none; color: white; border-radius: 4px; font-weight: bold;">Block</button>
+                </div>
+                <div id="xBlockedChipsContainer" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; width: 100%;"></div>
+            </div>
+
+            <div class="stats-section" style="margin-top: 10px;">
+                <p><span>Cached Account Profiles:</span> <strong id="xCachedCountDisplay">0</strong></p>
+                <button id="xClearCacheBtn" style="width: 100%; margin-top: 8px; padding: 6px; cursor: pointer; background: #555; border: none; color: white; border-radius: 3px;">Clear Location Cache</button>
+            </div>
+        </div>
+
+        <div id="crunchyroll-controls" class="tab-content">
+            <h5 class="tab-description">Settings for the Crunchyroll experience.</h5>
+            <h2>Crunchyroll Helper</h2>
+            <div class="setting crunchyroll-module-toggle-container">
+                <label for="crunchyrollModulePowerToggle">Crunchyroll Helper Power:</label>
+                <label class="switch">
+                    <input type="checkbox" id="crunchyrollModulePowerToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <h3 class="sub-heading">Playback & UI Controls</h3>
+            <div class="setting">
+                <label for="crunchyrollAutoCloseEndSlateToggle">Auto-Close End-Slate Recommendations:</label>
+                <label class="switch">
+                    <input type="checkbox" id="crunchyrollAutoCloseEndSlateToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: 5px;">
+                Automatically closes the full-screen recommendations carousel modal after an episode ends when no unwatched episodes remain.
+            </p>
+
+            <div class="setting" style="margin-top: 15px;">
+                <label for="crunchyrollHideControlsOnSpeedToggle">Hide Controls When Speeding Up:</label>
+                <label class="switch">
+                    <input type="checkbox" id="crunchyrollHideControlsOnSpeedToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: 5px;">
+                Automatically hides player controls, overlays, and mouse cursor when video playback speed is increased.
+            </p>
         </div>
 
         <div id="general-settings" class="tab-content">
@@ -285,6 +346,13 @@
                     <span class="slider"></span>
                 </label>
             </div>
+            <div class="setting">
+                <label for="visibilityCrunchyrollToggle">Crunchyroll:</label>
+                <label class="switch">
+                    <input type="checkbox" id="visibilityCrunchyrollToggle" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
 
             <h3 class="sub-heading" style="margin-top: 20px;">Credits & Licenses</h3>
             <div class="setting" style="display: block; font-size: 0.8em; color: #aaa;">
@@ -295,5 +363,6 @@
     <script src="popup.js"></script>
     <script src="fab_ui.js"></script>
     <script src="youtube_ui.js"></script>
+    <script src="crunchyroll_ui.js"></script>
 </body>
 </html>
