@@ -6,7 +6,8 @@ export async function fetchWithBackoff(url, options, attempt = 1) {
     const maxRetries = AppState.globalMaxRetries;
     const initialDelay = AppState.globalInitialDelayMs;
     const maxDelay = AppState.globalMaxDelayMs;
-    let currentDelay = initialDelay; // Start with initial delay for the first retry
+    // Calculate exponential delay based on attempt number (attempt 1 uses initialDelay)
+    let currentDelay = Math.min(maxDelay, initialDelay * Math.pow(2, attempt - 1));
 
     try {
         const response = await fetch(url, options);

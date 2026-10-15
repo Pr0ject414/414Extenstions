@@ -3,7 +3,7 @@ import * as FabConstants from './background_modules/fabConstants.js';
 import * as FabState from './background_modules/fabState.js';
 import * as FabQueueManager from './background_modules/fabQueueManager.js';
 import * as FabVerification from './background_modules/fabVerification.js';
-import * as AppState from '../../shared_modules/appState.js';
+import * as AppState from '../shared_modules/appState.js';
 
 let isWebRequestlistenerRegistered = false;
 

@@ -61,16 +61,33 @@
     }
 
     const internalContexts = new Set();
+    let hasUserGesture = false;
+
+    function hasUserActivation() {
+        if (typeof navigator !== 'undefined' && navigator.userActivation) {
+            return Boolean(navigator.userActivation.hasBeenActive);
+        }
+        return hasUserGesture;
+    }
 
     function resumeAllContexts() {
+        if (!hasUserActivation()) return;
+
         allAudioContexts.forEach(ctx => {
             if (ctx && ctx.state === 'suspended') {
-                ctx.resume().catch(() => {});
+                try {
+                    ctx.resume().catch(() => {});
+                } catch (e) {}
+            }
+            if (ctx && ctx.state === 'closed') {
+                allAudioContexts.delete(ctx);
             }
         });
         internalContexts.forEach(ctx => {
             if (ctx && ctx.state === 'suspended') {
-                ctx.resume().catch(() => {});
+                try {
+                    ctx.resume().catch(() => {});
+                } catch (e) {}
             }
             if (ctx && ctx.state === 'closed') {
                 internalContexts.delete(ctx);
@@ -78,8 +95,16 @@
         });
     }
 
+    function handleUserGesture() {
+        hasUserGesture = true;
+        resumeAllContexts();
+        if (currentVolume > 1.01 || currentVolume < 0.99) {
+            allMediaElements.forEach(syncElementVolume);
+        }
+    }
+
     ['click', 'keydown', 'pointerdown', 'touchstart'].forEach(type => {
-        window.addEventListener(type, resumeAllContexts, { capture: true, passive: true });
+        window.addEventListener(type, handleUserGesture, { capture: true, passive: true });
     });
 
     // --- 4. MEDIA ELEMENT TRACKING ---
@@ -87,7 +112,9 @@
     HTMLMediaElement.prototype.play = function() {
         allMediaElements.add(this);
         syncElementVolume(this);
-        resumeAllContexts();
+        if (hasUserActivation()) {
+            resumeAllContexts();
+        }
 
         const playPromise = originalPlay.apply(this, arguments);
         if (playPromise && typeof playPromise.catch === 'function') {
@@ -115,6 +142,8 @@
             return;
         }
 
+        if (!hasUserActivation()) return;
+
         // Only attach if not already handled by a page AudioContext
         // (This is a bit tricky to detect perfectly, but createMediaElementSource will throw if already attached)
         try {
@@ -127,7 +156,9 @@
             internalContexts.add(ctx);
             elementContexts.set(el, { ctx, gain });
             if (ctx.state === 'suspended') {
-                ctx.resume().catch(() => {});
+                try {
+                    ctx.resume().catch(() => {});
+                } catch (e) {}
             }
         } catch (e) {
             // Already attached to another context, or CORS issue.
@@ -138,6 +169,9 @@
 
     // --- 5. PERIODIC SCAN (Deep) ---
     function scanDeep() {
+        // Skip scanning if volume is normal 100% and no audio contexts need syncing
+        if (Math.abs(currentVolume - 1.0) < 0.01 && allAudioContexts.size === 0) return;
+
         // Sync native media
         const media = document.querySelectorAll('audio, video');
         media.forEach(el => {

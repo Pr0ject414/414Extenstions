@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
         crunchyrollModulePowerToggle.addEventListener('change', () => {
             const isEnabled = crunchyrollModulePowerToggle.checked;
             chrome.storage.local.set({ [CRUNCHYROLL_MODULE_ENABLED_KEY]: isEnabled });
+            chrome.runtime.sendMessage({ action: "setCrunchyrollModuleEnabled", enabled: isEnabled });
         });
 
         if (crunchyrollAutoCloseEndSlateToggle) {

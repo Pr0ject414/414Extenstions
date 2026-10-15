@@ -1,7 +1,6 @@
 // KylesChromeExtensions/background.js
 import { moduleManager } from './shared_modules/moduleManager.js';
 import * as AppState from './shared_modules/appState.js';
-import * as LanguageManager from './shared_modules/languageManager.js';
 
 import * as FabBackground from './fab_extension/fabBackground.js';
 import * as YouTubeBackground from './youtube_extension/youtubeBackground.js';
@@ -64,15 +63,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: true });
             return true;
         case "setFabModuleEnabled":
-             AppState.setFabModuleEnabled(request.enabled);
-             AppState.saveGlobalState().then(broadcastStateChanges);
-             sendResponse({ success: true });
-             return true;
+            AppState.setFabModuleEnabled(request.enabled);
+            AppState.saveGlobalState().then(broadcastStateChanges);
+            sendResponse({ success: true });
+            return true;
         case "setYouTubeModuleEnabled":
-             AppState.setYouTubeModuleEnabled(request.enabled);
-             AppState.saveGlobalState();
-             sendResponse({ success: true });
-             return true;
+            AppState.setYouTubeModuleEnabled(request.enabled);
+            AppState.saveGlobalState();
+            sendResponse({ success: true });
+            return true;
+        case "setXModuleEnabled":
+            AppState.setXModuleEnabled(request.enabled);
+            AppState.saveGlobalState();
+            sendResponse({ success: true });
+            return true;
+        case "setCrunchyrollModuleEnabled":
+            AppState.setCrunchyrollModuleEnabled(request.enabled);
+            AppState.saveGlobalState();
+            sendResponse({ success: true });
+            return true;
+        case "setVolumeModuleEnabled":
+            AppState.setVolumeModuleEnabled(request.enabled);
+            AppState.saveGlobalState();
+            sendResponse({ success: true });
+            return true;
+        case "setVscModuleEnabled":
+            AppState.setVscModuleEnabled(request.enabled);
+            AppState.saveGlobalState();
+            sendResponse({ success: true });
+            return true;
+        case "getGlobalAppState":
+            sendResponse({
+                globalMasterSwitchEnabled: AppState.globalMasterSwitchEnabled,
+                fabModuleEnabled: AppState.fabModuleEnabled,
+                youTubeModuleEnabled: AppState.youTubeModuleEnabled,
+                xModuleEnabled: AppState.xModuleEnabled,
+                crunchyrollModuleEnabled: AppState.crunchyrollModuleEnabled,
+                volumeModuleEnabled: AppState.volumeModuleEnabled,
+                vscModuleEnabled: AppState.vscModuleEnabled,
+                fabModuleVisible: AppState.fabModuleVisible,
+                youTubeModuleVisible: AppState.youTubeModuleVisible,
+                xModuleVisible: AppState.xModuleVisible,
+                crunchyrollModuleVisible: AppState.crunchyrollModuleVisible,
+                volumeModuleVisible: AppState.volumeModuleVisible,
+                vscModuleVisible: AppState.vscModuleVisible,
+            });
+            return true;
         case "settingsUpdated":
             (async () => {
                 await AppState.loadGlobalState();

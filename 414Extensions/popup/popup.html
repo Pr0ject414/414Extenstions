@@ -3,14 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kyle's Extensions</title>
+    <title>414 Extensions</title>
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
     <header class="popup-header">
-        <h1>Kyle's Extensions</h1>
+        <div class="header-brand">
+            <div class="brand-title-group">
+                <img src="../icons/icon32.png" alt="414 Logo" class="brand-icon">
+                <h1>414 Extensions</h1>
+            </div>
+            <span class="version-pill">v1.7</span>
+        </div>
         <div class="global-toggle-container setting">
-            <label for="globalMasterSwitchToggle">Extension Power (All):</label>
+            <label for="globalMasterSwitchToggle">
+                <span class="power-indicator-dot"></span>
+                Master Switch (All Features)
+            </label>
             <label class="switch">
                 <input type="checkbox" id="globalMasterSwitchToggle">
                 <span class="slider"></span>
@@ -20,37 +29,41 @@
 
     <div class="tab-container">
         <nav class="tab-nav">
-            <button class="tab-button active" data-tab="volume-controls">Volume</button>
-            <button class="tab-button" data-tab="speed-controls">Speed</button>
-            <button class="tab-button" data-tab="fab-controls">FAB Helper</button>
-            <button class="tab-button" data-tab="youtube-controls">YouTube Helper</button>
-            <button class="tab-button" data-tab="x-controls">X (Twitter)</button>
-            <button class="tab-button" data-tab="crunchyroll-controls">Crunchyroll</button>
-            <button class="tab-button" data-tab="general-settings">General</button>
+            <button class="tab-button active" data-tab="volume-controls"><span>🔊</span> Volume</button>
+            <button class="tab-button" data-tab="speed-controls"><span>⚡</span> Speed</button>
+            <button class="tab-button" data-tab="fab-controls"><span>🛒</span> FAB</button>
+            <button class="tab-button" data-tab="youtube-controls"><span>📺</span> YouTube</button>
+            <button class="tab-button" data-tab="x-controls" title="X (Twitter)"><span>𝕏</span></button>
+            <button class="tab-button" data-tab="crunchyroll-controls"><span>🎬</span> Crunchyroll</button>
+            <button class="tab-button" data-tab="general-settings"><span>⚙️</span> General</button>
         </nav>
 
+        <!-- Volume Booster Tab -->
         <div id="volume-controls" class="tab-content active">
-             <h5 class="tab-description">Control audio volume for the current tab.</h5>
-             <h2>Volume Booster</h2>
+             <p class="tab-description">Tab Audio Booster (Up to 600% gain)</p>
+             <h2><span>🔊</span> Volume Booster</h2>
              
-             <div class="volume-control-container" style="text-align: center; padding: 20px 0;">
+             <div class="volume-control-container">
                 <div class="volume-display">
-                    <span id="volumeValueDisplay" style="font-size: 2.5em; font-weight: bold; color: #4caf50;">100%</span>
+                    <span id="volumeValueDisplay">100%</span>
                 </div>
-                <!-- Added separate class for volume range to avoid conflict with toggle switch .slider -->
-                <div class="slidecontainer" style="margin: 20px 0; position: relative;"> 
-                    <input type="range" min="0" max="600" value="100" class="volume-range" id="volumeSlider" style="width: 100%;">
+                <div class="slidecontainer" style="margin: 16px 0 12px; position: relative;"> 
+                    <input type="range" min="0" max="600" value="100" class="volume-range" id="volumeSlider">
                 </div>
-                <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
-                    <button id="volumeResetBtn" style="padding: 5px 10px; cursor: pointer; background: #555; border: none; color: white; border-radius: 3px;">Reset to 100%</button>
-                    <p style="color: #888; font-size: 0.9em; margin: 0;">Boost up to 600%</p>
+                <div class="volume-presets">
+                    <button class="preset-btn" data-vol="100">100%</button>
+                    <button class="preset-btn" data-vol="200">200%</button>
+                    <button class="preset-btn" data-vol="400">400%</button>
+                    <button class="preset-btn" data-vol="600">600%</button>
+                    <button id="volumeResetBtn" class="preset-btn btn-secondary">Reset</button>
                 </div>
              </div>
         </div>
 
+        <!-- Video Speed Controller Tab -->
         <div id="speed-controls" class="tab-content">
-            <h5 class="tab-description">Quick settings for Video Speed Controller.</h5>
-            <h2>Speed Controller</h2>
+            <p class="tab-description">Precision playback speed overlay and shortcuts</p>
+            <h2><span>⚡</span> Speed Controller</h2>
             
             <div class="setting">
                 <label for="vscPowerToggle">VSC Enabled:</label>
@@ -60,33 +73,34 @@
                 </label>
             </div>
 
-            <div class="setting" style="flex-direction: column; align-items: flex-start;">
-                <label for="vscPopupKeySpeed" style="margin-bottom: 5px;">User Override Speed (Hold):</label>
-                <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
-                     <input type="number" id="vscPopupKeySpeed" min="0.1" max="16.0" step="0.1" value="2.0" style="flex: 1; padding: 5px; background: #333; color: white; border: 1px solid #444; border-radius: 3px;">
-                     <button id="vscSaveSpeedBtn" style="padding: 5px 10px; cursor: pointer; background: #4caf50; border: none; color: white; border-radius: 3px;">Save</button>
+            <div class="setting" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <label for="vscPopupKeySpeed">User Override Speed (Hold):</label>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                     <input type="number" id="vscPopupKeySpeed" min="0.1" max="16.0" step="0.1" value="2.0" style="flex: 1;">
+                     <button id="vscSaveSpeedBtn" class="btn-primary" style="padding: 7px 14px;">Save</button>
                 </div>
             </div>
 
-            <div class="setting" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
-                <label style="margin-bottom: 5px;">Global Default Speed:</label>
-                <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
-                     <span id="vscGlobalDefaultDisplay" style="font-weight: bold; color: #2196f3;">1.0</span>
-                     <button id="vscSetCurrentAsGlobalBtn" style="flex: 1; padding: 5px 10px; cursor: pointer; background: #2196f3; border: none; color: white; border-radius: 3px;">Set Current as Global</button>
+            <div class="setting" style="flex-direction: column; align-items: stretch; gap: 8px; margin-top: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label>Global Default Speed:</label>
+                    <span id="vscGlobalDefaultDisplay" style="font-weight: 700; color: var(--accent-cyan); font-size: 1.1em;">1.0</span>
                 </div>
-                <p style="font-size: 0.75em; color: #888; margin-top: 5px; margin-bottom: 0;">This speed will be used for all new sites.</p>
+                <button id="vscSetCurrentAsGlobalBtn" class="btn-secondary" style="padding: 7px 12px; width: 100%;">Set Current Speed as Global</button>
+                <p class="placeholder-text" style="margin: 0;">Applied to all unvisited domains.</p>
             </div>
 
             <h3 class="sub-heading">Quick Actions</h3>
-            <div class="setting">
-                 <button id="vscAddBlacklistBtn" style="width: 100%; padding: 8px; cursor: pointer; background: #d32f2f; border: none; color: white; border-radius: 3px;">Add Current Site to Blacklist</button>
+            <div class="setting" style="padding: 6px;">
+                 <button id="vscAddBlacklistBtn" class="btn-danger" style="width: 100%; padding: 8px;">Add Current Domain to Blacklist</button>
             </div>
             <p id="vscPopupStatus" class="status-message"></p>
         </div>
 
+        <!-- FAB Helper Tab -->
         <div id="fab-controls" class="tab-content">
-            <h5 class="tab-description">Settings and live status for FAB website automation.</h5>
-            <h2>FAB Helper</h2>
+            <p class="tab-description">Epic Games FAB free content acquisition suite</p>
+            <h2><span>🛒</span> FAB Helper</h2>
 
             <div class="setting fab-module-toggle-container">
                 <label for="fabModulePowerToggle">FAB Helper Power:</label>
@@ -105,14 +119,14 @@
                 </label>
             </div>
             <div class="setting">
-                <label for="fabAutoAddToggle">Auto-Add Free License (Product Pages):</label>
+                <label for="fabAutoAddToggle">Auto-Add Free (Product Pages):</label>
                 <label class="switch">
                     <input type="checkbox" id="fabAutoAddToggle">
                     <span class="slider"></span>
                 </label>
             </div>
             <div class="setting">
-                <label for="fabAutoOpenFreeToggle">Auto-Open Free Items (Browse Pages):</label>
+                <label for="fabAutoOpenFreeToggle">Auto-Open Free (Browse Pages):</label>
                 <label class="switch">
                     <input type="checkbox" id="fabAutoOpenFreeToggle">
                     <span class="slider"></span>
@@ -133,26 +147,24 @@
                 </label>
             </div>
             
-            <h3 class="sub-heading">Live Status</h3>
+            <h3 class="sub-heading">Live Automation Status</h3>
             <div class="stats-section operational-status-section">
                 <p>
-                    <span>Overall Status:</span>
+                    <span>Overall Engine Status:</span>
                     <span class="status-indicator-container">
                         <span id="fabOperationalStatusIndicator"></span>
                         <strong id="fabOperationalStatusText">Checking...</strong>
                     </span>
                 </p>
-            </div>
-
-            <div class="stats-section">
-                <p><span>Items in Processing Queue:</span> <strong id="fabQueueSize">N/A</strong></p>
-                <p><span>Owned Hidden (Active Page):</span> <strong id="fabHiddenOwnedCount">N/A</strong></p>
+                <p><span>Queue Depth:</span> <strong id="fabQueueSize">0</strong></p>
+                <p><span>Owned Hidden (Active Page):</span> <strong id="fabHiddenOwnedCount">0</strong></p>
             </div>
         </div>
         
+        <!-- YouTube Helper Tab -->
         <div id="youtube-controls" class="tab-content">
-            <h5 class="tab-description">Settings for the YouTube experience.</h5>
-            <h2>YouTube Helper</h2>
+            <p class="tab-description">Enhanced bitrate and player decluttering</p>
+            <h2><span>📺</span> YouTube Helper</h2>
             <div class="setting youtube-module-toggle-container">
                 <label for="youTubeModulePowerToggle">YouTube Helper Power:</label>
                 <label class="switch">
@@ -160,24 +172,25 @@
                     <span class="slider"></span>
                 </label>
             </div>
-            <h3 class="sub-heading">Player Settings</h3>
+
+            <h3 class="sub-heading">Player Experience</h3>
             <div class="setting">
-                <label for="youTubeNoSuggestionsToggle">Remove End-of-Video Suggestions:</label>
+                <label for="youTubeNoSuggestionsToggle">Remove End-Screen Suggestions:</label>
                 <label class="switch">
                     <input type="checkbox" id="youTubeNoSuggestionsToggle">
                     <span class="slider"></span>
                 </label>
             </div>
 
-            <h3 class="sub-heading">Video Quality</h3>
-            <div class="setting" style="flex-direction: column; align-items: flex-start;">
-                <label for="youTubeQualitySelect" style="margin-bottom: 5px;">Preferred Quality:</label>
-                <select id="youTubeQualitySelect" style="width: 100%; padding: 5px; border-radius: 4px; border: 1px solid #444; background: #333; color: white;">
+            <h3 class="sub-heading">Resolution & Bitrate</h3>
+            <div class="setting" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <label for="youTubeQualitySelect">Target Playback Quality:</label>
+                <select id="youTubeQualitySelect">
                     <option value="4320">8K (4320p)</option>
                     <option value="2160" selected>4K (2160p)</option>
-                    <option value="1440">1440p</option>
-                    <option value="1080">1080p</option>
-                    <option value="720">720p</option>
+                    <option value="1440">1440p (QHD)</option>
+                    <option value="1080">1080p (FHD)</option>
+                    <option value="720">720p (HD)</option>
                     <option value="480">480p</option>
                     <option value="360">360p</option>
                     <option value="240">240p</option>
@@ -185,31 +198,32 @@
                 </select>
             </div>
             <div class="setting">
-                <label for="youTubeEnhancedBitrateToggle">Enhanced Bitrate / Premium:</label>
+                <label for="youTubeEnhancedBitrateToggle">Premium Enhanced Bitrate:</label>
                 <label class="switch">
                     <input type="checkbox" id="youTubeEnhancedBitrateToggle">
                     <span class="slider"></span>
                 </label>
             </div>
-            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: -5px; margin-bottom: 10px;">
-                *Enhanced Bitrate and Super Resolution only apply if your user account has access (e.g., Premium).
+            <p class="placeholder-text">
+                *Enhanced bitrate applies automatically if your YouTube account has access.
             </p>
-             <h3 class="sub-heading">Live Status</h3>
+
+            <h3 class="sub-heading">Operational Status</h3>
             <div class="stats-section operational-status-section">
                 <p>
-                    <span>Overall Status:</span>
+                    <span>Module Status:</span>
                     <span class="status-indicator-container">
                         <span id="youTubeOperationalStatusIndicator"></span>
                         <strong id="youTubeOperationalStatusText">Checking...</strong>
                     </span>
                 </p>
             </div>
-
         </div>
         
+        <!-- X (Twitter) Tab -->
         <div id="x-controls" class="tab-content">
-            <h5 class="tab-description">Settings for the X (Twitter) experience.</h5>
-            <h2>X Helper</h2>
+            <p class="tab-description">Dossier badges, media unmuter, and geo-filtering</p>
+            <h2><span>𝕏</span> X (Twitter) Helper</h2>
             <div class="setting x-module-toggle-container">
                 <label for="xModulePowerToggle">X Helper Power:</label>
                 <label class="switch">
@@ -218,30 +232,26 @@
                 </label>
             </div>
             
-            <h3 class="sub-heading">Video Settings</h3>
+            <h3 class="sub-heading">Media & Audio</h3>
             <div class="setting">
-                <label for="xAlwaysMuteToggle">Always Mute Videos:</label>
+                <label for="xAlwaysMuteToggle">Always Start Videos Muted:</label>
                 <label class="switch">
                     <input type="checkbox" id="xAlwaysMuteToggle">
                     <span class="slider"></span>
                 </label>
             </div>
             
-            <div class="setting" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
-                <label for="xVolumeSlider" style="margin-bottom: 5px; display: flex; justify-content: space-between; width: 100%;">
-                    <span>Initial Volume:</span>
-                    <span id="xVolumeValueDisplay" style="font-weight: bold; color: #4caf50;">100%</span>
-                </label>
-                <div class="slidecontainer" style="width: 100%; position: relative;">
+            <div class="setting" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <div style="display: flex; justify-content: space-between;">
+                    <label for="xVolumeSlider">Default Media Volume:</label>
+                    <span id="xVolumeValueDisplay" style="font-weight: 700; color: var(--status-green);">100%</span>
+                </div>
+                <div class="slidecontainer">
                      <input type="range" min="0" max="100" value="100" class="volume-range" id="xVolumeSlider">
                 </div>
             </div>
 
-            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: 5px;">
-                Ensures videos start muted. Sound is enabled only when you explicitly unmute or adjust volume.
-            </p>
-
-            <h3 class="sub-heading" style="margin-top: 15px;">Account Location & Device Signals</h3>
+            <h3 class="sub-heading">Account Location & Device Badges</h3>
             <div class="setting">
                 <label for="xLocationToggle">Show Country & Device Badges:</label>
                 <label class="switch">
@@ -250,26 +260,27 @@
                 </label>
             </div>
 
-            <div class="setting" style="flex-direction: column; align-items: flex-start; margin-top: 10px;">
-                <label for="xCountrySelect" style="margin-bottom: 5px;">Filter / Hide Posts by Country:</label>
-                <div style="display: flex; gap: 6px; width: 100%;">
-                    <select id="xCountrySelect" style="flex: 1; padding: 5px; border-radius: 4px; border: 1px solid #444; background: #333; color: white;">
+            <div class="setting" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <label for="xCountrySelect">Filter / Hide Posts by Origin Country:</label>
+                <div style="display: flex; gap: 6px;">
+                    <select id="xCountrySelect" style="flex: 1;">
                         <option value="">-- Select Country to Block --</option>
                     </select>
-                    <button id="xAddCountryBtn" style="padding: 5px 12px; cursor: pointer; background: #d32f2f; border: none; color: white; border-radius: 4px; font-weight: bold;">Block</button>
+                    <button id="xAddCountryBtn" class="btn-danger" style="padding: 6px 14px;">Block</button>
                 </div>
-                <div id="xBlockedChipsContainer" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; width: 100%;"></div>
+                <div id="xBlockedChipsContainer" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;"></div>
             </div>
 
-            <div class="stats-section" style="margin-top: 10px;">
-                <p><span>Cached Account Profiles:</span> <strong id="xCachedCountDisplay">0</strong></p>
-                <button id="xClearCacheBtn" style="width: 100%; margin-top: 8px; padding: 6px; cursor: pointer; background: #555; border: none; color: white; border-radius: 3px;">Clear Location Cache</button>
+            <div class="stats-section">
+                <p><span>Cached Account Dossiers:</span> <strong id="xCachedCountDisplay">0</strong></p>
+                <button id="xClearCacheBtn" class="btn-secondary" style="width: 100%; margin-top: 8px; padding: 7px;">Clear Location Cache</button>
             </div>
         </div>
 
+        <!-- Crunchyroll Tab -->
         <div id="crunchyroll-controls" class="tab-content">
-            <h5 class="tab-description">Settings for the Crunchyroll experience.</h5>
-            <h2>Crunchyroll Helper</h2>
+            <p class="tab-description">Distraction-free anime streaming tools</p>
+            <h2><span>🎬</span> Crunchyroll Helper</h2>
             <div class="setting crunchyroll-module-toggle-container">
                 <label for="crunchyrollModulePowerToggle">Crunchyroll Helper Power:</label>
                 <label class="switch">
@@ -278,85 +289,90 @@
                 </label>
             </div>
             
-            <h3 class="sub-heading">Playback & UI Controls</h3>
+            <h3 class="sub-heading">Playback Controls</h3>
             <div class="setting">
-                <label for="crunchyrollAutoCloseEndSlateToggle">Auto-Close End-Slate Recommendations:</label>
+                <label for="crunchyrollAutoCloseEndSlateToggle">Auto-Dismiss End-Slate Carousel:</label>
                 <label class="switch">
                     <input type="checkbox" id="crunchyrollAutoCloseEndSlateToggle">
                     <span class="slider"></span>
                 </label>
             </div>
-            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: 5px;">
-                Automatically closes the full-screen recommendations carousel modal after an episode ends when no unwatched episodes remain.
+            <p class="placeholder-text">
+                Automatically closes the recommendation carousel after an episode concludes.
             </p>
 
-            <div class="setting" style="margin-top: 15px;">
-                <label for="crunchyrollHideControlsOnSpeedToggle">Hide Controls When Speeding Up:</label>
+            <div class="setting" style="margin-top: 10px;">
+                <label for="crunchyrollHideControlsOnSpeedToggle">Hide Controls During Speed-Up:</label>
                 <label class="switch">
                     <input type="checkbox" id="crunchyrollHideControlsOnSpeedToggle">
                     <span class="slider"></span>
                 </label>
             </div>
-            <p class="placeholder-text" style="font-size: 0.8em; color: #aaa; margin-top: 5px;">
-                Automatically hides player controls, overlays, and mouse cursor when video playback speed is increased.
+            <p class="placeholder-text">
+                Hides controls, overlays, and mouse cursor while speed is above 1.0x.
             </p>
         </div>
 
+        <!-- General Settings Tab -->
         <div id="general-settings" class="tab-content">
-            <h5 class="tab-description">General extension-wide settings and information.</h5>
-            <h2>General Info</h2>
-            <p class="placeholder-text">The "Extension Power (All)" switch in the header controls all functionalities of this extension, including all website-specific helpers.</p>
-            <p class="placeholder-text" style="margin-top: 15px;">Future global settings will appear here. For advanced settings and magic numbers, please visit the <a href="#" id="openOptionsPageLink">Extension Options page</a>.</p>
+            <p class="tab-description">Extension-wide preferences and module visibility</p>
+            <h2><span>⚙️</span> General Preferences</h2>
+            <p class="placeholder-text">
+                Master switch controls all extensions. Need advanced timing or keymaps? Open the 
+                <a href="#" id="openOptionsPageLink">Extension Options Page &rarr;</a>
+            </p>
             
-            <h3 class="sub-heading" style="margin-top: 20px;">Module Visibility</h3>
-            <p class="placeholder-text">Hide or show specific feature sets in this popup.</p>
+            <h3 class="sub-heading">Popup Tab Visibility</h3>
+            <p class="placeholder-text">Toggle which feature tabs appear in this popup:</p>
             
             <div class="setting">
-                <label for="visibilityVolumeToggle">Volume Booster:</label>
+                <label for="visibilityVolumeToggle">Volume Booster</label>
                 <label class="switch">
                     <input type="checkbox" id="visibilityVolumeToggle" checked>
                     <span class="slider"></span>
                 </label>
             </div>
             <div class="setting">
-                <label for="visibilityVscToggle">Speed Controller:</label>
+                <label for="visibilityVscToggle">Speed Controller</label>
                 <label class="switch">
                     <input type="checkbox" id="visibilityVscToggle" checked>
                     <span class="slider"></span>
                 </label>
             </div>
             <div class="setting">
-                <label for="visibilityFabToggle">FAB Helper:</label>
+                <label for="visibilityFabToggle">FAB Helper</label>
                 <label class="switch">
                     <input type="checkbox" id="visibilityFabToggle" checked>
                     <span class="slider"></span>
                 </label>
             </div>
             <div class="setting">
-                <label for="visibilityYouTubeToggle">YouTube Helper:</label>
+                <label for="visibilityYouTubeToggle">YouTube Helper</label>
                 <label class="switch">
                     <input type="checkbox" id="visibilityYouTubeToggle" checked>
                     <span class="slider"></span>
                 </label>
             </div>
             <div class="setting">
-                <label for="visibilityXToggle">X (Twitter):</label>
+                <label for="visibilityXToggle">X (Twitter)</label>
                 <label class="switch">
                     <input type="checkbox" id="visibilityXToggle" checked>
                     <span class="slider"></span>
                 </label>
             </div>
             <div class="setting">
-                <label for="visibilityCrunchyrollToggle">Crunchyroll:</label>
+                <label for="visibilityCrunchyrollToggle">Crunchyroll</label>
                 <label class="switch">
                     <input type="checkbox" id="visibilityCrunchyrollToggle" checked>
                     <span class="slider"></span>
                 </label>
             </div>
 
-            <h3 class="sub-heading" style="margin-top: 20px;">Credits & Licenses</h3>
-            <div class="setting" style="display: block; font-size: 0.8em; color: #aaa;">
-                <p><strong>YouTube Auto HD</strong> functionality is based on code from <a href="https://github.com/avi12/youtube-auto-hd" target="_blank" style="color: #4caf50;">youtube-auto-hd</a> by avi12, used under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" style="color: #4caf50;">GPLv3 License</a>.</p>
+            <h3 class="sub-heading">Credits & Open Source</h3>
+            <div class="setting" style="display: block; font-size: 11px; line-height: 1.5;">
+                <p class="placeholder-text" style="margin: 0;">
+                    <strong>YouTube Auto HD</strong> core logic based on <a href="https://github.com/avi12/youtube-auto-hd" target="_blank">youtube-auto-hd</a> by avi12 under <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank">GPLv3</a>.
+                </p>
             </div>
         </div>
     </div>

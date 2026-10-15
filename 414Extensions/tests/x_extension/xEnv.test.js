@@ -67,4 +67,53 @@ describe('xEnv.js', () => {
         // Should be forced back to 1.0
         expect(originalVolumeDescriptor.get.call(video)).toBe(1.0);
     });
+
+    it('should inject a white, clickable, interactive download button into video players', () => {
+        const player = document.createElement('div');
+        player.setAttribute('data-testid', 'videoPlayer');
+
+        const video = document.createElement('video');
+        video.src = 'https://video.twimg.com/ext_tw_video/123/pu/vid/720x1280/test.mp4';
+        // Mock React Fiber/Props on video
+        video.__reactProps$test = {
+            variants: [
+                { url: 'https://video.twimg.com/ext_tw_video/123/pu/vid/720x1280/test.mp4', bitrate: 2176000, contentType: 'video/mp4' }
+            ]
+        };
+        player.appendChild(video);
+
+        const settingsBtn = document.createElement('button');
+        settingsBtn.setAttribute('aria-label', 'Settings');
+        const controlGroup = document.createElement('div');
+        controlGroup.appendChild(settingsBtn);
+        player.appendChild(controlGroup);
+
+        document.body.appendChild(player);
+
+        // Run injection
+        const postMessageSpy = jest.spyOn(window, 'postMessage');
+        XEnv.injectDownloadButtons();
+
+        const btn = player.querySelector('.vsc-download-btn');
+        expect(btn).not.toBeNull();
+        expect(btn.getAttribute('aria-label')).toBe('Download Video');
+        expect(btn.style.cursor).toBe('pointer');
+
+        // Check SVG fill
+        const svg = btn.querySelector('svg');
+        expect(svg).not.toBeNull();
+        expect(svg.innerHTML).toContain('fill="#ffffff"');
+
+        // Click button
+        btn.click();
+        expect(postMessageSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'X_DOWNLOAD_REQUEST',
+                payload: expect.objectContaining({
+                    url: 'https://video.twimg.com/ext_tw_video/123/pu/vid/720x1280/test.mp4'
+                })
+            }),
+            '*'
+        );
+    });
 });

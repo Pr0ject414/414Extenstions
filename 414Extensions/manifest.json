@@ -26,7 +26,12 @@
   },
   "action": {
     "default_popup": "popup/popup.html",
-    "default_icon": "icons/default_icon.png"
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "content_scripts": [
     {
@@ -140,8 +145,10 @@
     "extension_pages": "script-src 'self'; object-src 'self';"
   },
   "icons": {
-    "48": "icons/default_icon.png",
-    "128": "icons/default_icon.png"
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "options_page": "settings/settings.html"
 }

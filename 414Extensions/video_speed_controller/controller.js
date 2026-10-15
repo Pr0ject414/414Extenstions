@@ -5,6 +5,7 @@ const VSC_STORAGE_KEYS = {
   BLACKLIST: 'vsc_blacklist',
   IS_ENABLED: 'vsc_is_enabled',
   VISIBLE: 'isVscModuleVisible',
+  GLOBAL_MASTER_SWITCH: 'isGlobalMasterSwitchEnabled',
   SHORTCUTS: 'vsc_shortcuts',
   OPTIONS: 'vsc_options'
 };
@@ -67,11 +68,12 @@ function checkBlacklistAndInit() {
       VSC_STORAGE_KEYS.GLOBAL_DEFAULT_SPEED,
       VSC_STORAGE_KEYS.SPEED, // For migration
       VSC_STORAGE_KEYS.IS_ENABLED, 
-      VSC_STORAGE_KEYS.VISIBLE
+      VSC_STORAGE_KEYS.VISIBLE,
+      VSC_STORAGE_KEYS.GLOBAL_MASTER_SWITCH
   ], (result) => {
     if (chrome.runtime.lastError) return;
     // 0. Master Switch & Visibility Check
-    if (result[VSC_STORAGE_KEYS.IS_ENABLED] === false || result[VSC_STORAGE_KEYS.VISIBLE] === false) {
+    if (result[VSC_STORAGE_KEYS.GLOBAL_MASTER_SWITCH] === false || result[VSC_STORAGE_KEYS.IS_ENABLED] === false || result[VSC_STORAGE_KEYS.VISIBLE] === false) {
         debugLog('VSC is disabled globally or hidden.');
         isGloballyDisabled = true;
         deinit(); // Ensure cleanup if it was running
@@ -1113,14 +1115,9 @@ if (isExtValid()) {
         if (namespace !== 'local') return;
         if (!isExtValid()) return;
 
-        // 1. Master Switch
-        if (changes[VSC_STORAGE_KEYS.IS_ENABLED]) {
-            const isEnabled = changes[VSC_STORAGE_KEYS.IS_ENABLED].newValue;
-            if (isEnabled === false) {
-                deinit();
-            } else {
-                checkBlacklistAndInit();
-            }
+        // 1. Master Switch & Visibility Updates
+        if (changes[VSC_STORAGE_KEYS.GLOBAL_MASTER_SWITCH] || changes[VSC_STORAGE_KEYS.IS_ENABLED] || changes[VSC_STORAGE_KEYS.VISIBLE]) {
+            checkBlacklistAndInit();
         }
 
         // 2. Options Update (Speed, Opacity, etc.)

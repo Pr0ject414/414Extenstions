@@ -654,12 +654,61 @@
     // --- UI INJECTION ---
 
     const DOWNLOAD_ICON_SVG = `
-        <svg viewBox="0 0 24 24" aria-hidden="true" style="width: 20px; height: 20px; fill: currentColor;">
-            <g><path d="M12 16.5l-5.5-5.5h3.5v-9h4v9h3.5L12 16.5zm-9 2h18v2H3v-2z"></path></g>
+        <svg viewBox="0 0 24 24" aria-hidden="true" style="width: 20px; height: 20px; fill: #ffffff !important; display: block; pointer-events: none;">
+            <path d="M12 16.5l-5.5-5.5h3.5v-9h4v9h3.5L12 16.5zm-9 2h18v2H3v-2z" fill="#ffffff"></path>
         </svg>
     `;
 
+    function ensureDownloadStyles() {
+        if (document.getElementById('vsc-download-btn-style')) return;
+        const style = document.createElement('style');
+        style.id = 'vsc-download-btn-style';
+        style.textContent = `
+            .vsc-download-btn {
+                pointer-events: auto !important;
+                cursor: pointer !important;
+                background-color: transparent !important;
+                border: none !important;
+                border-radius: 50% !important;
+                width: 36px !important;
+                height: 36px !important;
+                min-width: 36px !important;
+                min-height: 36px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                padding: 0 !important;
+                margin: 0 4px !important;
+                color: #ffffff !important;
+                opacity: 0.85 !important;
+                transition: opacity 0.15s ease, background-color 0.15s ease, transform 0.15s ease !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+                z-index: 99999 !important;
+                position: relative !important;
+            }
+            .vsc-download-btn:hover {
+                opacity: 1 !important;
+                background-color: rgba(255, 255, 255, 0.2) !important;
+                transform: scale(1.1) !important;
+            }
+            .vsc-download-btn:active {
+                transform: scale(0.95) !important;
+                background-color: rgba(255, 255, 255, 0.3) !important;
+            }
+            .vsc-download-btn svg,
+            .vsc-download-btn svg path {
+                fill: #ffffff !important;
+                color: #ffffff !important;
+                pointer-events: none !important;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
     function injectDownloadButtons() {
+        ensureDownloadStyles();
+
         // Find all video player containers
         const players = document.querySelectorAll('[data-testid="videoPlayer"], [data-testid="videoComponent"]');
         
@@ -667,40 +716,80 @@
             // 1. Check if this player already has our button anywhere inside
             if (player.querySelector('.vsc-download-btn')) return;
 
-            // 2. Find the best container for the button
-            // Priority 1: The right-side control group (where settings/fullscreen live)
-            // Priority 2: Any standard control bar container
-            const container = player.querySelector('.r-633pao') || 
-                              player.querySelector('.r-ero68b.r-17s6mgv.r-1awozwy.r-18u37iz') ||
-                              player.querySelector('.r-18u37iz.r-1wtj0ep.r-13qz1uu');
-
-            if (!container) return;
-
-            // Ensure container is actually visible (not a hidden transition node)
-            if (container.offsetParent === null && !player.querySelector('video')) return;
-
             const btn = document.createElement('button');
-            btn.className = 'vsc-download-btn r-sdzlij r-1phboty r-rs99b7 r-lrvibr r-2yi16 r-1qi8awa r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l';
-            btn.style.cssText = 'background: transparent; border: none; cursor: pointer; color: white; display: flex; align-items: center; justify-content: center; padding: 0 5px;';
+            btn.type = 'button';
+            btn.className = 'vsc-download-btn';
+            btn.setAttribute('aria-label', 'Download Video');
+            btn.setAttribute('title', 'Download Video');
+            btn.style.cssText = 'pointer-events: auto !important; cursor: pointer !important; background-color: transparent !important; border: none !important; border-radius: 50% !important; width: 36px !important; height: 36px !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; padding: 0 !important; margin: 0 4px !important; color: #ffffff !important; z-index: 99999 !important; position: relative !important;';
             btn.innerHTML = `
-                <div dir="ltr" class="css-146c3p1 r-qvutc0 r-37j5jr r-q4m81j r-a023e6 r-rjixqe r-b88u0q r-1awozwy r-6koalj r-18u37iz r-16y2uox r-bcqeeo r-1777fci">
+                <div style="display: flex; align-items: center; justify-content: center; pointer-events: none; width: 100%; height: 100%;">
                     ${DOWNLOAD_ICON_SVG}
                 </div>
             `;
+
+            // Hover effects
+            btn.addEventListener('mouseenter', () => {
+                btn.style.setProperty('opacity', '1', 'important');
+                btn.style.setProperty('background-color', 'rgba(255, 255, 255, 0.2)', 'important');
+                btn.style.setProperty('transform', 'scale(1.1)', 'important');
+            });
+
+            btn.addEventListener('mouseleave', () => {
+                btn.style.setProperty('opacity', '0.85', 'important');
+                btn.style.setProperty('background-color', 'transparent', 'important');
+                btn.style.setProperty('transform', 'scale(1)', 'important');
+            });
+
+            btn.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                btn.style.setProperty('transform', 'scale(0.95)', 'important');
+            }, true);
+
+            btn.addEventListener('mouseup', () => {
+                btn.style.setProperty('transform', 'scale(1.1)', 'important');
+            });
             
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                const video = findRelatedVideo(btn);
-                if (video) triggerDownload(video);
-            });
+                e.stopImmediatePropagation();
+                const video = findRelatedVideo(btn) || player.querySelector('video') || document.querySelector('video');
+                if (video) {
+                    triggerDownload(video);
+                } else {
+                    console.warn("X Env: Target video not found for download.");
+                }
+            }, true);
 
-            // Append after "Video Settings" if available, otherwise just append to the group
-            const settingsBtn = container.querySelector('[aria-label="Video Settings"]');
+            // 2. Find the best container or insertion point
+            const settingsBtn = player.querySelector('button[aria-label="Settings"], button[aria-label="Playback settings"], button[aria-label="Video Settings"], button[aria-label="Video settings"]');
+            const fullscreenBtn = player.querySelector('button[aria-label="Fullscreen"], button[aria-label="Full screen"], [data-testid="fullScreenButton"]');
+            const muteBtn = player.querySelector('button[aria-label="Mute"], button[aria-label="Unmute"], [data-testid="muteButton"], [data-testid="unmuteButton"]');
+
             if (settingsBtn && settingsBtn.parentElement) {
-                settingsBtn.parentElement.after(btn);
+                settingsBtn.parentElement.insertBefore(btn, settingsBtn);
+            } else if (fullscreenBtn && fullscreenBtn.parentElement) {
+                fullscreenBtn.parentElement.insertBefore(btn, fullscreenBtn);
+            } else if (muteBtn && muteBtn.parentElement) {
+                muteBtn.parentElement.after(btn);
             } else {
-                container.appendChild(btn);
+                // Secondary check: General controls container
+                const container = player.querySelector('.r-633pao') || 
+                                  player.querySelector('.r-ero68b.r-17s6mgv.r-1awozwy.r-18u37iz') ||
+                                  player.querySelector('.r-18u37iz.r-1wtj0ep.r-13qz1uu');
+                if (container) {
+                    container.appendChild(btn);
+                } else {
+                    // Fallback: floating overlay icon in player
+                    btn.style.setProperty('position', 'absolute', 'important');
+                    btn.style.setProperty('top', '12px', 'important');
+                    btn.style.setProperty('right', '12px', 'important');
+                    btn.style.setProperty('background-color', 'rgba(0, 0, 0, 0.6)', 'important');
+                    btn.style.setProperty('box-shadow', '0 2px 8px rgba(0,0,0,0.5)', 'important');
+                    player.appendChild(btn);
+                }
             }
         });
     }
@@ -874,6 +963,7 @@
         window.XEnv = {
             allowedUnmuted,
             shadowMutedState,
+            injectDownloadButtons,
             get isModuleEnabled() { return isModuleEnabled; },
             get alwaysMuteEnabled() { return alwaysMuteEnabled; },
             get currentVolume() { return currentVolume; }

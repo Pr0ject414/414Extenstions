@@ -1,6 +1,6 @@
 // KylesChromeExtensions/youtube_extension/youtubeBackground.js
 import * as YouTubeState from './background_modules/youtubeState.js';
-import * as AppState from '../../shared_modules/appState.js';
+import * as AppState from '../shared_modules/appState.js';
 
 // --- Lifecycle Functions ---
 export async function init() {

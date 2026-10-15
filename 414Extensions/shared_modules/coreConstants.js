@@ -9,6 +9,12 @@ export const FAB_MODULE_ENABLED_KEY = 'isFabModuleEnabled';
 // Master On/Off Switch for the YouTube Module
 export const YOUTUBE_MODULE_ENABLED_KEY = 'isYouTubeModuleEnabled';
 
+// Master On/Off Switch for the Volume Booster Module
+export const VOLUME_MODULE_ENABLED_KEY = 'isVolumeModuleEnabled';
+
+// Master On/Off Switch for the Video Speed Controller Module
+export const VSC_MODULE_ENABLED_KEY = 'vsc_is_enabled';
+
 // Master On/Off Switch for the X (Twitter) Module
 export const X_MODULE_ENABLED_KEY = 'isXModuleEnabled';
 // Specific feature toggle for X

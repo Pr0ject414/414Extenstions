@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Global Elements ---
     const globalMasterSwitchToggle = document.getElementById('globalMasterSwitchToggle');
     const openOptionsPageLink = document.getElementById('openOptionsPageLink');
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
     
     // --- Volume Control Elements ---
     const volumeSlider = document.getElementById('volumeSlider');
@@ -275,6 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
         xModulePowerToggle.addEventListener('change', () => {
              const isEnabled = xModulePowerToggle.checked;
              chrome.storage.local.set({ [X_MODULE_ENABLED_KEY]: isEnabled });
+             chrome.runtime.sendMessage({ action: "setXModuleEnabled", enabled: isEnabled });
         });
     }
     if (xAlwaysMuteToggle) {
@@ -299,11 +302,41 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Volume Control Logic ---
     if (volumeSlider && volumeValueDisplay) {
         const updateVolumeDisplay = (val) => {
-            volumeValueDisplay.textContent = `${val}%`;
-            // Visual feedback - color change based on volume
-            if (val > 100) volumeValueDisplay.style.color = '#ff9800'; // Orange for boost
-            else volumeValueDisplay.style.color = '#4caf50'; // Green for normal
+            const num = parseInt(val, 10) || 0;
+            volumeValueDisplay.textContent = `${num}%`;
+            // Dynamic color shift based on volume intensity
+            if (num > 400) {
+                volumeValueDisplay.style.color = '#ec4899'; // Magenta Overdrive
+                volumeValueDisplay.style.textShadow = '0 0 24px rgba(236, 72, 153, 0.5)';
+            } else if (num > 200) {
+                volumeValueDisplay.style.color = '#06b6d4'; // Cyan High Boost
+                volumeValueDisplay.style.textShadow = '0 0 20px rgba(6, 182, 212, 0.4)';
+            } else if (num > 100) {
+                volumeValueDisplay.style.color = '#f59e0b'; // Amber Boost
+                volumeValueDisplay.style.textShadow = '0 0 16px rgba(245, 158, 11, 0.35)';
+            } else {
+                volumeValueDisplay.style.color = '#10b981'; // Emerald Green Normal
+                volumeValueDisplay.style.textShadow = '0 0 16px rgba(16, 185, 129, 0.3)';
+            }
         };
+
+        // Preset volume buttons
+        document.querySelectorAll('.preset-btn[data-vol]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetVol = parseInt(btn.getAttribute('data-vol'), 10) || 100;
+                volumeSlider.value = targetVol;
+                updateVolumeDisplay(targetVol);
+                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                    if (tabs && tabs.length > 0) {
+                        chrome.runtime.sendMessage({ 
+                            action: "updateVolume", 
+                            tabId: tabs[0].id, 
+                            volume: targetVol / 100 
+                        });
+                    }
+                });
+            });
+        });
 
         volumeSlider.addEventListener('input', () => {
              const val = volumeSlider.value;
@@ -364,8 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
         vscPowerToggle.addEventListener('change', () => {
             const isEnabled = vscPowerToggle.checked;
             chrome.storage.local.set({ [VSC_STORAGE_KEYS.IS_ENABLED]: isEnabled });
-            // Since controller.js checks on page load/init, we might want to reload active tabs or send message
-            // For now, simpler to just save. User might need to refresh.
+            chrome.runtime.sendMessage({ action: "setVscModuleEnabled", enabled: isEnabled });
         });
     }
 
@@ -475,14 +507,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // This function can be called by module scripts to correctly set their disabled state.
     function setDependentModulesState() {
         const isGlobalOn = globalMasterSwitchToggle.checked;
-        document.getElementById('fab-controls').classList.toggle('effectively-disabled', !isGlobalOn);
-        document.getElementById('youtube-controls').classList.toggle('effectively-disabled', !isGlobalOn);
-        document.getElementById('x-controls').classList.toggle('effectively-disabled', !isGlobalOn);
+        const moduleIds = ['fab-controls', 'youtube-controls', 'x-controls', 'crunchyroll-controls', 'volume-controls', 'speed-controls'];
+        moduleIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('effectively-disabled', !isGlobalOn);
+        });
         
         // Also disable the power toggles themselves
-        document.getElementById('fabModulePowerToggle').disabled = !isGlobalOn;
-        document.getElementById('youTubeModulePowerToggle').disabled = !isGlobalOn;
-        document.getElementById('xModulePowerToggle').disabled = !isGlobalOn;
+        const toggleIds = ['fabModulePowerToggle', 'youTubeModulePowerToggle', 'xModulePowerToggle', 'crunchyrollModulePowerToggle', 'vscPowerToggle'];
+        toggleIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = !isGlobalOn;
+        });
     }
 
     // Attach a global status indicator updater to the window object
@@ -531,9 +567,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --- Tab Switching Logic ---
-    const tabButtons = document.querySelectorAll('.tab-button');
-    const tabContents = document.querySelectorAll('.tab-content');
-
     function refreshTabVisibility() {
         const visibilityMap = {
             'volume-controls': visibilityVolumeToggle?.checked !== false,
@@ -578,17 +611,21 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Restore last active tab
-    chrome.storage.session.get(['lastActiveTab'], (result) => {
-        if (result.lastActiveTab) {
-            switchTab(result.lastActiveTab);
-        }
-    });
+    if (chrome.storage?.session?.get) {
+        chrome.storage.session.get(['lastActiveTab'], (result) => {
+            if (result?.lastActiveTab) {
+                switchTab(result.lastActiveTab);
+            }
+        });
+    }
 
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
             const targetTab = button.getAttribute('data-tab');
             switchTab(targetTab);
-            chrome.storage.session.set({ lastActiveTab: targetTab });
+            if (chrome.storage?.session?.set) {
+                chrome.storage.session.set({ lastActiveTab: targetTab });
+            }
         });
     });
 });

@@ -3,78 +3,99 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Extension Settings</title>
+    <title>414 Extensions Settings</title>
     <link rel="stylesheet" href="settings.css">
 </head>
 <body>
     <div class="settings-content-wrapper">
-        <h1>Extension Settings</h1>
+        <header class="dashboard-header">
+            <div class="dashboard-title-group">
+                <img src="../icons/icon48.png" alt="414 Logo" class="dashboard-icon">
+                <div>
+                    <h1>414 Extensions Settings</h1>
+                    <p class="dashboard-subtitle">Global network throttling, keymaps, and automation parameters</p>
+                </div>
+            </div>
+            <span class="version-pill">v1.7</span>
+        </header>
 
         <div class="tab-container">
             <nav class="tab-nav">
-                <button class="tab-button active" data-tab="global-settings-tab">Global Settings</button>
-                <button class="tab-button" data-tab="fab-helper-tab">FAB Helper</button>
-                <button class="tab-button" data-tab="video-controller-tab">Video Speed Controller</button>
+                <button class="tab-button active" data-tab="global-settings-tab">
+                    <span>🌐</span> Global Settings
+                </button>
+                <button class="tab-button" data-tab="fab-helper-tab">
+                    <span>🛒</span> FAB Helper
+                </button>
+                <button class="tab-button" data-tab="video-controller-tab">
+                    <span>⚡</span> Video Speed Controller
+                </button>
             </nav>
 
+            <!-- Global Settings Tab -->
             <div id="global-settings-tab" class="tab-content active">
                 <div class="setting-group">
-                    <h2>Global Network Settings</h2>
+                    <h2><span>🌐</span> Global Network Parameters</h2>
+                    <p>Configure exponential backoff and retry thresholds for all network operations.</p>
+                    
                     <div class="setting">
                         <label for="maxRetries">Max Retries for Network Requests:</label>
                         <input type="number" id="maxRetries" min="1" value="5">
                     </div>
                     <div class="setting">
-                        <label for="initialDelayS">Initial Backoff Delay (s):</label>
+                        <label for="initialDelayS">Initial Backoff Delay (seconds):</label>
                         <input type="number" id="initialDelayS" min="1" step="0.5" value="30">
                     </div>
                     <div class="setting">
-                        <label for="maxDelayS">Maximum Backoff Delay (s):</label>
-                        <input type="number" id="maxDelayS" min="1" step="1" value="300"> </div>
+                        <label for="maxDelayS">Maximum Backoff Delay (seconds):</label>
+                        <input type="number" id="maxDelayS" min="1" step="1" value="300">
+                    </div>
+                    
                     <button id="saveGlobalSettings">Save Global Settings</button>
                     <span id="globalStatus" class="status-message"></span>
                 </div>
 
                 <div class="setting-group">
-                    <h2>Module Visibility</h2>
-                    <p>Completely turn off and hide specific features from the extension popup.</p>
+                    <h2><span>👁️</span> Module Popup Visibility</h2>
+                    <p>Toggle individual feature tabs on or off in the extension popup menu.</p>
+                    
                     <div class="setting">
-                        <label for="visibilityVolumeToggle">Volume Booster:</label>
+                        <label for="visibilityVolumeToggle">Volume Booster</label>
                         <label class="switch">
                             <input type="checkbox" id="visibilityVolumeToggle" checked>
                             <span class="slider"></span>
                         </label>
                     </div>
                     <div class="setting">
-                        <label for="visibilityVscToggle">Speed Controller:</label>
+                        <label for="visibilityVscToggle">Speed Controller</label>
                         <label class="switch">
                             <input type="checkbox" id="visibilityVscToggle" checked>
                             <span class="slider"></span>
                         </label>
                     </div>
                     <div class="setting">
-                        <label for="visibilityFabToggle">FAB Helper:</label>
+                        <label for="visibilityFabToggle">FAB Helper</label>
                         <label class="switch">
                             <input type="checkbox" id="visibilityFabToggle" checked>
                             <span class="slider"></span>
                         </label>
                     </div>
                     <div class="setting">
-                        <label for="visibilityYouTubeToggle">YouTube Helper:</label>
+                        <label for="visibilityYouTubeToggle">YouTube Helper</label>
                         <label class="switch">
                             <input type="checkbox" id="visibilityYouTubeToggle" checked>
                             <span class="slider"></span>
                         </label>
                     </div>
                     <div class="setting">
-                        <label for="visibilityXToggle">X (Twitter):</label>
+                        <label for="visibilityXToggle">X (Twitter)</label>
                         <label class="switch">
                             <input type="checkbox" id="visibilityXToggle" checked>
                             <span class="slider"></span>
                         </label>
                     </div>
                     <div class="setting">
-                        <label for="visibilityCrunchyrollToggle">Crunchyroll:</label>
+                        <label for="visibilityCrunchyrollToggle">Crunchyroll</label>
                         <label class="switch">
                             <input type="checkbox" id="visibilityCrunchyrollToggle" checked>
                             <span class="slider"></span>
@@ -83,89 +104,85 @@
                 </div>
             </div>
 
+            <!-- FAB Helper Tab -->
             <div id="fab-helper-tab" class="tab-content">
                 <div class="setting-group">
-                    <h2>FAB Helper Module Settings</h2>
-                    <p>Fine-tune timings and limits for FAB processing.</p>
+                    <h2><span>🛒</span> Automation Engine Timings</h2>
+                    <p>Fine-tune scanning frequency, verification cycles, and tab concurrence for FAB.</p>
+                    
                     <div class="setting">
-                        <label for="delayBetweenVerificationChecksS">Verification Check Delay (s):</label>
+                        <label for="delayBetweenVerificationChecksS">Verification Check Delay (seconds):</label>
                         <input type="number" id="delayBetweenVerificationChecksS" min="1" step="0.5" value="5">
                     </div>
                     <div class="setting">
-                        <label for="delayBetweenTabOpenS">Tab Opening Delay (s):</label>
-                        <input type="number" id="delayBetweenTabOpenS" min="0.1" step="0.1" value="2"> </div>
+                        <label for="delayBetweenTabOpenS">Tab Opening Delay (seconds):</label>
+                        <input type="number" id="delayBetweenTabOpenS" min="0.1" step="0.1" value="2">
+                    </div>
                     <div class="setting">
                         <label for="maxConcurrentFabTabs">Max Concurrent FAB Tabs:</label>
                         <input type="number" id="maxConcurrentFabTabs" min="1" max="10" value="2">
                     </div>
                     <div class="setting">
-                        <label for="fabBrowsePageScanIntervalS">Browse Page Scan Interval (s):</label>
+                        <label for="fabBrowsePageScanIntervalS">Browse Page Scan Interval (seconds):</label>
                         <input type="number" id="fabBrowsePageScanIntervalS" min="1" step="0.5" value="5">
                     </div>
                     <div class="setting">
                         <label for="fabFreeItemGraceCycles">Free Item Grace Cycles:</label>
                         <input type="number" id="fabFreeItemGraceCycles" min="0" step="1" value="4">
                     </div>
+                    
                     <button id="saveFabSettings">Save FAB Helper Settings</button>
                     <span id="fabStatus" class="status-message"></span>
                 </div>
 
                 <div class="setting-group">
-                    <h2>Queue Item Manually (FAB Helper)</h2>
-                    <p>Add a FAB product page URL to the processing queue. It will be processed according to the "Enable Queue Processing" toggle in the popup.</p>
-                    <div class="setting">
-                        <label for="itemQueueUrl">Product Page URL:</label>
-                        <input type="text" id="itemQueueUrl" placeholder="https://www.fab.com/listings/your-item-id">
+                    <h2><span>📥</span> Manual Queue Injection</h2>
+                    <p>Queue a specific FAB listing URL directly into the processing pipeline.</p>
+                    
+                    <div class="setting" style="flex-wrap: wrap; gap: 10px;">
+                        <label for="itemQueueUrl" style="flex-basis: 100%;">Product Page URL:</label>
+                        <input type="text" id="itemQueueUrl" placeholder="https://www.fab.com/listings/your-item-id" style="flex: 1;">
+                        <button id="queueItemButton" style="margin: 0;">Queue Item</button>
                     </div>
-                    <button id="queueItemButton">Queue Item</button>
                     <span id="queueStatus" class="status-message"></span>
                 </div>
             </div>
 
+            <!-- Video Speed Controller Tab -->
             <div id="video-controller-tab" class="tab-content">
                 <div class="setting-group">
-                    <h2>Shortcuts</h2>
+                    <h2><span>⌨️</span> Playback Shortcuts</h2>
+                    <p>Customize keyboard shortcuts and step intervals for media playback speed control.</p>
+                    
                     <div class="shortcuts-container" id="vscShortcutsContainer">
-                        <!-- Shortcuts will be injected here by JS -->
-                        <!-- Example row structure for reference:
-                        <div class="shortcut-row">
-                            <label>Decrease speed</label>
-                            <input type="text" class="shortcut-key" value="s">
-                            <input type="number" class="shortcut-value" value="0.1">
-                        </div>
-                        -->
+                        <!-- Shortcuts injected dynamically by settings.js -->
                     </div>
 
-                    <h2>Other Settings</h2>
+                    <h2 style="margin-top: 24px;"><span>🎛️</span> Controller Overlay Preferences</h2>
+                    
                     <div class="setting">
-                         <label for="vscAudioSupport">Audio support</label>
+                         <label for="vscAudioSupport">Audio pitch preservation & gain support</label>
                          <label class="switch">
                              <input type="checkbox" id="vscAudioSupport">
                              <span class="slider"></span>
                          </label>
                     </div>
                     <div class="setting">
-                         <label for="vscRememberSpeed">Remember playback speed</label>
+                         <label for="vscRememberSpeed">Remember playback speed across sessions</label>
                          <label class="switch">
                              <input type="checkbox" id="vscRememberSpeed">
                              <span class="slider"></span>
                          </label>
                     </div>
-                     <div class="setting">
-                         <label for="vscHideDefault">Hide controller by default</label>
+                    <div class="setting">
+                         <label for="vscHideDefault">Hide controller overlay by default</label>
                          <label class="switch">
                              <input type="checkbox" id="vscHideDefault">
                              <span class="slider"></span>
                          </label>
                     </div>
-                    <!-- Force last saved speed maps to our persistence logic, 
-                         but 'Force' implies overruling site-specific changes? 
-                         For now, we treat it as "Persistence enabled" distinct from just remembering?
-                         The user screenshot has "Remember" AND "Force". 
-                         "Remember" = load on init. 
-                         "Force" = prevent site from changing it? -->
-                     <div class="setting">
-                         <label for="vscForceLastSaved">Force last saved speed (experimental)</label>
+                    <div class="setting">
+                         <label for="vscForceLastSaved">Force last saved speed (override website speed alterations)</label>
                          <label class="switch">
                              <input type="checkbox" id="vscForceLastSaved">
                              <span class="slider"></span>
@@ -173,33 +190,37 @@
                     </div>
                     
                     <div class="setting">
-                        <label for="vscOpacity">Controller Opacity (0.1 - 1.0)</label>
+                        <label for="vscOpacity">Controller HUD Opacity (0.1 - 1.0):</label>
                         <input type="number" id="vscOpacity" min="0.1" max="1.0" step="0.1" value="0.3">
                     </div>
                     <div class="setting">
-                        <label for="vscButtonSize">Controller Button Size (px)</label>
+                        <label for="vscButtonSize">Controller Button Size (px):</label>
                         <input type="number" id="vscButtonSize" min="10" max="30" step="1" value="14">
                     </div>
 
-                    <h2>Blacklist</h2>
-                    <div class="setting">
-                         <label for="vscSitesBlacklist">Blacklisted Sites (One domain or Regex per line):</label>
+                    <h2 style="margin-top: 24px;"><span>🚫</span> Domain Blacklist</h2>
+                    <p>Prevent Video Speed Controller from injecting into specific domains (one domain or regex per line):</p>
+                    
+                    <div class="setting" style="flex-direction: column; align-items: stretch;">
                          <textarea id="vscSitesBlacklist" rows="5" placeholder="instagram.com&#10;/.*\.google\.com/"></textarea>
                     </div>
 
+                    <h2 style="margin-top: 24px;"><span>⏩</span> Speeds & Defaults</h2>
                     <div class="setting">
-                        <label for="vscKeySpeed">User Override Speed (Hold Click/Space)</label>
+                        <label for="vscKeySpeed">User Override Speed (Hold Click/Key):</label>
                         <input type="number" id="vscKeySpeed" min="0.1" max="16.0" step="0.1" value="2.0">
                     </div>
 
                     <div class="setting">
-                        <label for="vscGlobalDefaultSpeed">Global Default Speed (fallback for new sites)</label>
+                        <label for="vscGlobalDefaultSpeed">Global Default Speed (fallback for new domains):</label>
                         <input type="number" id="vscGlobalDefaultSpeed" min="0.1" max="16.0" step="0.1" value="1.0">
                     </div>
                     
-                    <button id="saveVscSettings">Save VSC Settings</button>
-                    <button id="vscClearSiteSpeeds" style="background-color: #d32f2f;">Clear All Site Speeds</button>
-                    <button id="resetVscSettings" style="background-color: #555;">Restore Defaults</button>
+                    <div style="margin-top: 20px;">
+                        <button id="saveVscSettings">Save VSC Settings</button>
+                        <button id="vscClearSiteSpeeds">Clear All Site Speeds</button>
+                        <button id="resetVscSettings">Restore Defaults</button>
+                    </div>
                     <span id="vscStatus" class="status-message"></span>
                 </div>
             </div>

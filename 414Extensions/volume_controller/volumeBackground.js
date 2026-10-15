@@ -84,8 +84,12 @@ export const VolumeBackground = {
             setStoredVolumeForTab(tabId, volume);
             updateBadgeForTab(tabId);
             // Forward to content script
-            chrome.tabs.sendMessage(tabId, { action: "setVolume", volume: volume }).catch(() => {});
+            try {
+                const sendPromise = chrome.tabs.sendMessage(tabId, { action: "setVolume", volume: volume });
+                if (sendPromise && typeof sendPromise.catch === 'function') sendPromise.catch(() => {});
+            } catch (e) {}
             sendResponse({ success: true });
+            return true;
         }
         else if (request.action === "getCurrentVolumeForPopup") {
             // Message from Popup to get initial state
@@ -108,15 +112,19 @@ export const VolumeBackground = {
         });
         
         // Listeners for badge updates
-        chrome.tabs.onActivated.addListener(activeInfo => {
-            updateBadgeForTab(activeInfo.tabId);
-        });
+        if (chrome.tabs.onActivated?.addListener) {
+            chrome.tabs.onActivated.addListener(activeInfo => {
+                updateBadgeForTab(activeInfo.tabId);
+            });
+        }
         
-        chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-             if (changeInfo.status === 'complete' || changeInfo.url) {
-                 updateBadgeForTab(tabId);
-             }
-        });
+        if (chrome.tabs.onUpdated?.addListener) {
+            chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+                 if (changeInfo.status === 'complete' || changeInfo.url) {
+                     updateBadgeForTab(tabId);
+                 }
+            });
+        }
     },
     onInstalled: async () => {
         console.log("VolumeBackground: Installed");

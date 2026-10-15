@@ -212,20 +212,30 @@ async function stitchSegments(segments, initUrl, baseUrl, origin, filename, send
             })
         );
 
-        // Concatenate buffers
+        // Concatenate buffers into a single Uint8Array
         const finalParts = initBuffer ? [initBuffer, ...segmentBuffers] : segmentBuffers;
-        const finalBlob = new Blob(finalParts, { type: 'video/mp4' });
+        const totalLength = finalParts.reduce((acc, part) => acc + part.byteLength, 0);
+        const merged = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const part of finalParts) {
+            merged.set(new Uint8Array(part), offset);
+            offset += part.byteLength;
+        }
+
+        // Convert to Base64 Data URL (MV3 Service Worker compatible, chunked to prevent stack overflow)
+        let binary = '';
+        const chunkSize = 0x8000; // 32KB chunks
+        for (let i = 0; i < merged.length; i += chunkSize) {
+            binary += String.fromCharCode.apply(null, merged.subarray(i, Math.min(i + chunkSize, merged.length)));
+        }
+        const dataUrl = `data:video/mp4;base64,${btoa(binary)}`;
 
         // Trigger Download
-        const blobUrl = URL.createObjectURL(finalBlob);
         chrome.downloads.download({
-            url: blobUrl,
+            url: dataUrl,
             filename: filename,
             saveAs: false
         }, (id) => {
-            // Note: In manifest V3 MV3 background scripts, blob URLs can be tricky.
-            // We'll keep it alive briefly then revoke.
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
             if (chrome.runtime.lastError) {
                 sendResponse({ success: false, error: chrome.runtime.lastError.message });
             } else {

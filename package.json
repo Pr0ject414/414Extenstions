@@ -4,7 +4,9 @@
   "description": "Extensions for Automating Annoying Tasks",
   "type": "module",
   "scripts": {
-    "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "pack": "node scripts/pack.js",
+    "icons": "node scripts/generate_icons.js"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",

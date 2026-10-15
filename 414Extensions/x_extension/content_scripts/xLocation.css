@@ -157,3 +157,47 @@
     flex: 1;
     word-break: break-word;
 }
+
+/* Video Player Download Button Styles */
+.vsc-download-btn {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    background-color: transparent !important;
+    border: none !important;
+    border-radius: 50% !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    margin: 0 4px !important;
+    color: #ffffff !important;
+    opacity: 0.85 !important;
+    transition: opacity 0.15s ease, background-color 0.15s ease, transform 0.15s ease !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    z-index: 99999 !important;
+    position: relative !important;
+}
+
+.vsc-download-btn:hover {
+    opacity: 1 !important;
+    background-color: rgba(255, 255, 255, 0.2) !important;
+    transform: scale(1.1) !important;
+}
+
+.vsc-download-btn:active {
+    transform: scale(0.95) !important;
+    background-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.vsc-download-btn svg,
+.vsc-download-btn svg path {
+    fill: #ffffff !important;
+    color: #ffffff !important;
+    pointer-events: none !important;
+}
+

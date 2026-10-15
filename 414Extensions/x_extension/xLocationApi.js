@@ -117,9 +117,13 @@ export class XLocationApiClient {
     }
 
     async loadHeadersFromStorage() {
-        const res = await chrome.storage.local.get(['x_api_headers']);
-        if (res.x_api_headers) {
-            this.headers = res.x_api_headers;
+        try {
+            const res = await chrome.storage.local.get(['x_api_headers']);
+            if (res?.x_api_headers) {
+                this.headers = res.x_api_headers;
+            }
+        } catch (e) {
+            console.warn("XLocationApiClient: Error loading headers from storage:", e);
         }
     }
 

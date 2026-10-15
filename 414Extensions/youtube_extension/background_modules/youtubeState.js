@@ -1,6 +1,6 @@
 // KylesChromeExtensions/youtube_extension/background_modules/youtubeState.js
 import * as YouTubeConstants from './youtubeConstants.js';
-import { loadStateFromStorage, saveStateToStorage } from '../../../shared_modules/storageUtils.js';
+import { loadStateFromStorage, saveStateToStorage } from '../../shared_modules/storageUtils.js';
 
 // --- YouTube Specific State ---
 export let youTubeNoSuggestionsEnabled = false;

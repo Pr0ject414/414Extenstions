@@ -1,6 +1,41 @@
-414Extensions.zip
-*.7z
-414Extensions/Jules.md
+# Dependencies
 node_modules/
 package-lock.json
-/414Extensions/video_speed_controller/.idea
+
+# Build and Distribution Archives
+dist/
+*.zip
+*.7z
+*.tar.gz
+*.tgz
+
+# Testing and Coverage
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# IDE and Editor configurations
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Project Specific
+414Extensions/Jules.md

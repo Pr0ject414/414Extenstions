@@ -20,7 +20,8 @@ global.console = {
     error: jest.fn()
 };
 
-import { isRateLimited, setRateLimitCoolDown, rateLimitCoolDownUntil } from '../../shared_modules/appState.js';
+import * as AppState from '../../shared_modules/appState.js';
+const { isRateLimited, setRateLimitCoolDown, rateLimitCoolDownUntil } = AppState;
 
 describe('appState - Rate Limiting', () => {
     beforeEach(() => {
@@ -82,5 +83,61 @@ describe('appState - Rate Limiting', () => {
         const result = setRateLimitCoolDown(smallerFutureTime);
 
         expect(result).toBe(false);
+    });
+});
+
+describe('appState - Module States & Master Switch', () => {
+    test('module toggles should update in-memory state', () => {
+        AppState.setGlobalMasterSwitchEnabled(false);
+        expect(AppState.globalMasterSwitchEnabled).toBe(false);
+        AppState.setGlobalMasterSwitchEnabled(true);
+        expect(AppState.globalMasterSwitchEnabled).toBe(true);
+
+        AppState.setXModuleEnabled(false);
+        expect(AppState.xModuleEnabled).toBe(false);
+        AppState.setXModuleEnabled(true);
+        expect(AppState.xModuleEnabled).toBe(true);
+
+        AppState.setCrunchyrollModuleEnabled(false);
+        expect(AppState.crunchyrollModuleEnabled).toBe(false);
+        AppState.setCrunchyrollModuleEnabled(true);
+        expect(AppState.crunchyrollModuleEnabled).toBe(true);
+
+        AppState.setVolumeModuleEnabled(false);
+        expect(AppState.volumeModuleEnabled).toBe(false);
+        AppState.setVolumeModuleEnabled(true);
+        expect(AppState.volumeModuleEnabled).toBe(true);
+
+        AppState.setVscModuleEnabled(false);
+        expect(AppState.vscModuleEnabled).toBe(false);
+        AppState.setVscModuleEnabled(true);
+        expect(AppState.vscModuleEnabled).toBe(true);
+
+        AppState.setFabModuleEnabled(false);
+        expect(AppState.fabModuleEnabled).toBe(false);
+        AppState.setFabModuleEnabled(true);
+        expect(AppState.fabModuleEnabled).toBe(true);
+
+        AppState.setYouTubeModuleEnabled(false);
+        expect(AppState.youTubeModuleEnabled).toBe(false);
+        AppState.setYouTubeModuleEnabled(true);
+        expect(AppState.youTubeModuleEnabled).toBe(true);
+    });
+
+    test('saveGlobalState should write all 6 module keys to storage', async () => {
+        global.chrome.storage.local.set.mockImplementation((obj, cb) => cb && cb());
+        await AppState.saveGlobalState();
+        expect(global.chrome.storage.local.set).toHaveBeenCalledWith(
+            expect.objectContaining({
+                isGlobalMasterSwitchEnabled: true,
+                isFabModuleEnabled: true,
+                isYouTubeModuleEnabled: true,
+                isXModuleEnabled: true,
+                isCrunchyrollModuleEnabled: true,
+                isVolumeModuleEnabled: true,
+                vsc_is_enabled: true
+            }),
+            expect.any(Function)
+        );
     });
 });

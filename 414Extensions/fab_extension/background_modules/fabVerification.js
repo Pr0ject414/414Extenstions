@@ -55,7 +55,7 @@ async function verifySingleItem(item) {
                     'Accept': 'application/json, text/plain, */*',
                     'X-Requested-With': 'XMLHttpRequest'
                 },
-                credentials: 'omit'
+                credentials: 'include'
             }
         );
 
