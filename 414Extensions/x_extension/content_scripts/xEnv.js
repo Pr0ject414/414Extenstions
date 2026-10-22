@@ -85,6 +85,10 @@
 
     function handleInteractionStart(target) {
         if (!target) return;
+        if (target.tagName === 'VIDEO' && target.classList && target.classList.contains('x-friend-card-video')) {
+            allowedUnmuted.add(target);
+            return;
+        }
         // Check if interacting with volume slider (Broadened)
         const volSlider = getVolumeSliderFromTarget(target);
 
@@ -159,6 +163,7 @@
 
         const video = findRelatedVideo(target);
         if (video) {
+            if (video.classList && video.classList.contains('x-friend-card-video')) return;
             // GEOMETRIC CHECK: Ensure the click is actually INSIDE the video rect.
             const rect = video.getBoundingClientRect();
             const isInX = e.clientX >= rect.left && e.clientX <= rect.right;
@@ -316,6 +321,26 @@
         // But we still track explicit unmute buttons.
 
         const target = e.target;
+        if (target && target.tagName === 'VIDEO' && target.classList && target.classList.contains('x-friend-card-video')) {
+            allowedUnmuted.add(target);
+            const rect = target.getBoundingClientRect();
+            const isControlBarClick = rect.height > 0 && e.clientY > 0 && e.clientY > rect.bottom - 44;
+            const isCurrentlyMuted = originalDescriptor ? originalDescriptor.get.call(target) : target.muted;
+            if (!isControlBarClick && isCurrentlyMuted) {
+                e.preventDefault();
+                e.stopPropagation();
+                shadowMutedState.set(target, false);
+                applyOriginalMuted(target, false);
+                target.removeAttribute('muted');
+                if (target.volume !== currentVolume) {
+                    applyOriginalVolume(target, currentVolume);
+                }
+                if (target.paused) {
+                    target.play().catch(() => {});
+                }
+            }
+            return;
+        }
         const muteButton = target.closest('[aria-label="Mute"]');
         const unmuteButton = target.closest('[aria-label="Unmute"]');
         // Broadened Slider Selector for Click Unmuting
@@ -565,7 +590,7 @@
             let current = video;
             for (let i = 0; i < 15; i++) {
                 if (!current) break;
-                
+
                 const reactKeys = Object.keys(current).filter(k => k.startsWith('__reactFiber$') || k.startsWith('__reactProps$'));
                 for (const key of reactKeys) {
                     const props = current[key];
@@ -581,8 +606,8 @@
                             // Sort by bitrate desc
                             allVariants.sort((a, b) => b.bitrate - a.bitrate);
                             const tweetId = findTweetId(video);
-                            return { 
-                                url: allVariants[0].url, 
+                            return {
+                                url: allVariants[0].url,
                                 id: tweetId || Date.now(),
                                 isM3U8: allVariants[0].url.includes('.m3u8') || allVariants[0].type.includes('mpegURL')
                             };
@@ -590,6 +615,17 @@
                     }
                 }
                 current = current.parentElement;
+            }
+
+            // 2. Direct MP4 / stream src fallback (e.g. Friends timeline hydrated video cards)
+            const directSrc = (video && ((video.getAttribute && video.getAttribute('src')) || video.src || video.currentSrc)) || '';
+            if (directSrc && /^https?:\/\//i.test(directSrc)) {
+                const tweetId = findTweetId(video);
+                return {
+                    url: directSrc,
+                    id: tweetId || Date.now(),
+                    isM3U8: directSrc.includes('.m3u8')
+                };
             }
         } catch (e) {
             console.error("X Env: Error extracting metadata", e);
@@ -602,13 +638,13 @@
         seen.add(obj);
 
         if (Array.isArray(obj.variants)) return obj.variants;
-        
+
         // Skip common large/circular React keys to prevent freezes
         const skipKeys = ['return', 'sibling', 'stateNode', 'alternate', '_owner', 'child'];
-        
+
         for (const key in obj) {
             if (skipKeys.includes(key)) continue;
-            
+
             try {
                 const val = obj[key];
                 if (val && typeof val === 'object') {
@@ -623,15 +659,13 @@
     }
 
     function findTweetId(element) {
-        // Check URL first
-        const match = window.location.pathname.match(/\/status\/(\d+)/);
-        if (match) return match[1];
-
-        // Check DOM (article tag) up from video
+        // Check DOM (article tag) up from video first so feed/quoted tweets resolve to their own tweet ID
         let current = element;
         for (let i = 0; i < 20; i++) {
             if (!current) break;
             if (current.tagName === 'ARTICLE') {
+                const attrId = current.getAttribute('data-tweet-id') || current.getAttribute('data-x-tweet-id');
+                if (attrId) return attrId;
                 const links = current.querySelectorAll('a[href*="/status/"]');
                 for (const link of links) {
                     const m = link.href.match(/\/status\/(\d+)/);
@@ -640,14 +674,19 @@
             }
             current = current.parentElement;
         }
+
+        // Fallback to URL
+        const match = window.location.pathname.match(/\/status\/(\d+)/);
+        if (match) return match[1];
+
         return null;
     }
 
     // --- UI INJECTION ---
 
     const DOWNLOAD_ICON_SVG = `
-        <svg viewBox="0 0 24 24" aria-hidden="true" style="width: 20px; height: 20px; fill: #ffffff !important; display: block; pointer-events: none;">
-            <path d="M12 16.5l-5.5-5.5h3.5v-9h4v9h3.5L12 16.5zm-9 2h18v2H3v-2z" fill="#ffffff"></path>
+        <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" style="width: 18px; height: 18px; fill: currentColor; display: block; pointer-events: none;">
+            <path d="M12 16.5l-5.5-5.5h3.5v-9h4v9h3.5L12 16.5zm-9 2h18v2H3v-2z" fill="currentColor"></path>
         </svg>
     `;
 
@@ -657,97 +696,125 @@
         style.id = 'vsc-download-btn-style';
         style.textContent = `
             .vsc-download-btn {
+                appearance: none !important;
+                -webkit-appearance: none !important;
                 pointer-events: auto !important;
                 cursor: pointer !important;
                 background-color: transparent !important;
                 border: none !important;
-                border-radius: 50% !important;
-                width: 36px !important;
-                height: 36px !important;
-                min-width: 36px !important;
-                min-height: 36px !important;
+                border-radius: 9999px !important;
+                width: 34.75px !important;
+                height: 34.75px !important;
+                min-width: 34.75px !important;
+                min-height: 34.75px !important;
                 display: inline-flex !important;
                 align-items: center !important;
                 justify-content: center !important;
                 padding: 0 !important;
-                margin: 0 4px !important;
-                color: #ffffff !important;
-                opacity: 0.85 !important;
-                transition: opacity 0.15s ease, background-color 0.15s ease, transform 0.15s ease !important;
+                margin: 0 !important;
+                color: #71767b !important;
+                transition: color 0.15s ease, background-color 0.15s ease, transform 0.12s ease !important;
                 user-select: none !important;
                 -webkit-user-select: none !important;
-                z-index: 99999 !important;
                 position: relative !important;
             }
             .vsc-download-btn:hover {
-                opacity: 1 !important;
-                background-color: rgba(255, 255, 255, 0.2) !important;
-                transform: scale(1.1) !important;
+                color: #1d9bf0 !important;
+                background-color: rgba(29, 155, 240, 0.12) !important;
             }
             .vsc-download-btn:active {
-                transform: scale(0.95) !important;
-                background-color: rgba(255, 255, 255, 0.3) !important;
+                transform: scale(0.92) !important;
+                background-color: rgba(29, 155, 240, 0.2) !important;
             }
             .vsc-download-btn svg,
             .vsc-download-btn svg path {
-                fill: #ffffff !important;
-                color: #ffffff !important;
+                fill: currentColor !important;
+                color: inherit !important;
                 pointer-events: none !important;
             }
         `;
         (document.head || document.documentElement).appendChild(style);
     }
 
+    function findBookmarkInsertionRef(actionBar) {
+        if (!actionBar || !actionBar.querySelector) return null;
+        const bookmarkEl = actionBar.querySelector(
+            '[data-testid="bookmark"], [data-testid="removeBookmark"], button[aria-label="Bookmark"], .x-friend-card-stat-bookmark'
+        );
+        if (!bookmarkEl) return null;
+        let ref = bookmarkEl;
+        while (ref.parentElement && ref.parentElement !== actionBar) {
+            ref = ref.parentElement;
+        }
+        return ref.parentElement === actionBar ? ref : null;
+    }
+
+    function findArticleActionBar(article) {
+        if (!article || !article.querySelectorAll) return null;
+        const groups = Array.from(article.querySelectorAll('div[role="group"]'));
+        return groups.length > 0 ? groups[groups.length - 1] : null;
+    }
+
     function injectDownloadButtons() {
         ensureDownloadStyles();
 
-        // Find all video player containers
-        const players = document.querySelectorAll('[data-testid="videoPlayer"], [data-testid="videoComponent"]');
+        // Find all video player containers and Friends timeline video elements
+        const players = document.querySelectorAll('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video');
         
         players.forEach(player => {
-            // 1. Check if this player already has our button anywhere inside
-            if (player.querySelector('.vsc-download-btn')) return;
+            const article = player.closest ? player.closest('article') : null;
+            const actionBar = findArticleActionBar(article);
+
+            if (actionBar) {
+                // Remove any legacy download button inside the video frame itself
+                const legacyInPlayer = player.querySelector ? player.querySelector('.vsc-download-btn') : null;
+                if (legacyInPlayer && legacyInPlayer.parentNode) {
+                    legacyInPlayer.parentNode.removeChild(legacyInPlayer);
+                }
+
+                // Ensure .x-force-friend-btn-wrap is positioned immediately to the left of the Bookmark button
+                let btnWrap = actionBar.querySelector('.x-force-friend-btn-wrap');
+                if (!btnWrap) {
+                    btnWrap = document.createElement('div');
+                    btnWrap.className = 'x-force-friend-btn-wrap';
+                }
+                const bookmarkRef = findBookmarkInsertionRef(actionBar);
+                if (bookmarkRef) {
+                    if (btnWrap.parentNode !== actionBar || btnWrap.nextSibling !== bookmarkRef) {
+                        actionBar.insertBefore(btnWrap, bookmarkRef);
+                    }
+                } else if (btnWrap.parentNode !== actionBar) {
+                    actionBar.appendChild(btnWrap);
+                }
+
+                if (actionBar.querySelector('.vsc-download-btn')) return;
+            } else {
+                if (player.querySelector && player.querySelector('.vsc-download-btn')) return;
+            }
 
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'vsc-download-btn';
+            btn.setAttribute('data-testid', 'vsc-download-btn');
             btn.setAttribute('aria-label', 'Download Video');
             btn.setAttribute('title', 'Download Video');
-            btn.style.cssText = 'pointer-events: auto !important; cursor: pointer !important; background-color: transparent !important; border: none !important; border-radius: 50% !important; width: 36px !important; height: 36px !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; padding: 0 !important; margin: 0 4px !important; color: #ffffff !important; z-index: 99999 !important; position: relative !important;';
-            btn.innerHTML = `
-                <div style="display: flex; align-items: center; justify-content: center; pointer-events: none; width: 100%; height: 100%;">
-                    ${DOWNLOAD_ICON_SVG}
-                </div>
-            `;
-
-            // Hover effects
-            btn.addEventListener('mouseenter', () => {
-                btn.style.setProperty('opacity', '1', 'important');
-                btn.style.setProperty('background-color', 'rgba(255, 255, 255, 0.2)', 'important');
-                btn.style.setProperty('transform', 'scale(1.1)', 'important');
-            });
-
-            btn.addEventListener('mouseleave', () => {
-                btn.style.setProperty('opacity', '0.85', 'important');
-                btn.style.setProperty('background-color', 'transparent', 'important');
-                btn.style.setProperty('transform', 'scale(1)', 'important');
-            });
+            btn.style.cursor = 'pointer';
+            btn.innerHTML = DOWNLOAD_ICON_SVG;
 
             btn.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                btn.style.setProperty('transform', 'scale(0.95)', 'important');
             }, true);
-
-            btn.addEventListener('mouseup', () => {
-                btn.style.setProperty('transform', 'scale(1.1)', 'important');
-            });
             
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                const video = findRelatedVideo(btn) || player.querySelector('video') || document.querySelector('video');
+                const enclosingArticle = btn.closest ? btn.closest('article') : article;
+                const video = (enclosingArticle && enclosingArticle.querySelector('video')) ||
+                              findRelatedVideo(btn) ||
+                              (player.tagName === 'VIDEO' ? player : (player.querySelector && player.querySelector('video'))) ||
+                              document.querySelector('video');
                 if (video) {
                     triggerDownload(video);
                 } else {
@@ -755,34 +822,27 @@
                 }
             }, true);
 
-            // 2. Find the best container or insertion point
-            const settingsBtn = player.querySelector('button[aria-label="Settings"], button[aria-label="Playback settings"], button[aria-label="Video Settings"], button[aria-label="Video settings"]');
-            const fullscreenBtn = player.querySelector('button[aria-label="Fullscreen"], button[aria-label="Full screen"], [data-testid="fullScreenButton"]');
-            const muteBtn = player.querySelector('button[aria-label="Mute"], button[aria-label="Unmute"], [data-testid="muteButton"], [data-testid="unmuteButton"]');
-
-            if (settingsBtn && settingsBtn.parentElement) {
-                settingsBtn.parentElement.insertBefore(btn, settingsBtn);
-            } else if (fullscreenBtn && fullscreenBtn.parentElement) {
-                fullscreenBtn.parentElement.insertBefore(btn, fullscreenBtn);
-            } else if (muteBtn && muteBtn.parentElement) {
-                muteBtn.parentElement.after(btn);
-            } else {
-                // Secondary check: General controls container
-                const container = player.querySelector('.r-633pao') || 
-                                  player.querySelector('.r-ero68b.r-17s6mgv.r-1awozwy.r-18u37iz') ||
-                                  player.querySelector('.r-18u37iz.r-1wtj0ep.r-13qz1uu');
-                if (container) {
-                    container.appendChild(btn);
-                } else {
-                    // Fallback: floating overlay icon in player
-                    btn.style.setProperty('position', 'absolute', 'important');
-                    btn.style.setProperty('top', '12px', 'important');
-                    btn.style.setProperty('right', '12px', 'important');
-                    btn.style.setProperty('background-color', 'rgba(0, 0, 0, 0.6)', 'important');
-                    btn.style.setProperty('box-shadow', '0 2px 8px rgba(0,0,0,0.5)', 'important');
-                    player.appendChild(btn);
+            if (actionBar) {
+                const btnWrap = actionBar.querySelector('.x-force-friend-btn-wrap');
+                const forceBtn = btnWrap ? btnWrap.querySelector('.x-force-friend-btn') : null;
+                if (btnWrap) {
+                    if (forceBtn) {
+                        btnWrap.insertBefore(btn, forceBtn);
+                    } else {
+                        btnWrap.appendChild(btn);
+                    }
+                    return;
                 }
             }
+
+            // Fallback for standalone video players outside a tweet article
+            let fallbackWrap = player.querySelector ? player.querySelector('.x-force-friend-btn-wrap') : null;
+            if (!fallbackWrap) {
+                fallbackWrap = document.createElement('div');
+                fallbackWrap.className = 'x-force-friend-btn-wrap';
+                player.appendChild(fallbackWrap);
+            }
+            fallbackWrap.appendChild(btn);
         });
     }
 
@@ -951,11 +1011,220 @@
         return origXHRSend.apply(this, arguments);
     };
 
+    // --- In-Place Tweet Interactions (Like, Repost, Bookmark) via X Internal API / Webpack ---
+    const X_WEB_BEARER = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+    const MUTATION_DEFAULTS = {
+        like: {
+            queryId: 'lI07N6Otwv1PhnEgXILM7A',
+            operationName: 'FavoriteTweet',
+            buildVariables: (tid) => ({ tweet_id: String(tid) })
+        },
+        unlike: {
+            queryId: 'ZYKSe-w7KEslx3JhSIk5LA',
+            operationName: 'UnfavoriteTweet',
+            buildVariables: (tid) => ({ tweet_id: String(tid) })
+        },
+        repost: {
+            queryId: 'mbRO74GrOvSfRcJnlMapnQ',
+            operationName: 'CreateRetweet',
+            buildVariables: (tid) => ({ tweet_id: String(tid), dark_request: false })
+        },
+        unrepost: {
+            queryId: 'ZyZigVsNiFO6v1dEks1eWg',
+            operationName: 'DeleteRetweet',
+            buildVariables: (tid) => ({ source_tweet_id: String(tid), dark_request: false })
+        },
+        bookmark: {
+            queryId: 'aoDbu3RHznuiSkQ9aNM67Q',
+            operationName: 'CreateBookmark',
+            buildVariables: (tid) => ({ tweet_id: String(tid) })
+        },
+        unbookmark: {
+            queryId: 'Wlmlj2-xzyS1GN3a6cj-mQ',
+            operationName: 'DeleteBookmark',
+            buildVariables: (tid) => ({ tweet_id: String(tid) })
+        }
+    };
+
+    let wpRequireCache = null;
+    let cachedXInternalApi = null;
+    const opDescCache = new Map();
+
+    function getWebpackRequire() {
+        if (wpRequireCache) return wpRequireCache;
+        const chunk = window.webpackChunk_twitter_responsive_web;
+        if (Array.isArray(chunk)) {
+            try {
+                chunk.push([[Symbol('x_ext_probe')], {}, (r) => {
+                    wpRequireCache = r;
+                }]);
+            } catch (e) {}
+        }
+        return wpRequireCache;
+    }
+
+    function resolveOperationDescriptor(actionType) {
+        const spec = MUTATION_DEFAULTS[actionType];
+        if (!spec) return null;
+        if (opDescCache.has(spec.operationName)) {
+            return opDescCache.get(spec.operationName);
+        }
+
+        const req = getWebpackRequire();
+        if (req && req.m) {
+            try {
+                for (const modId of Object.keys(req.m)) {
+                    const fnStr = String(req.m[modId]);
+                    if (fnStr.includes(`operationName:"${spec.operationName}"`) || fnStr.includes(`operationName: "${spec.operationName}"`)) {
+                        const exported = req(modId);
+                        if (exported && exported.queryId && exported.operationName === spec.operationName) {
+                            opDescCache.set(spec.operationName, exported);
+                            return exported;
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
+
+        const fallback = {
+            queryId: spec.queryId,
+            operationName: spec.operationName,
+            operationType: 'mutation',
+            metadata: { featureSwitches: [], fieldToggles: [] }
+        };
+        opDescCache.set(spec.operationName, fallback);
+        return fallback;
+    }
+
+    function getXInternalApi() {
+        if (cachedXInternalApi && cachedXInternalApi.apiClient) return cachedXInternalApi;
+        const rootEl = document.getElementById('react-root') || document.body;
+        if (!rootEl) return null;
+
+        const visited = new WeakSet();
+        const queue = [];
+        for (const key of Object.keys(rootEl)) {
+            if (key.startsWith('__reactContainer$') || key.startsWith('__reactFiber$')) {
+                queue.push(rootEl[key]);
+            }
+        }
+
+        let steps = 0;
+        while (queue.length > 0 && steps < 500) {
+            steps++;
+            const fiber = queue.shift();
+            if (!fiber || typeof fiber !== 'object' || visited.has(fiber)) continue;
+            visited.add(fiber);
+
+            const storeCandidate =
+                fiber.memoizedProps?.store ||
+                fiber.pendingProps?.store ||
+                fiber.stateNode?.store ||
+                fiber.memoizedState?.element?.props?.store;
+
+            if (storeCandidate && typeof storeCandidate.dispatch === 'function' && typeof storeCandidate.getState === 'function') {
+                try {
+                    storeCandidate.dispatch((dispatch, getState, extra) => {
+                        if (extra && extra.api && extra.api.apiClient) {
+                            cachedXInternalApi = extra.api;
+                        }
+                    });
+                    if (cachedXInternalApi) return cachedXInternalApi;
+                } catch (e) {}
+            }
+
+            if (fiber.child) queue.push(fiber.child);
+            if (fiber.sibling) queue.push(fiber.sibling);
+        }
+        return cachedXInternalApi;
+    }
+
+    async function generateClientTransactionId(path, method = 'POST') {
+        const req = getWebpackRequire();
+        if (!req || !req.m) return null;
+        try {
+            if (req.m[265390]) {
+                const mod = req(265390);
+                if (mod && typeof mod.kc === 'function') {
+                    return await mod.kc('https://x.com', path, method);
+                }
+            }
+            for (const modId of Object.keys(req.m)) {
+                const fnStr = String(req.m[modId]);
+                if (fnStr.includes('x-client-transaction-id') && fnStr.includes('rweb_client_transaction_id_enabled')) {
+                    const mod = req(modId);
+                    if (mod && typeof mod.kc === 'function') {
+                        return await mod.kc('https://x.com', path, method);
+                    }
+                }
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    async function executeMainWorldTweetAction(actionType, tweetId) {
+        const spec = MUTATION_DEFAULTS[actionType];
+        if (!spec || !tweetId) return false;
+        const opDesc = resolveOperationDescriptor(actionType);
+        const variables = spec.buildVariables(tweetId);
+
+        // 1. Primary: Use X's own internal apiClient.graphQL (includes x-client-transaction-id & session binding)
+        const xApi = getXInternalApi();
+        if (xApi && xApi.apiClient && typeof xApi.apiClient.graphQL === 'function') {
+            try {
+                await xApi.apiClient.graphQL(opDesc, variables);
+                return true;
+            } catch (err) {
+                console.warn(`X Env: internal apiClient.graphQL failed for ${actionType}, falling back to signed fetch`, err);
+            }
+        }
+
+        // 2. Fallback: Direct fetch with dynamically generated x-client-transaction-id
+        const apiPath = `/i/api/graphql/${opDesc.queryId}/${opDesc.operationName}`;
+        const csrfMatch = (document.cookie || '').match(/(?:^|;\s*)ct0=([^;]+)/);
+        const csrfToken = csrfMatch && csrfMatch[1] ? decodeURIComponent(csrfMatch[1]) : '';
+        const txId = await generateClientTransactionId(apiPath, 'POST');
+
+        const headers = {
+            'authorization': X_WEB_BEARER,
+            'content-type': 'application/json',
+            'x-twitter-active-user': 'yes',
+            'x-twitter-auth-type': 'OAuth2Session',
+            'x-twitter-client-language': 'en'
+        };
+        if (csrfToken) headers['x-csrf-token'] = csrfToken;
+        if (txId) headers['x-client-transaction-id'] = txId;
+
+        try {
+            const res = await origFetch(`https://x.com${apiPath}`, {
+                method: 'POST',
+                credentials: 'include',
+                headers,
+                body: JSON.stringify({
+                    variables,
+                    queryId: opDesc.queryId
+                })
+            });
+            return Boolean(res && res.ok);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    window.addEventListener('message', (event) => {
+        if (event.source !== window || !event.data) return;
+        if (event.data.type === 'X_PERFORM_TWEET_ACTION' && event.data.payload) {
+            const { actionType, tweetId } = event.data.payload;
+            executeMainWorldTweetAction(actionType, tweetId);
+        }
+    });
+
     if (typeof window !== 'undefined') {
         window.XEnv = {
             allowedUnmuted,
             shadowMutedState,
             injectDownloadButtons,
+            executeMainWorldTweetAction,
             get isModuleEnabled() { return isModuleEnabled; },
             get alwaysMuteEnabled() { return alwaysMuteEnabled; },
             get currentVolume() { return currentVolume; }

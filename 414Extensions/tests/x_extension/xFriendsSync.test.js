@@ -234,4 +234,173 @@ describe('XFriendsSyncManager', () => {
         expect(seen['1850000000000000222']).toEqual(['Bob (bob@example.com)']);
         expect(seen['1850000000000000111']).toEqual(['Bob (bob@example.com)']);
     });
+
+    test('should sync forced posts and rich tweet metadata for the Friends Timeline and unseen Home injection', async () => {
+        const aliceManager = new XFriendsSyncManager({
+            relays: ['wss://mock.relay'],
+            webSocketFactory: () => relayHub.createSocket()
+        });
+        const bobManager = new XFriendsSyncManager({
+            relays: ['wss://mock.relay'],
+            webSocketFactory: () => relayHub.createSocket()
+        });
+
+        await aliceManager.setIdentity('alice@example.com', 'Alice');
+        await aliceManager.addFriend('bob@example.com');
+
+        storageMap.clear();
+        await bobManager.setIdentity('bob@example.com', 'Bob');
+        await bobManager.acceptFriend('alice@example.com');
+        await aliceManager.syncWithRelays();
+
+        // Alice sees a normal post with metadata and forces a second post to Bob
+        await aliceManager.markTweetsSeen(['1850000000000000500'], {
+            '1850000000000000500': {
+                screenName: 'technews',
+                authorName: 'Tech News',
+                text: 'Regular seen post about web browsers'
+            }
+        });
+        await aliceManager.forceTweetToFriends('1850000000000000999', {
+            screenName: 'breaking',
+            authorName: 'Breaking Updates',
+            text: 'Must-see post forced by Alice!',
+            media: [{ type: 'photo', url: 'https://pbs.twimg.com/media/sample.jpg' }]
+        });
+
+        // Bob syncs with relays
+        await bobManager.syncWithRelays();
+
+        const bobTimeline = bobManager.getFriendsTimelineData();
+        expect(bobTimeline.timelinePosts.length).toBe(2);
+
+        // Forced post should be sorted first and appear in unseenForcedPosts
+        expect(bobTimeline.timelinePosts[0]).toEqual(expect.objectContaining({
+            tweetId: '1850000000000000999',
+            isForced: true,
+            forcedBy: ['Alice (alice@example.com)'],
+            seenBy: ['Alice (alice@example.com)'],
+            isSeenByMe: false,
+            meta: expect.objectContaining({
+                screenName: 'breaking',
+                authorName: 'Breaking Updates',
+                text: 'Must-see post forced by Alice!'
+            })
+        }));
+
+        expect(bobTimeline.unseenForcedPosts.length).toBe(1);
+        expect(bobTimeline.unseenForcedPosts[0].tweetId).toBe('1850000000000000999');
+
+        // Bob dismisses the forced post from his Home feed -> removed from unseenForcedPosts and marked seen
+        await bobManager.dismissForcedTweet('1850000000000000999');
+        const bobTimelineAfterDismiss = bobManager.getFriendsTimelineData();
+        expect(bobTimelineAfterDismiss.unseenForcedPosts.length).toBe(0);
+        expect(bobTimelineAfterDismiss.timelinePosts[0].isSeenByMe).toBe(true);
+
+        // Alice unforces the post -> Bob syncs and sees it is no longer forced
+        await aliceManager.unforceTweet('1850000000000000999');
+        await bobManager.syncWithRelays();
+        const statusCheck = bobManager.checkTweetsSyncStatus(['1850000000000000999']);
+        expect(statusCheck.forcedMap['1850000000000000999']).toBeUndefined();
+    });
+
+    test('hydrateTweets should fetch rich post metadata (text, playable video MP4, quoted tweet, parent reply) and filter out deleted tweets', async () => {
+        const mockFetch = jest.fn(async (url) => {
+            if (url.includes('id=2113362791734341682')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        id_str: '2113362791734341682',
+                        created_at: 'Wed Oct 22 20:09:49 +0000 2026',
+                        text: 'Watch this clip &amp; enjoy https://t.co/vidlink',
+                        favorite_count: 1420,
+                        conversation_count: 85,
+                        user: {
+                            name: 'Video Creator',
+                            screen_name: 'vidcreator',
+                            is_blue_verified: true,
+                            profile_image_url_https: 'https://pbs.twimg.com/profile_images/1/avatar_normal.jpg'
+                        },
+                        entities: {
+                            media: [{ url: 'https://t.co/vidlink' }],
+                            urls: []
+                        },
+                        mediaDetails: [
+                            {
+                                type: 'video',
+                                media_url_https: 'https://pbs.twimg.com/ext_tw_video_thumb/poster.jpg',
+                                video_info: {
+                                    variants: [
+                                        { bitrate: 256000, content_type: 'video/mp4', url: 'https://video.twimg.com/low.mp4' },
+                                        { bitrate: 2176000, content_type: 'video/mp4', url: 'https://video.twimg.com/high.mp4' }
+                                    ]
+                                }
+                            }
+                        ],
+                        parent: {
+                            id_str: '2113360000000000000',
+                            text: 'Original thread starter',
+                            user: {
+                                name: 'Thread Starter',
+                                screen_name: 'starter'
+                            }
+                        }
+                    })
+                };
+            }
+            if (url.includes('id=2113364772632838435')) {
+                return {
+                    ok: false,
+                    status: 404
+                };
+            }
+            return { ok: false, status: 500 };
+        });
+
+        const manager = new XFriendsSyncManager({
+            relays: ['wss://relay1.test'],
+            webSocketFactory: (url) => hub.connect(url),
+            fetchFn: mockFetch
+        });
+        await manager.init();
+
+        // Simulate friend having seen both a valid video tweet and a deleted tweet (bare IDs)
+        manager.state.friends['morgkorg'] = {
+            email: 'morgkorg',
+            displayName: 'morgkorg',
+            status: 'connected'
+        };
+        manager.state.friendSeenMap['morgkorg'] = ['2113362791734341682', '2113364772632838435'];
+        manager.rebuildIndex();
+
+        const res = await manager.hydrateTweets(['2113362791734341682', '2113364772632838435']);
+        expect(res.hydrated['2113362791734341682']).toEqual(expect.objectContaining({
+            id: '2113362791734341682',
+            screenName: 'vidcreator',
+            authorName: 'Video Creator',
+            isVerified: true,
+            text: 'Watch this clip & enjoy',
+            favoriteCount: 1420,
+            replyCount: 85,
+            isHydrated: true,
+            media: [
+                expect.objectContaining({
+                    type: 'video',
+                    posterUrl: 'https://pbs.twimg.com/ext_tw_video_thumb/poster.jpg',
+                    videoUrl: 'https://video.twimg.com/high.mp4'
+                })
+            ],
+            parentTweet: expect.objectContaining({
+                screenName: 'starter',
+                text: 'Original thread starter'
+            })
+        }));
+
+        expect(res.hydrated['2113364772632838435'].isUnavailable).toBe(true);
+
+        // Deleted/unavailable tweets should be excluded from getFriendsTimelineData()
+        const timeline = manager.getFriendsTimelineData();
+        expect(timeline.timelinePosts.map(p => p.tweetId)).toEqual(['2113362791734341682']);
+    });
 });

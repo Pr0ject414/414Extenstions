@@ -221,8 +221,8 @@ export function handleMessage(request, sender, sendResponse) {
     }
 
     if (request.action === "X_MARK_TWEETS_SEEN") {
-        const { tweetIds } = request.payload || {};
-        friendsSync.markTweetsSeen(tweetIds).then(res => {
+        const { tweetIds, tweetMetaMap } = request.payload || {};
+        friendsSync.markTweetsSeen(tweetIds, tweetMetaMap).then(res => {
             sendResponse({ success: true, ...res });
         }).catch(err => {
             sendResponse({ success: false, error: err.message });
@@ -233,8 +233,58 @@ export function handleMessage(request, sender, sendResponse) {
     if (request.action === "X_CHECK_TWEETS_SEEN") {
         const { tweetIds } = request.payload || {};
         friendsSync.init().then(() => {
-            const seenMap = friendsSync.checkTweetsSeen(tweetIds);
-            sendResponse({ success: true, seenMap });
+            const status = friendsSync.checkTweetsSyncStatus(tweetIds);
+            sendResponse({ success: true, ...status });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_FORCE_TWEET_TO_FRIENDS") {
+        const { tweetId, meta } = request.payload || {};
+        friendsSync.forceTweetToFriends(tweetId, meta).then(res => {
+            sendResponse({ success: true, ...res });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_UNFORCE_TWEET") {
+        const { tweetId } = request.payload || {};
+        friendsSync.unforceTweet(tweetId).then(res => {
+            sendResponse({ success: true, ...res });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_DISMISS_FORCED_TWEET") {
+        const { tweetId } = request.payload || {};
+        friendsSync.dismissForcedTweet(tweetId).then(res => {
+            sendResponse({ success: true, ...res });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_GET_FRIENDS_TIMELINE") {
+        friendsSync.init().then(() => {
+            const data = friendsSync.getFriendsTimelineData();
+            sendResponse({ success: true, ...data });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_HYDRATE_TWEETS") {
+        const { tweetIds } = request.payload || {};
+        friendsSync.hydrateTweets(tweetIds).then(res => {
+            sendResponse({ success: true, ...res });
         }).catch(err => {
             sendResponse({ success: false, error: err.message });
         });

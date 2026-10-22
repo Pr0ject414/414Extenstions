@@ -227,6 +227,7 @@ describe('xLocationUI.js', () => {
         cell.appendChild(tweet);
         document.body.appendChild(cell);
 
+        delete window.XObserverInjected;
         const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
         const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
         eval(observerScriptContent);
@@ -317,6 +318,7 @@ describe('xLocationUI.js', () => {
         cell.appendChild(tweet);
         document.body.appendChild(cell);
 
+        delete window.XObserverInjected;
         const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
         const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
         eval(observerScriptContent);
@@ -413,6 +415,7 @@ describe('xLocationUI.js', () => {
         cell.appendChild(tweet);
         document.body.appendChild(cell);
 
+        delete window.XObserverInjected;
         const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
         const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
         eval(observerScriptContent);
@@ -549,6 +552,7 @@ describe('xLocationUI.js', () => {
         cell3.appendChild(tweet3);
         document.body.appendChild(cell3);
 
+        delete window.XObserverInjected;
         const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
         const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
         eval(observerScriptContent);
@@ -563,6 +567,939 @@ describe('xLocationUI.js', () => {
 
         expect(tweet3.style.display).toBe('');
         expect(cell3.querySelector('.x-tweet-filtered-placeholder')).toBeNull();
+
+        jest.useRealTimers();
+    });
+
+    test('renderForceTweetButton should inject action bar button and toggle forced state on click', () => {
+        const article = document.createElement('article');
+        article.setAttribute('data-testid', 'tweet');
+        const actionBar = document.createElement('div');
+        actionBar.setAttribute('role', 'group');
+        article.appendChild(actionBar);
+        document.body.appendChild(article);
+
+        const onToggle = jest.fn();
+        const btn = window.XLocationUI.renderForceTweetButton(
+            article,
+            '1850000000000000777',
+            { forcedByMe: false, forcedByFriends: ['Bob (bob@example.com)'] },
+            onToggle
+        );
+
+        expect(btn).not.toBeNull();
+        expect(btn.classList.contains('is-forced')).toBe(false);
+        expect(btn.classList.contains('is-friend-forced')).toBe(true);
+        expect(btn.title).toContain('Forced by Bob');
+
+        // Click to force to friends
+        btn.click();
+        expect(btn.classList.contains('is-forced')).toBe(true);
+        expect(onToggle).toHaveBeenCalledWith('1850000000000000777', true, article);
+
+        // Click again to unforce
+        btn.click();
+        expect(btn.classList.contains('is-forced')).toBe(false);
+        expect(onToggle).toHaveBeenCalledWith('1850000000000000777', false, article);
+    });
+
+    test('ensureFriendsTimelineTab and renderFriendsTimeline should inject Friends tab and render seen & forced posts', () => {
+        const tabList = document.createElement('div');
+        tabList.setAttribute('role', 'tablist');
+        const forYouTab = document.createElement('a');
+        forYouTab.setAttribute('role', 'tab');
+        forYouTab.textContent = 'For you';
+        const followingTab = document.createElement('a');
+        followingTab.setAttribute('role', 'tab');
+        followingTab.textContent = 'Following';
+        tabList.appendChild(forYouTab);
+        tabList.appendChild(followingTab);
+        document.body.appendChild(tabList);
+
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+
+        const sampleData = {
+            timelinePosts: [
+                {
+                    tweetId: '1850000000000000888',
+                    isForced: true,
+                    forcedBy: ['Alice (alice@example.com)'],
+                    seenBy: ['Alice (alice@example.com)'],
+                    forcedByMe: false,
+                    isSeenByMe: false,
+                    meta: {
+                        screenName: 'openai',
+                        authorName: 'OpenAI',
+                        text: 'Forced announcement post!'
+                    }
+                },
+                {
+                    tweetId: '1850000000000000889',
+                    isForced: false,
+                    forcedBy: [],
+                    seenBy: ['Bob (bob@example.com)'],
+                    forcedByMe: false,
+                    isSeenByMe: true,
+                    meta: {
+                        screenName: 'github',
+                        authorName: 'GitHub',
+                        text: 'Normal post seen by Bob.'
+                    }
+                }
+            ],
+            unseenForcedPosts: [{ tweetId: '1850000000000000888' }],
+            connectedFriends: [
+                { email: 'alice@example.com', displayName: 'Alice', label: 'Alice (alice@example.com)' },
+                { email: 'bob@example.com', displayName: 'Bob', label: 'Bob (bob@example.com)' }
+            ]
+        };
+
+        const onSelectFriendsTab = jest.fn();
+        const friendsTab = window.XLocationUI.ensureFriendsTimelineTab(tabList, sampleData, { onSelectFriendsTab });
+        expect(friendsTab).not.toBeNull();
+        expect(friendsTab.textContent).toContain('Friends');
+        expect(friendsTab.querySelector('.x-friends-tab-badge').textContent).toBe('1');
+
+        // Click Friends tab
+        friendsTab.click();
+        expect(window.XLocationUI.isFriendsTimelineTabSelected()).toBe(true);
+        expect(onSelectFriendsTab).toHaveBeenCalledWith(true);
+
+        // Render timeline
+        const root = window.XLocationUI.renderFriendsTimeline(host, sampleData, {});
+        const cards = root.querySelectorAll('.x-friend-tweet-card');
+        expect(cards.length).toBe(2);
+        expect(cards[0].textContent).toContain('Forced by Alice');
+        expect(cards[0].textContent).toContain('Forced announcement post!');
+        expect(cards[1].textContent).toContain('Seen by Bob');
+
+        // Click "Forced" filter pill
+        const forcedFilterBtn = root.querySelector('[data-filter="forced"]');
+        forcedFilterBtn.click();
+        expect(root.querySelectorAll('.x-friend-tweet-card').length).toBe(1);
+
+        // Click native "For you" tab -> should deselect Friends tab
+        forYouTab.click();
+        expect(window.XLocationUI.isFriendsTimelineTabSelected()).toBe(false);
+        expect(onSelectFriendsTab).toHaveBeenCalledWith(false);
+    });
+
+    test('ensureFriendsTimelineTab should insert Friends tab right after Following in X ScrollSnap-List DOM', () => {
+        document.body.innerHTML = `<div role="tablist" class="css-g5y9jx r-18u37iz r-16y2uox r-1wbh5a2 r-tzz3ar r-1pi2tsx r-buy8e9 r-mfh4gg r-2eszeu r-10m9thr r-lltvgl r-o2224p" data-testid="ScrollSnap-List" style="scroll-padding: 0px 36px;"><div role="presentation" class="css-g5y9jx r-14tvyh0 r-cpa5s6 r-16y2uox"><div role="tab" aria-selected="true" tabindex="0" class="css-g5y9jx r-1awozwy r-6koalj r-eqz5dr r-16y2uox r-1h3ijdo r-17s6mgv r-s8bhmr r-3pj75a r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l"><div class="css-g5y9jx"><div dir="ltr" class="css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-b88u0q r-1awozwy r-6koalj r-18u37iz r-1pi2tsx r-1777fci r-1l7z4oj r-95jzfe r-bnwqim" style="color: rgb(231, 233, 234);"><span class="css-1jxf684 r-bcqeeo r-1ttztb7 r-qvutc0 r-poiln3">For you</span><div class="css-g5y9jx r-xoduu5 r-1kihuf0 r-sdzlij r-1p0dtai r-hdaws3 r-s8bhmr r-u8s1d r-13qz1uu" style="background-color: rgb(29, 155, 240);"></div></div></div></div></div><div role="presentation" class="css-g5y9jx r-14tvyh0 r-cpa5s6 r-16y2uox"><div role="tab" aria-selected="false" tabindex="-1" class="css-g5y9jx r-1awozwy r-6koalj r-eqz5dr r-16y2uox r-1h3ijdo r-17s6mgv r-s8bhmr r-3pj75a r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l"><div class="css-g5y9jx"><div dir="ltr" class="css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-majxgm r-1awozwy r-6koalj r-18u37iz r-1pi2tsx r-1777fci r-1l7z4oj r-95jzfe r-bnwqim" style="color: rgb(113, 118, 123);"><span class="css-1jxf684 r-bcqeeo r-1ttztb7 r-qvutc0 r-poiln3">Following</span><div class="css-g5y9jx r-xoduu5"></div></div></div></div></div><div role="presentation" class="css-g5y9jx r-14tvyh0 r-cpa5s6 r-16y2uox"><div role="tab" aria-selected="false" tabindex="-1" class="css-g5y9jx r-1awozwy r-6koalj r-eqz5dr r-16y2uox r-1h3ijdo r-17s6mgv r-s8bhmr r-3pj75a r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l"><div class="css-g5y9jx"><div dir="ltr" class="css-146c3p1 r-bcqeeo r-1ttztb7 r-qvutc0 r-37j5jr r-a023e6 r-rjixqe r-majxgm r-1awozwy r-6koalj r-18u37iz r-1pi2tsx r-1777fci r-1l7z4oj r-95jzfe r-bnwqim" style="color: rgb(113, 118, 123);"><span class="css-1jxf684 r-bcqeeo r-1ttztb7 r-qvutc0 r-poiln3">NFL</span><div class="css-g5y9jx r-xoduu5"></div></div></div></div></div></div>`;
+
+        const tabList = document.querySelector('[role="tablist"]');
+        const friendsTab = window.XLocationUI.ensureFriendsTimelineTab(tabList, {}, {});
+        expect(friendsTab).not.toBeNull();
+
+        const presentations = Array.from(tabList.querySelectorAll(':scope > [role="presentation"]'));
+        expect(presentations.length).toBe(4);
+        expect(presentations[0].textContent).toContain('For you');
+        expect(presentations[1].textContent).toContain('Following');
+        expect(presentations[2].textContent).toContain('Friends');
+        expect(presentations[3].textContent).toContain('NFL');
+        expect(presentations[2].className).toContain('r-14tvyh0');
+    });
+
+    test('renderForcedPostsInHomeFeed should inject unseen forced posts at top of Home feed and allow dismissing', () => {
+        const homeFeed = document.createElement('section');
+        const existingTweet = document.createElement('article');
+        existingTweet.textContent = 'Native timeline tweet';
+        homeFeed.appendChild(existingTweet);
+        document.body.appendChild(homeFeed);
+
+        const onDismissForced = jest.fn();
+        const container = window.XLocationUI.renderForcedPostsInHomeFeed(
+            homeFeed,
+            [
+                {
+                    tweetId: '1850000000000000700',
+                    forcedBy: ['Alice (alice@example.com)'],
+                    seenBy: ['Alice (alice@example.com)'],
+                    meta: {
+                        screenName: 'nasa',
+                        authorName: 'NASA',
+                        text: 'Check out this rocket launch!'
+                    }
+                }
+            ],
+            { onDismissForced }
+        );
+
+        expect(container).not.toBeNull();
+        expect(homeFeed.firstChild).toBe(container);
+        expect(container.textContent).toContain('Forced to Your Timeline by Friends (1)');
+        expect(container.textContent).toContain('Check out this rocket launch!');
+
+        const dismissBtn = container.querySelector('.x-forced-dismiss-btn');
+        dismissBtn.click();
+        expect(onDismissForced).toHaveBeenCalledWith('1850000000000000700');
+        expect(homeFeed.querySelector('#x-forced-home-feed')).toBeNull();
+    });
+
+    test('renderFriendsTimeline should paginate posts (20 per page), request hydration for unhydrated bare IDs, and upgrade cards to playable video posts', () => {
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+
+        // Reset filter to 'all'
+        const manyPosts = Array.from({ length: 25 }, (_, idx) => ({
+            tweetId: String(1850000000000001000n + BigInt(idx)),
+            isForced: false,
+            forcedBy: [],
+            seenBy: ['morgkorg'],
+            forcedByMe: false,
+            isSeenByMe: false,
+            meta: null
+        }));
+
+        const onHydrateTweets = jest.fn();
+        const root = window.XLocationUI.renderFriendsTimeline(host, {
+            timelinePosts: manyPosts,
+            unseenForcedPosts: [],
+            connectedFriends: [{ email: 'morgkorg', displayName: 'morgkorg', label: 'morgkorg' }]
+        }, { onHydrateTweets });
+
+        // Make sure 'all' filter is selected
+        const allFilterBtn = root.querySelector('[data-filter="all"]');
+        if (allFilterBtn && !allFilterBtn.classList.contains('is-active')) {
+            allFilterBtn.click();
+        }
+
+        // Only 20 posts rendered on first page + "Show more posts (5 remaining)" button
+        expect(root.querySelectorAll('article.x-friend-tweet-card').length).toBe(20);
+        const loadMoreBtn = root.querySelector('.x-friends-load-more-btn');
+        expect(loadMoreBtn).not.toBeNull();
+        expect(loadMoreBtn.textContent).toContain('5 remaining');
+
+        // Should have requested hydration for the first 20 unhydrated IDs
+        expect(onHydrateTweets).toHaveBeenCalled();
+        const firstId = manyPosts[0].tweetId;
+        expect(onHydrateTweets.mock.calls[0][0]).toContain(firstId);
+
+        // No manual "Mark Seen" or "Open Post" pill buttons should exist
+        expect(root.querySelector('.x-friend-card-seen-btn')).toBeNull();
+        expect(root.querySelector('.x-friend-card-open-link')).toBeNull();
+
+        // Hydrate the first card with playable video and parent reply
+        window.XLocationUI.updateHydratedCardsInDOM({
+            [firstId]: {
+                id: firstId,
+                screenName: 'morg_author',
+                authorName: 'Morg Author',
+                isVerified: true,
+                text: 'Real hydrated post with video!',
+                isHydrated: true,
+                favoriteCount: 2500,
+                replyCount: 42,
+                media: [
+                    {
+                        type: 'video',
+                        posterUrl: 'https://pbs.twimg.com/thumb.jpg',
+                        videoUrl: 'https://video.twimg.com/clip.mp4'
+                    }
+                ],
+                parentTweet: {
+                    id: '1850000000000000001',
+                    screenName: 'parent_user',
+                    authorName: 'Parent User',
+                    text: 'Replying to this parent post'
+                }
+            }
+        });
+
+        const updatedCard = root.querySelector(`article.x-friend-tweet-card[data-tweet-id="${firstId}"]`);
+        expect(updatedCard).not.toBeNull();
+        expect(updatedCard.getAttribute('data-testid')).toBe('tweet');
+        expect(updatedCard.textContent).toContain('Real hydrated post with video!');
+        expect(updatedCard.textContent).toContain('Replying to this parent post');
+
+        const videoEl = updatedCard.querySelector('video.x-friend-card-video');
+        expect(videoEl).not.toBeNull();
+        expect(videoEl.src).toBe('https://video.twimg.com/clip.mp4');
+
+        // Automatic seen marking updates the card in-place
+        window.XLocationUI.markCardSeenInDOM(firstId);
+        expect(updatedCard.classList.contains('is-seen-by-me')).toBe(true);
+        const mySeenPill = updatedCard.querySelector('[data-testid="x-card-my-seen"]');
+        expect(mySeenPill.style.display).toBe('');
+    });
+
+    test('createFriendTweetCard should render authentic Quote Retweets, strip self-quote URLs, deduplicate quote media, and request hydration when quote metadata is incomplete', () => {
+        const card = window.XLocationUI.createFriendTweetCard({
+            tweetId: '1850000000000009001',
+            seenBy: ['Alice'],
+            forcedBy: [],
+            forcedByMe: false,
+            isSeenByMe: false,
+            meta: {
+                id: '1850000000000009001',
+                screenName: 'outer_author',
+                authorName: 'Outer Author',
+                avatarUrl: 'https://pbs.twimg.com/profile_images/outer.jpg',
+                isVerified: true,
+                text: 'Wild quote post here https://x.com/quoted_user/status/1850000000000008000 https://t.co/abc123xyz',
+                isHydrated: true,
+                hydrationVersion: 1, // v1 should trigger re-hydration for quote post
+                media: [
+                    { type: 'photo', url: 'https://pbs.twimg.com/media/quote_photo.jpg' }
+                ],
+                quotedTweet: {
+                    id: '1850000000000008000',
+                    screenName: 'quoted_user',
+                    authorName: 'Quoted User',
+                    avatarUrl: 'https://pbs.twimg.com/profile_images/quoted.jpg',
+                    isVerified: true,
+                    createdAt: new Date(Date.now() - 3600 * 1000).toISOString(),
+                    text: 'Original quoted post content',
+                    media: [
+                        { type: 'photo', url: 'https://pbs.twimg.com/media/quote_photo.jpg' }
+                    ]
+                }
+            }
+        });
+
+        // Should flag needs-hydration because hydrationVersion !== 2 on a quote post
+        expect(card.getAttribute('data-needs-hydration')).toBe('true');
+
+        // Outer body text should have stripped both the self-quote status URL and trailing t.co link
+        const outerBody = card.querySelector('.x-friend-card-body');
+        expect(outerBody).not.toBeNull();
+        expect(outerBody.textContent).toBe('Wild quote post here');
+
+        // Duplicated quote photo should only appear inside the quote card, not in outer media
+        const allMediaGrids = card.querySelectorAll('.x-friend-card-media-grid');
+        expect(allMediaGrids.length).toBe(1);
+        expect(allMediaGrids[0].classList.contains('x-friend-card-quote-media')).toBe(true);
+
+        // Quoted tweet card structure
+        const quoteBox = card.querySelector('.x-friend-card-quote');
+        expect(quoteBox).not.toBeNull();
+        const quoteHeader = quoteBox.querySelector('.x-friend-card-quote-header');
+        expect(quoteHeader.querySelector('[data-testid="User-Name"]')).not.toBeNull();
+        expect(quoteHeader.querySelector('.x-friend-card-quote-avatar').src).toContain('quoted.jpg');
+        expect(quoteHeader.querySelector('.x-friend-card-quote-author').textContent).toBe('Quoted User');
+        expect(quoteHeader.querySelector('.x-friend-card-quote-handle').textContent).toBe('@quoted_user');
+        expect(quoteHeader.querySelector('.x-friend-card-quote-time').textContent).toContain('1h');
+        expect(quoteBox.querySelector('.x-friend-card-quote-text').textContent).toBe('Original quoted post content');
+    });
+
+    test('seen posts should stay on screen when dwell time passes and only be removed after scrolling past (rect.bottom <= 0)', () => {
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+
+        const postA = {
+            tweetId: '1850000000000009101',
+            isForced: false,
+            forcedBy: [],
+            seenBy: ['Alice'],
+            forcedByMe: false,
+            isSeenByMe: false,
+            meta: {
+                id: '1850000000000009101',
+                screenName: 'user_a',
+                authorName: 'User A',
+                text: 'First post on screen',
+                isHydrated: true,
+                hydrationVersion: 2
+            }
+        };
+        const postB = {
+            tweetId: '1850000000000009102',
+            isForced: false,
+            forcedBy: [],
+            seenBy: ['Alice'],
+            forcedByMe: false,
+            isSeenByMe: false,
+            meta: {
+                id: '1850000000000009102',
+                screenName: 'user_b',
+                authorName: 'User B',
+                text: 'Second post on screen',
+                isHydrated: true,
+                hydrationVersion: 2
+            }
+        };
+
+        const timelineData = {
+            timelinePosts: [postA, postB],
+            unseenForcedPosts: [],
+            connectedFriends: [{ email: 'alice@example.com', displayName: 'Alice', label: 'Alice' }]
+        };
+
+        const root = window.XLocationUI.renderFriendsTimeline(host, timelineData, {});
+        // Switch to 'unseen' filter to verify even in Unseen filter, dwell-seen posts are NOT removed while still on screen
+        const unseenFilterBtn = root.querySelector('[data-filter="unseen"]');
+        unseenFilterBtn.click();
+
+        let cardA = root.querySelector(`article.x-friend-tweet-card[data-tweet-id="${postA.tweetId}"]`);
+        expect(cardA).not.toBeNull();
+
+        // Simulate cardA being on-screen (rect.top = 120, rect.bottom = 340, rect.height = 220)
+        cardA.getBoundingClientRect = () => ({
+            top: 120,
+            bottom: 340,
+            left: 0,
+            right: 600,
+            width: 600,
+            height: 220
+        });
+
+        // Dwell time passes -> mark cardA as seen
+        postA.isSeenByMe = true;
+        window.XLocationUI.markCardSeenInDOM(postA.tweetId);
+
+        // Even if syncFriendsTimelineUI re-renders the timeline, cardA MUST stay in the DOM while on screen
+        window.XLocationUI.renderFriendsTimeline(host, timelineData, {});
+        cardA = root.querySelector(`article.x-friend-tweet-card[data-tweet-id="${postA.tweetId}"]`);
+        expect(cardA).not.toBeNull();
+        expect(cardA.classList.contains('is-seen-by-me')).toBe(true);
+
+        // Calling removeSeenCardsScrolledPast while cardA is still on screen (bottom = 340 > 0) does NOT remove it
+        cardA.getBoundingClientRect = () => ({
+            top: 120,
+            bottom: 340,
+            left: 0,
+            right: 600,
+            width: 600,
+            height: 220
+        });
+        expect(window.XLocationUI.removeSeenCardsScrolledPast()).toBe(0);
+        expect(root.querySelector(`article.x-friend-tweet-card[data-tweet-id="${postA.tweetId}"]`)).not.toBeNull();
+
+        // Now user scrolls down past cardA (rect.bottom = -15 <= 0, height = 220)
+        window.scrollBy = jest.fn();
+        cardA.getBoundingClientRect = () => ({
+            top: -235,
+            bottom: -15,
+            left: 0,
+            right: 600,
+            width: 600,
+            height: 220
+        });
+
+        const cardBRefBefore = root.querySelector(`article.x-friend-tweet-card[data-tweet-id="${postB.tweetId}"]`);
+        expect(cardBRefBefore).not.toBeNull();
+
+        expect(window.XLocationUI.removeSeenCardsScrolledPast()).toBe(1);
+        expect(root.querySelector(`article.x-friend-tweet-card[data-tweet-id="${postA.tweetId}"]`)).toBeNull();
+        expect(window.scrollBy).toHaveBeenCalledWith(0, -220);
+
+        // Even when renderFriendsTimeline is called again after removal, Post B's DOM node is NEVER recreated
+        window.XLocationUI.renderFriendsTimeline(host, timelineData, {});
+        const cardBRefAfter = root.querySelector(`article.x-friend-tweet-card[data-tweet-id="${postB.tweetId}"]`);
+        expect(cardBRefAfter).toBe(cardBRefBefore);
+    });
+
+    test('createFriendTweetCard should render For You quote layout, deduplicate DOM vs Syndication media URLs, and place Force button left of Bookmark', () => {
+        const card = window.XLocationUI.createFriendTweetCard({
+            tweetId: '2113383149011140730',
+            seenBy: ['Alice'],
+            forcedBy: [],
+            forcedByMe: false,
+            isSeenByMe: false,
+            meta: {
+                id: '2113383149011140730',
+                screenName: 'MKBHD',
+                authorName: 'Marques Brownlee',
+                avatarUrl: 'https://pbs.twimg.com/profile_images/1990855181785759745/CP3H7WsL_bigger.jpg',
+                isVerified: true,
+                text: 'Honestly the resemblance is uncanny',
+                // Unhydrated DOM format URL that matches the quote tweet's Syndication media asset ID
+                media: [
+                    { type: 'photo', url: 'https://pbs.twimg.com/media/HVO5iJBWsAA5wrD?format=jpg&name=900x900' }
+                ],
+                quotedTweet: {
+                    id: '2113278199459455320',
+                    screenName: 'zachblank',
+                    authorName: 'Zach Blank',
+                    avatarUrl: 'https://pbs.twimg.com/profile_images/2018873530486480896/m1GPH5yK_bigger.jpg',
+                    isVerified: true,
+                    createdAt: '2026-04-20T18:00:00.000Z',
+                    text: 'Saw @MKBHD at the airport today',
+                    media: [
+                        { type: 'photo', url: 'https://pbs.twimg.com/media/HVO5iJBWsAA5wrD.jpg' }
+                    ]
+                },
+                isHydrated: true,
+                hydrationVersion: 3
+            }
+        });
+        document.body.appendChild(card);
+
+        // 1. Outer tweet should NOT duplicate the quote tweet's photo even when URL query format differs
+        const allMediaGrids = card.querySelectorAll('.x-friend-card-media-grid');
+        expect(allMediaGrids.length).toBe(1);
+        expect(allMediaGrids[0].classList.contains('x-friend-card-quote-media')).toBe(true);
+
+        // 2. Quote card header has 24x24 Tweet-User-Avatar sibling before User-Name
+        const quoteBox = card.querySelector('.x-friend-card-quote');
+        expect(quoteBox).not.toBeNull();
+        const qAvatarWrap = quoteBox.querySelector('[data-testid="Tweet-User-Avatar"]');
+        const qUserMeta = quoteBox.querySelector('[data-testid="User-Name"]');
+        expect(qAvatarWrap).not.toBeNull();
+        expect(qUserMeta).not.toBeNull();
+        expect(qAvatarWrap.nextSibling).toBe(qUserMeta);
+
+        // 3. Inline location badge rendered on quote User-Name stays INSIDE qUserMeta right after @zachblank
+        window.XLocationUI.renderInlineBadge(qUserMeta, {
+            screenName: 'zachblank',
+            location: 'United States',
+            device: 'United States App Store'
+        });
+        const inlineBadge = qUserMeta.querySelector('.x-location-inline-badge');
+        expect(inlineBadge).not.toBeNull();
+
+        // 4. Force button wrap is positioned immediately to the left of the Bookmark button in footer[role="group"]
+        const footer = card.querySelector('div[role="group"]');
+        const forceWrap = footer.querySelector('.x-force-friend-btn-wrap');
+        const bookmarkBtn = footer.querySelector('[data-testid="bookmark"]');
+        expect(forceWrap).not.toBeNull();
+        expect(bookmarkBtn).not.toBeNull();
+        expect(forceWrap.nextSibling).toBe(bookmarkBtn);
+    });
+
+    test('createFriendTweetCard should render parentTweet in bottom .x-friend-card-quote box, strip leading @mention, and show Replying to @handle', () => {
+        const replyCard = window.XLocationUI.createFriendTweetCard({
+            tweetId: '2113364772632838435',
+            seenBy: ['morgkorg'],
+            forcedBy: [],
+            forcedByMe: false,
+            isSeenByMe: true,
+            meta: {
+                id: '2113364772632838435',
+                screenName: 'printpaint6',
+                authorName: 'Jcheezer',
+                avatarUrl: 'https://pbs.twimg.com/profile_images/2065072534270193664/_2gSIOgj_bigger.jpg',
+                isVerified: true,
+                inReplyToScreenName: 'InsiderWire',
+                text: '@InsiderWire',
+                media: [
+                    { type: 'photo', url: 'https://pbs.twimg.com/media/HVQGBj3XUAAuLTs.jpg' }
+                ],
+                parentTweet: {
+                    id: '2113351340177154267',
+                    screenName: 'InsiderWire',
+                    authorName: 'Insider Wire',
+                    avatarUrl: 'https://pbs.twimg.com/profile_images/2004360023804096512/NSyJqypN_bigger.jpg',
+                    isVerified: true,
+                    createdAt: '2026-04-20T16:00:00.000Z',
+                    inReplyToScreenName: 'RepNancyMace',
+                    text: "#BREAKING: Ilhan Omar's real name is Ilhan Nur Said Elmi, the same surname as her ex-husband."
+                },
+                isHydrated: true,
+                hydrationVersion: 4
+            }
+        });
+        document.body.appendChild(replyCard);
+
+        // Should NOT render top .x-friend-card-parent box
+        expect(replyCard.querySelector('.x-friend-card-parent')).toBeNull();
+
+        // Outer body text should strip the bare "@InsiderWire" reply prefix so no redundant "@InsiderWire" body is shown
+        expect(replyCard.querySelector('.x-friend-card-body')).toBeNull();
+
+        // Parent tweet should be rendered in the bottom .x-friend-card-quote box inside .x-friend-card-right
+        const quoteBox = replyCard.querySelector('.x-friend-card-right .x-friend-card-quote');
+        expect(quoteBox).not.toBeNull();
+        expect(quoteBox.querySelector('.x-friend-card-quote-author').textContent).toBe('Insider Wire');
+        expect(quoteBox.querySelector('.x-friend-card-quote-handle').textContent).toBe('@InsiderWire');
+        expect(quoteBox.querySelector('[data-testid="icon-verified"]')).not.toBeNull();
+        expect(quoteBox.querySelector('.x-friend-card-quote-replying').textContent).toBe('Replying to @RepNancyMace');
+        expect(quoteBox.querySelector('.x-friend-card-quote-text').textContent).toContain("Ilhan Omar's real name");
+    });
+
+    test('clicking Home link (AppTabBar_Home_Link) while on Friends tab should switch back to For you tab and deactivate Friends', () => {
+        const tabList = document.createElement('div');
+        tabList.setAttribute('role', 'tablist');
+
+        const forYouTab = document.createElement('div');
+        forYouTab.setAttribute('role', 'tab');
+        forYouTab.setAttribute('aria-selected', 'false');
+        forYouTab.textContent = 'For you';
+        const forYouClickSpy = jest.fn(() => {
+            forYouTab.setAttribute('aria-selected', 'true');
+        });
+        forYouTab.addEventListener('click', forYouClickSpy);
+
+        const followingTab = document.createElement('div');
+        followingTab.setAttribute('role', 'tab');
+        followingTab.setAttribute('aria-selected', 'true');
+        followingTab.textContent = 'Following';
+
+        tabList.appendChild(forYouTab);
+        tabList.appendChild(followingTab);
+        document.body.appendChild(tabList);
+
+        const homeNavLink = document.createElement('a');
+        homeNavLink.setAttribute('data-testid', 'AppTabBar_Home_Link');
+        homeNavLink.setAttribute('href', '/home');
+        document.body.appendChild(homeNavLink);
+
+        const onSelectFriendsTab = jest.fn();
+        const friendsTab = window.XLocationUI.ensureFriendsTimelineTab(tabList, {}, { onSelectFriendsTab });
+
+        // Activate Friends tab
+        friendsTab.click();
+        expect(window.XLocationUI.isFriendsTimelineTabSelected()).toBe(true);
+        expect(friendsTab.classList.contains('is-active')).toBe(true);
+
+        // Click Home button in navigation bar
+        homeNavLink.click();
+        expect(window.XLocationUI.isFriendsTimelineTabSelected()).toBe(false);
+        expect(friendsTab.classList.contains('is-active')).toBe(false);
+        expect(forYouClickSpy).toHaveBeenCalled();
+        expect(onSelectFriendsTab).toHaveBeenLastCalledWith(false);
+    });
+
+    test('xObserver syncFriendsTimelineUI should toggle .x-native-feed-hidden instead of display:none when switching between Friends and For you tabs', () => {
+        jest.useFakeTimers();
+
+        global.chrome = {
+            runtime: {
+                id: 'test-extension-id',
+                lastError: null,
+                sendMessage: jest.fn((msg, cb) => {
+                    if (msg.action === 'X_GET_FRIENDS_TIMELINE' && cb) {
+                        cb({
+                            success: true,
+                            timelinePosts: [],
+                            unseenForcedPosts: [],
+                            connectedFriends: []
+                        });
+                    } else if (cb) {
+                        cb({ success: true });
+                    }
+                })
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXFriendsSyncEnabled: true,
+                            blockedCountries: [],
+                            blockedDeviceRegions: [],
+                            blockedNameFlags: []
+                        });
+                    })
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+
+        const tabList = document.createElement('div');
+        tabList.setAttribute('role', 'tablist');
+        const forYouTab = document.createElement('div');
+        forYouTab.setAttribute('role', 'tab');
+        forYouTab.textContent = 'For you';
+        tabList.appendChild(forYouTab);
+        document.body.appendChild(tabList);
+
+        const primaryCol = document.createElement('div');
+        primaryCol.setAttribute('data-testid', 'primaryColumn');
+        const nativeFeed = document.createElement('section');
+        nativeFeed.setAttribute('role', 'region');
+        primaryCol.appendChild(nativeFeed);
+        document.body.appendChild(primaryCol);
+
+        delete window.XObserverInjected;
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(300);
+
+        const friendsTab = tabList.querySelector('.x-friends-timeline-tab');
+        expect(friendsTab).not.toBeNull();
+
+        // Click Friends tab -> nativeFeed should get .x-native-feed-hidden and NOT display:none
+        friendsTab.click();
+        expect(nativeFeed.classList.contains('x-native-feed-hidden')).toBe(true);
+        expect(nativeFeed.style.display).toBe('');
+
+        // Click For you tab -> .x-native-feed-hidden removed
+        forYouTab.click();
+        expect(nativeFeed.classList.contains('x-native-feed-hidden')).toBe(false);
+        expect(nativeFeed.style.display).toBe('');
+
+        jest.useRealTimers();
+    });
+
+    test('videos in Friends timeline should autoplay muted when in viewport and pause when scrolled away or tab is deactivated', () => {
+        window.innerHeight = 800;
+        window.XLocationUI.setFriendsTimelineTabSelected(true);
+
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+
+        const root = window.XLocationUI.renderFriendsTimeline(host, {
+            timelinePosts: [
+                {
+                    tweetId: '2113400000000000001',
+                    seenBy: ['Alice'],
+                    forcedBy: [],
+                    forcedByMe: false,
+                    isSeenByMe: false,
+                    meta: {
+                        id: '2113400000000000001',
+                        screenName: 'viduser1',
+                        authorName: 'Video One',
+                        text: 'First video post',
+                        media: [
+                            { type: 'video', url: 'https://pbs.twimg.com/poster1.jpg', videoUrl: 'https://video.twimg.com/v1.mp4' }
+                        ],
+                        isHydrated: true,
+                        hydrationVersion: 4
+                    }
+                },
+                {
+                    tweetId: '2113400000000000002',
+                    seenBy: ['Alice'],
+                    forcedBy: [],
+                    forcedByMe: false,
+                    isSeenByMe: false,
+                    meta: {
+                        id: '2113400000000000002',
+                        screenName: 'viduser2',
+                        authorName: 'Video Two',
+                        text: 'Second video post',
+                        media: [
+                            { type: 'video', url: 'https://pbs.twimg.com/poster2.jpg', videoUrl: 'https://video.twimg.com/v2.mp4' }
+                        ],
+                        isHydrated: true,
+                        hydrationVersion: 4
+                    }
+                }
+            ],
+            unseenForcedPosts: [],
+            connectedFriends: []
+        });
+
+        const videos = root.querySelectorAll('video.x-friend-card-video');
+        expect(videos.length).toBe(2);
+        const [v1, v2] = videos;
+
+        expect(v1.muted).toBe(true);
+        expect(v1.loop).toBe(true);
+
+        let v1Paused = true;
+        let v2Paused = true;
+        Object.defineProperty(v1, 'paused', { get: () => v1Paused, configurable: true });
+        Object.defineProperty(v2, 'paused', { get: () => v2Paused, configurable: true });
+        v1.play = jest.fn(() => { v1Paused = false; return Promise.resolve(); });
+        v1.pause = jest.fn(() => { v1Paused = true; });
+        v2.play = jest.fn(() => { v2Paused = false; return Promise.resolve(); });
+        v2.pause = jest.fn(() => { v2Paused = true; });
+
+        // v1 is 100% visible in viewport, v2 is below viewport
+        v1.getBoundingClientRect = () => ({ top: 150, bottom: 450, left: 0, right: 500, width: 500, height: 300 });
+        v2.getBoundingClientRect = () => ({ top: 850, bottom: 1150, left: 0, right: 500, width: 500, height: 300 });
+
+        window.XLocationUI.evaluateVideoAutoplay();
+        expect(v1.play).toHaveBeenCalledTimes(1);
+        expect(v1Paused).toBe(false);
+        expect(v2Paused).toBe(true);
+
+        // Scroll down so v1 is offscreen and v2 is in viewport -> v1 pauses, v2 plays
+        v1.getBoundingClientRect = () => ({ top: -350, bottom: -50, left: 0, right: 500, width: 500, height: 300 });
+        v2.getBoundingClientRect = () => ({ top: 200, bottom: 500, left: 0, right: 500, width: 500, height: 300 });
+
+        window.XLocationUI.evaluateVideoAutoplay();
+        expect(v1.pause).toHaveBeenCalled();
+        expect(v1Paused).toBe(true);
+        expect(v2.play).toHaveBeenCalledTimes(1);
+        expect(v2Paused).toBe(false);
+
+        // Switching out of Friends tab pauses v2
+        window.XLocationUI.setFriendsTimelineTabSelected(false);
+        expect(v2.pause).toHaveBeenCalled();
+        expect(v2Paused).toBe(true);
+
+        // Clicking on a muted video frame unmutes it
+        expect(v1.muted).toBe(true);
+        v1.click();
+        expect(v1.muted).toBe(false);
+    });
+
+    test('clicking Like or Repost on Friends card should perform in-place X GraphQL mutation and update counts', async () => {
+        global.fetch = jest.fn(() => Promise.resolve({ ok: true }));
+        document.cookie = 'ct0=mock_csrf_token_123';
+
+        const card = window.XLocationUI.createFriendTweetCard({
+            tweetId: '2113500000000000111',
+            seenBy: ['Alice'],
+            forcedBy: [],
+            forcedByMe: false,
+            isSeenByMe: false,
+            meta: {
+                id: '2113500000000000111',
+                screenName: 'author1',
+                authorName: 'Author One',
+                text: 'Test post for like and repost',
+                favoriteCount: 9,
+                retweetCount: 4,
+                isHydrated: true,
+                hydrationVersion: 4
+            }
+        });
+        document.body.appendChild(card);
+
+        const likeBtn = card.querySelector('[data-testid="like"]');
+        const repostBtn = card.querySelector('[data-testid="retweet"]');
+        expect(likeBtn).not.toBeNull();
+        expect(repostBtn).not.toBeNull();
+        expect(likeBtn.textContent).toBe('9');
+        expect(repostBtn.textContent).toBe('4');
+
+        // Click Like -> toggles .is-liked, increments count to 10, calls FavoriteTweet
+        likeBtn.click();
+        expect(likeBtn.classList.contains('is-liked')).toBe(true);
+        expect(likeBtn.getAttribute('data-testid')).toBe('unlike');
+        expect(likeBtn.textContent).toBe('10');
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/FavoriteTweet'),
+            expect.objectContaining({
+                method: 'POST',
+                headers: expect.objectContaining({ 'x-csrf-token': 'mock_csrf_token_123' })
+            })
+        );
+
+        // Click Repost -> toggles .is-reposted, increments count to 5, calls CreateRetweet
+        repostBtn.click();
+        expect(repostBtn.classList.contains('is-reposted')).toBe(true);
+        expect(repostBtn.getAttribute('data-testid')).toBe('unretweet');
+        expect(repostBtn.textContent).toBe('5');
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/mbRO74GrOvSfRcJnlMapnQ/CreateRetweet'),
+            expect.objectContaining({
+                method: 'POST',
+                headers: expect.objectContaining({ 'x-csrf-token': 'mock_csrf_token_123' })
+            })
+        );
+
+        // When #react-root is present (live X web app), Bookmark delegates to MAIN world (xEnv.js) via postMessage
+        const reactRoot = document.createElement('div');
+        reactRoot.id = 'react-root';
+        document.body.appendChild(reactRoot);
+        const postMessageSpy = jest.spyOn(window, 'postMessage');
+
+        const bookmarkBtn = card.querySelector('[data-testid="bookmark"]');
+        expect(bookmarkBtn).not.toBeNull();
+        bookmarkBtn.click();
+        expect(bookmarkBtn.classList.contains('is-bookmarked')).toBe(true);
+        expect(bookmarkBtn.getAttribute('data-testid')).toBe('removeBookmark');
+        expect(postMessageSpy).toHaveBeenCalledWith(
+            {
+                type: 'X_PERFORM_TWEET_ACTION',
+                payload: { actionType: 'bookmark', tweetId: '2113500000000000111' }
+            },
+            '*'
+        );
+
+        postMessageSpy.mockRestore();
+        reactRoot.remove();
+    });
+
+    test('filtered tweets should automatically be marked as seen and removed cleanly when scrolled past', () => {
+        jest.useFakeTimers();
+
+        const sendMessageSpy = jest.fn((msg, cb) => {
+            if (msg.action === 'X_FETCH_USER_INFO' && cb) {
+                cb({
+                    success: true,
+                    data: {
+                        screenName: 'blocked_user_br',
+                        location: 'Brazil',
+                        device: 'Web'
+                    }
+                });
+            } else if (cb) {
+                cb({ success: true, seenMap: {}, forcedMap: {}, forcedByMe: [], mySeenIds: [] });
+            }
+        });
+
+        global.chrome = {
+            runtime: {
+                id: 'test-extension-id',
+                lastError: null,
+                sendMessage: sendMessageSpy
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXFriendsSyncEnabled: true,
+                            blockedCountries: ['Brazil'],
+                            blockedDeviceRegions: [],
+                            blockedNameFlags: []
+                        });
+                    })
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+
+        const root = window.XLocationUI.renderFriendsTimeline(host, {
+            timelinePosts: [
+                {
+                    tweetId: '2113600000000000999',
+                    seenBy: ['Alice'],
+                    forcedBy: [],
+                    forcedByMe: false,
+                    isSeenByMe: false,
+                    meta: {
+                        id: '2113600000000000999',
+                        screenName: 'blocked_user_br',
+                        authorName: 'Blocked User',
+                        text: 'Post from blocked country',
+                        isHydrated: true,
+                        hydrationVersion: 4
+                    }
+                }
+            ],
+            unseenForcedPosts: [],
+            connectedFriends: []
+        });
+
+        delete window.XObserverInjected;
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(300);
+
+        const filteredCard = root.querySelector('article.x-friend-tweet-card[data-tweet-id="2113600000000000999"]');
+        const placeholder = root.querySelector('.x-tweet-filtered-placeholder');
+        expect(filteredCard).not.toBeNull();
+        expect(placeholder).not.toBeNull();
+        // Card was automatically marked as seen when filtered!
+        expect(filteredCard.classList.contains('is-seen-by-me')).toBe(true);
+
+        // Advance flush timer so X_MARK_TWEETS_SEEN is sent
+        jest.advanceTimersByTime(2500);
+        expect(sendMessageSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                action: 'X_MARK_TWEETS_SEEN',
+                payload: expect.objectContaining({
+                    tweetIds: expect.arrayContaining(['2113600000000000999'])
+                })
+            }),
+            expect.any(Function)
+        );
+
+        // When user scrolls past the "Tweet filtered" placeholder, both placeholder and card are removed
+        placeholder.getBoundingClientRect = () => ({ top: -80, bottom: -10, left: 0, right: 500, width: 500, height: 70 });
+        expect(window.XLocationUI.removeSeenCardsScrolledPast()).toBe(1);
+        expect(root.querySelector('.x-tweet-filtered-placeholder')).toBeNull();
+        expect(root.querySelector('article.x-friend-tweet-card[data-tweet-id="2113600000000000999"]')).toBeNull();
 
         jest.useRealTimers();
     });

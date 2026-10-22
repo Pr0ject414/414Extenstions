@@ -41,7 +41,12 @@ moduleManager.register(XBackground, {
         "X_FRIENDS_REMOVE",
         "X_FRIENDS_FORCE_SYNC",
         "X_MARK_TWEETS_SEEN",
-        "X_CHECK_TWEETS_SEEN"
+        "X_CHECK_TWEETS_SEEN",
+        "X_FORCE_TWEET_TO_FRIENDS",
+        "X_UNFORCE_TWEET",
+        "X_DISMISS_FORCED_TWEET",
+        "X_GET_FRIENDS_TIMELINE",
+        "X_HYDRATE_TWEETS"
     ]
 });
 

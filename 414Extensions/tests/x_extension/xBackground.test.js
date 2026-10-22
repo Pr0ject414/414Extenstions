@@ -134,4 +134,59 @@ describe('xBackground', () => {
             added: 1
         }));
     });
+
+    test('X_FORCE_TWEET_TO_FRIENDS, X_DISMISS_FORCED_TWEET, X_UNFORCE_TWEET, and X_GET_FRIENDS_TIMELINE should route to friendsSync', async () => {
+        global.chrome.storage.local.get.mockResolvedValue({});
+        global.chrome.storage.local.set.mockResolvedValue();
+
+        const sendResponseForce = jest.fn();
+        const handledForce = handleMessage({
+            action: 'X_FORCE_TWEET_TO_FRIENDS',
+            payload: {
+                tweetId: '1850000000000000123',
+                meta: { screenName: 'kyle', authorName: 'Kyle', text: 'Forced tweet' }
+            }
+        }, {}, sendResponseForce);
+        expect(handledForce).toBe(true);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(sendResponseForce).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            forced: true,
+            tweetId: '1850000000000000123'
+        }));
+
+        const sendResponseTimeline = jest.fn();
+        const handledTimeline = handleMessage({
+            action: 'X_GET_FRIENDS_TIMELINE'
+        }, {}, sendResponseTimeline);
+        expect(handledTimeline).toBe(true);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(sendResponseTimeline).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            timelinePosts: expect.any(Array),
+            unseenForcedPosts: expect.any(Array)
+        }));
+
+        const sendResponseDismiss = jest.fn();
+        handleMessage({
+            action: 'X_DISMISS_FORCED_TWEET',
+            payload: { tweetId: '1850000000000000123' }
+        }, {}, sendResponseDismiss);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(sendResponseDismiss).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            dismissed: true
+        }));
+
+        const sendResponseUnforce = jest.fn();
+        handleMessage({
+            action: 'X_UNFORCE_TWEET',
+            payload: { tweetId: '1850000000000000123' }
+        }, {}, sendResponseUnforce);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(sendResponseUnforce).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            forced: false
+        }));
+    });
 });

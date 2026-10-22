@@ -12,6 +12,7 @@
     const dwellTimers = new Map(); // tweetId -> timerId
     const locallyMarkedSeen = new Set();
     const pendingSeenQueue = new Set();
+    const pendingSeenMetaMap = {}; // tweetId -> TweetMeta
 
     let observer = null;
     let tweetIntersectionObserver = null;
@@ -67,7 +68,13 @@
     }
 
     function extractTweetIdFromArticle(article) {
-        if (!article || !article.querySelector) return null;
+        if (!article) return null;
+        if (article.dataset && article.dataset.xTweetId) return article.dataset.xTweetId;
+        if (article.getAttribute) {
+            const directId = article.getAttribute('data-tweet-id') || article.getAttribute('data-x-tweet-id');
+            if (directId) return directId;
+        }
+        if (!article.querySelector) return null;
 
         // 1. Primary: look for the timestamp permalink in the outer tweet header
         const timeLinks = article.querySelectorAll('a[href*="/status/"] time');
@@ -91,8 +98,273 @@
         return null;
     }
 
-    function recordTweetSeen(tweetId) {
+    function extractAuthorNameFromHeader(headerElem, screenName) {
+        if (!headerElem) return '';
+        const spans = headerElem.querySelectorAll ? headerElem.querySelectorAll('span') : [];
+        for (const span of spans) {
+            if (span.closest && span.closest('.x-location-inline-badge')) continue;
+            const txt = (span.textContent || '').trim();
+            if (!txt || txt.startsWith('@') || txt === '·') continue;
+            if (screenName && txt.toLowerCase() === `@${screenName.toLowerCase()}`) continue;
+            return txt;
+        }
+        return screenName || '';
+    }
+
+    function extractTextWithEmojiAlts(elem) {
+        if (!elem) return '';
+        let out = '';
+        const walk = (node) => {
+            if (!node) return;
+            if (node.nodeType === 3) {
+                out += node.nodeValue || '';
+            } else if (node.nodeType === 1) {
+                if (node.tagName === 'IMG' && node.getAttribute('alt')) {
+                    out += node.getAttribute('alt');
+                } else {
+                    const children = node.childNodes || [];
+                    for (let i = 0; i < children.length; i++) {
+                        walk(children[i]);
+                    }
+                }
+            }
+        };
+        walk(elem);
+        return out.trim();
+    }
+
+    function extractTweetMetadataFromArticle(article, tweetId) {
+        if (!article || !article.querySelector) return null;
+        if (article._xPostItem && article._xPostItem.meta && (article._xPostItem.meta.screenName || article._xPostItem.meta.isHydrated)) {
+            return article._xPostItem.meta;
+        }
+        const id = tweetId || extractTweetIdFromArticle(article);
+        if (!id) return null;
+
+        const allHeaders = article.querySelectorAll('[data-testid="User-Name"], [data-testid="UserName"]');
+        const headerElem = allHeaders[0] || null;
+        const qHeaderFromList = allHeaders.length > 1 ? allHeaders[1] : null;
+
+        const screenName = extractScreenNameFromUserCell(headerElem) || '';
+        const authorName = extractAuthorNameFromHeader(headerElem, screenName);
+
+        // Identify the inner quoted tweet card container (if present) without matching outer avatars/links
+        let quoteCard = article.querySelector('.x-friend-card-quote');
+        if (!quoteCard && qHeaderFromList) {
+            const roleLink = qHeaderFromList.closest ? qHeaderFromList.closest('[role="link"]') : null;
+            if (roleLink && article.contains(roleLink) && roleLink !== article && (!headerElem || !roleLink.contains(headerElem))) {
+                quoteCard = roleLink;
+            } else {
+                let curr = qHeaderFromList;
+                while (curr.parentElement && curr.parentElement !== article && (!headerElem || !curr.parentElement.contains(headerElem))) {
+                    curr = curr.parentElement;
+                }
+                if (curr !== qHeaderFromList) {
+                    quoteCard = curr;
+                }
+            }
+        }
+        if (!quoteCard) {
+            const roleLinks = article.querySelectorAll('[role="link"]');
+            for (const rl of roleLinks) {
+                if (headerElem && rl.contains && rl.contains(headerElem)) continue;
+                if (rl.querySelector && (rl.querySelector('[data-testid="User-Name"], [data-testid="UserName"]') || rl.querySelector('[data-testid="tweetText"]'))) {
+                    quoteCard = rl;
+                    break;
+                }
+            }
+        }
+
+        const isVerified = Boolean(
+            headerElem && headerElem.querySelector && headerElem.querySelector('[data-testid="icon-verified"], .x-friend-card-verified-icon')
+        );
+
+        let avatarUrl = '';
+        const avatarImgs = article.querySelectorAll('[data-testid^="UserAvatar-Container-"] img[src], img[src*="profile_images"], img.x-friend-card-avatar');
+        for (const img of avatarImgs) {
+            if (quoteCard && quoteCard.contains && quoteCard.contains(img)) continue;
+            avatarUrl = (img.getAttribute('src') || '').replace('_normal.', '_bigger.');
+            if (avatarUrl) break;
+        }
+
+        let createdAt = null;
+        const timeElements = article.querySelectorAll('a[href*="/status/"] time[datetime], time[datetime]');
+        for (const tEl of timeElements) {
+            if (quoteCard && quoteCard.contains && quoteCard.contains(tEl)) continue;
+            createdAt = tEl.getAttribute('datetime') || null;
+            if (createdAt) break;
+        }
+
+        let text = '';
+        const tweetTextNodes = article.querySelectorAll('[data-testid="tweetText"]');
+        for (const tNode of tweetTextNodes) {
+            if (quoteCard && quoteCard.contains && quoteCard.contains(tNode)) continue;
+            text = extractTextWithEmojiAlts(tNode);
+            if (text) break;
+        }
+
+        // Media attachments (photos & videos on outer tweet only)
+        const media = [];
+        const photoImgs = article.querySelectorAll('[data-testid="tweetPhoto"] img[src]');
+        for (const img of photoImgs) {
+            if (quoteCard && quoteCard.contains && quoteCard.contains(img)) continue;
+            const src = img.getAttribute('src') || '';
+            if (src && !src.includes('profile_images') && !src.includes('/emoji/')) {
+                media.push({ type: 'photo', url: src });
+            }
+        }
+        const videos = article.querySelectorAll('video');
+        for (const vid of videos) {
+            if (quoteCard && quoteCard.contains && quoteCard.contains(vid)) continue;
+            const poster = vid.getAttribute('poster') || '';
+            const src = vid.getAttribute('src') || '';
+            if (poster || src) {
+                media.push({ type: 'video', posterUrl: poster, url: src || poster });
+            }
+        }
+
+        // Quoted tweet summary if present
+        let quotedTweet = null;
+        if (quoteCard) {
+            const qHeader = qHeaderFromList || (quoteCard.querySelector ? quoteCard.querySelector('[data-testid="User-Name"], [data-testid="UserName"], .x-friend-card-quote-header') : null);
+            const qTextEl = quoteCard.querySelector ? quoteCard.querySelector('[data-testid="tweetText"]') : null;
+            const qAvatarImg = quoteCard.querySelector ? quoteCard.querySelector('img[src*="profile_images"], img.x-friend-card-quote-avatar') : null;
+            const qAvatarUrl = (qAvatarImg ? (qAvatarImg.getAttribute('src') || '') : '').replace('_normal.', '_bigger.');
+            const qIsVerified = Boolean(
+                (qHeader && qHeader.querySelector && qHeader.querySelector('[data-testid="icon-verified"], .x-friend-card-verified-icon')) ||
+                (quoteCard.querySelector && quoteCard.querySelector('[data-testid="icon-verified"], .x-friend-card-verified-icon'))
+            );
+            const qTimeEl = quoteCard.querySelector ? quoteCard.querySelector('time[datetime]') : null;
+            const qCreatedAt = qTimeEl ? (qTimeEl.getAttribute('datetime') || null) : null;
+            let qId = '';
+            if (quoteCard.querySelectorAll) {
+                const qLinks = quoteCard.querySelectorAll('a[href*="/status/"]');
+                for (const ql of qLinks) {
+                    const href = ql.getAttribute('href') || '';
+                    const m = href.match(/\/status\/(\d+)/);
+                    if (m && m[1] && m[1] !== id) {
+                        qId = m[1];
+                        break;
+                    }
+                }
+            }
+            const qMedia = [];
+            if (quoteCard.querySelectorAll) {
+                const qPhotos = quoteCard.querySelectorAll('[data-testid="tweetPhoto"] img[src]');
+                for (const qImg of qPhotos) {
+                    const src = qImg.getAttribute('src') || '';
+                    if (src && !src.includes('profile_images') && !src.includes('/emoji/')) {
+                        qMedia.push({ type: 'photo', url: src });
+                    }
+                }
+                const qVideos = quoteCard.querySelectorAll('video');
+                for (const qVid of qVideos) {
+                    const poster = qVid.getAttribute('poster') || '';
+                    const src = qVid.getAttribute('src') || '';
+                    if (poster || src) {
+                        qMedia.push({ type: 'video', posterUrl: poster, url: src || poster });
+                    }
+                }
+            }
+
+            if (qHeader || qTextEl || qMedia.length > 0) {
+                const qScreenName = extractScreenNameFromUserCell(qHeader) || extractScreenNameFromUserCell(quoteCard) || '';
+                const qAuthorName = extractAuthorNameFromHeader(qHeader, qScreenName);
+                const qText = extractTextWithEmojiAlts(qTextEl);
+                if (qScreenName || qAuthorName || qText || qMedia.length > 0) {
+                    quotedTweet = {
+                        id: qId,
+                        screenName: qScreenName,
+                        authorName: qAuthorName,
+                        avatarUrl: qAvatarUrl,
+                        isVerified: qIsVerified,
+                        createdAt: qCreatedAt,
+                        text: qText,
+                        media: qMedia.slice(0, 4)
+                    };
+                }
+            }
+        }
+
+        const permalink = screenName
+            ? `https://x.com/${screenName}/status/${id}`
+            : `https://x.com/i/status/${id}`;
+
+        return {
+            id,
+            screenName,
+            authorName,
+            avatarUrl,
+            isVerified,
+            text,
+            media: media.slice(0, 4),
+            quotedTweet,
+            createdAt,
+            permalink,
+            updatedAt: Date.now()
+        };
+    }
+
+    let cachedTimelineData = {
+        timelinePosts: [],
+        unseenForcedPosts: [],
+        connectedFriends: []
+    };
+    let hasLoadedTimelineOnce = false;
+    let lastTimelineFetchMs = 0;
+    let checkedTweetsGeneration = 1;
+    const inflightHydrateIds = new Set();
+
+    function observeTimelineArticles() {
+        ensureIntersectionObserver();
+        if (!tweetIntersectionObserver) return;
+        const customArticles = document.querySelectorAll('#x-friends-timeline-root article[data-testid="tweet"], #x-forced-home-feed article[data-testid="tweet"]');
+        customArticles.forEach(article => {
+            const tweetId = extractTweetIdFromArticle(article);
+            if (!tweetId) return;
+            article.dataset.xTweetId = tweetId;
+            if (!observedTweets.has(article)) {
+                observedTweets.add(article);
+                tweetIntersectionObserver.observe(article);
+            }
+        });
+    }
+
+    function recordTweetSeen(tweetId, article = null) {
         if (!tweetId || !isFriendsSyncActive || !isContextValid()) return;
+        const liveArticle = (article && article.isConnected)
+            ? article
+            : (document.querySelector(`article[data-tweet-id="${tweetId}"], article[data-x-tweet-id="${tweetId}"]`) || article);
+
+        if (liveArticle) {
+            const meta = (liveArticle._xPostItem && liveArticle._xPostItem.meta && liveArticle._xPostItem.meta.screenName)
+                ? liveArticle._xPostItem.meta
+                : extractTweetMetadataFromArticle(liveArticle, tweetId);
+            if (meta && (meta.screenName || meta.text || (Array.isArray(meta.media) && meta.media.length > 0))) {
+                pendingSeenMetaMap[tweetId] = meta;
+            }
+        }
+
+        if (window.XLocationUI && typeof window.XLocationUI.markCardSeenInDOM === 'function') {
+            window.XLocationUI.markCardSeenInDOM(tweetId);
+        }
+
+        // Update cachedTimelineData in-memory so seen state and badge stay in sync without removing on-screen cards
+        if (Array.isArray(cachedTimelineData.timelinePosts)) {
+            const item = cachedTimelineData.timelinePosts.find(p => p.tweetId === tweetId);
+            if (item) item.isSeenByMe = true;
+        }
+        if (Array.isArray(cachedTimelineData.unseenForcedPosts)) {
+            const forcedItem = cachedTimelineData.unseenForcedPosts.find(p => p.tweetId === tweetId);
+            if (forcedItem && !forcedItem.isSeenByMe) {
+                forcedItem.isSeenByMe = true;
+                const tabList = findHomeTabList();
+                if (tabList && window.XLocationUI && typeof window.XLocationUI.ensureFriendsTimelineTab === 'function') {
+                    window.XLocationUI.ensureFriendsTimelineTab(tabList, cachedTimelineData);
+                }
+            }
+        }
+
         if (locallyMarkedSeen.has(tweetId)) return;
 
         locallyMarkedSeen.add(tweetId);
@@ -108,18 +380,280 @@
         if (!isContextValid() || pendingSeenQueue.size === 0) return;
 
         const batch = Array.from(pendingSeenQueue);
+        const tweetMetaMap = {};
+        for (const id of batch) {
+            if (pendingSeenMetaMap[id]) {
+                tweetMetaMap[id] = pendingSeenMetaMap[id];
+                delete pendingSeenMetaMap[id];
+            }
+        }
         pendingSeenQueue.clear();
 
         try {
             chrome.runtime.sendMessage({
                 action: 'X_MARK_TWEETS_SEEN',
-                payload: { tweetIds: batch }
+                payload: { tweetIds: batch, tweetMetaMap }
             }, () => {
                 if (safeHasError()) return;
             });
         } catch (err) {
             // Ignore invalidated context errors
         }
+    }
+
+    function handleToggleForceTweet(tweetId, shouldForce, article = null, fallbackMeta = null) {
+        if (!tweetId || !isContextValid()) return;
+
+        if (shouldForce) {
+            const meta = (fallbackMeta && fallbackMeta.screenName)
+                ? fallbackMeta
+                : (article ? extractTweetMetadataFromArticle(article, tweetId) : fallbackMeta);
+            locallyMarkedSeen.add(tweetId);
+            try {
+                chrome.runtime.sendMessage({
+                    action: 'X_FORCE_TWEET_TO_FRIENDS',
+                    payload: { tweetId, meta }
+                }, () => {
+                    if (safeHasError()) return;
+                    checkedTweetsGeneration++;
+                    syncFriendsTimelineUI(true);
+                });
+            } catch (e) {}
+        } else {
+            try {
+                chrome.runtime.sendMessage({
+                    action: 'X_UNFORCE_TWEET',
+                    payload: { tweetId }
+                }, () => {
+                    if (safeHasError()) return;
+                    checkedTweetsGeneration++;
+                    syncFriendsTimelineUI(true);
+                });
+            } catch (e) {}
+        }
+    }
+
+    function requestTweetsHydration(tweetIds = []) {
+        if (!isContextValid() || !Array.isArray(tweetIds) || tweetIds.length === 0) return;
+        const batch = tweetIds.filter(id => id && !inflightHydrateIds.has(id)).slice(0, 20);
+        if (batch.length === 0) return;
+
+        batch.forEach(id => inflightHydrateIds.add(id));
+
+        try {
+            chrome.runtime.sendMessage({
+                action: 'X_HYDRATE_TWEETS',
+                payload: { tweetIds: batch }
+            }, (response) => {
+                batch.forEach(id => inflightHydrateIds.delete(id));
+                if (safeHasError() || !response || !response.success || !response.hydrated) return;
+
+                const hydrated = response.hydrated;
+                const unavailableIds = new Set();
+
+                for (const [tid, meta] of Object.entries(hydrated)) {
+                    if (meta && meta.isUnavailable) {
+                        unavailableIds.add(tid);
+                    }
+                }
+
+                if (Array.isArray(cachedTimelineData.timelinePosts)) {
+                    cachedTimelineData.timelinePosts = cachedTimelineData.timelinePosts
+                        .filter(p => !unavailableIds.has(p.tweetId))
+                        .map(p => hydrated[p.tweetId] ? { ...p, meta: hydrated[p.tweetId] } : p);
+                }
+                if (Array.isArray(cachedTimelineData.unseenForcedPosts)) {
+                    cachedTimelineData.unseenForcedPosts = cachedTimelineData.unseenForcedPosts
+                        .filter(p => !unavailableIds.has(p.tweetId))
+                        .map(p => hydrated[p.tweetId] ? { ...p, meta: hydrated[p.tweetId] } : p);
+                }
+
+                if (window.XLocationUI && typeof window.XLocationUI.updateHydratedCardsInDOM === 'function') {
+                    window.XLocationUI.updateHydratedCardsInDOM(hydrated);
+                }
+                observeTimelineArticles();
+                scanDOM();
+            });
+        } catch (err) {
+            batch.forEach(id => inflightHydrateIds.delete(id));
+        }
+    }
+
+    function findHomeTabList() {
+        const tabLists = document.querySelectorAll('[role="tablist"]');
+        for (const tl of tabLists) {
+            const text = (tl.textContent || '').toLowerCase();
+            if (text.includes('for you') || text.includes('following') || tl.getAttribute('data-x-home-tablist') === 'true') {
+                return tl;
+            }
+        }
+        return null;
+    }
+
+    function findPrimaryTimelineContainer() {
+        const primaryCol = document.querySelector('[data-testid="primaryColumn"]');
+        if (primaryCol) {
+            const section = primaryCol.querySelector('section[role="region"]');
+            if (section) return { host: primaryCol, nativeFeed: section };
+            return { host: primaryCol, nativeFeed: null };
+        }
+        const section = document.querySelector('section[role="region"]');
+        if (section && section.parentElement) {
+            return { host: section.parentElement, nativeFeed: section };
+        }
+        return { host: null, nativeFeed: null };
+    }
+
+    function isHomeTimelinePage(tabList) {
+        if (tabList) return true;
+        const path = (typeof window !== 'undefined' && window.location && window.location.pathname) || '/';
+        return path === '/' || path === '/home' || path.startsWith('/home/');
+    }
+
+    function syncFriendsTimelineUI(forceRefresh = false) {
+        if (!isFriendsSyncActive || !isContextValid() || !window.XLocationUI) return;
+
+        const tabList = findHomeTabList();
+        if (!isHomeTimelinePage(tabList)) {
+            if (typeof window.XLocationUI.isFriendsTimelineTabSelected === 'function'
+                && window.XLocationUI.isFriendsTimelineTabSelected()
+                && typeof window.XLocationUI.setFriendsTimelineTabSelected === 'function') {
+                window.XLocationUI.setFriendsTimelineTabSelected(false);
+            }
+            const timelineRoot = document.getElementById('x-friends-timeline-root');
+            if (timelineRoot) {
+                timelineRoot.style.display = 'none';
+            }
+            document.querySelectorAll('.x-native-feed-hidden').forEach(el => {
+                el.classList.remove('x-native-feed-hidden');
+                el.style.display = '';
+            });
+            return;
+        }
+
+        const { host, nativeFeed } = findPrimaryTimelineContainer();
+        if (!tabList && !host && !nativeFeed) return;
+
+        const callbacks = {
+            onToggleForce: handleToggleForceTweet,
+            onHydrateTweets: requestTweetsHydration,
+            onPageAppended: () => {
+                observeTimelineArticles();
+            },
+            onMarkSeen: (tid, meta) => {
+                if (!isContextValid()) return;
+                recordTweetSeen(tid, null);
+                chrome.runtime.sendMessage({
+                    action: 'X_MARK_TWEETS_SEEN',
+                    payload: { tweetIds: [tid], tweetMetaMap: meta ? { [tid]: meta } : {} }
+                }, () => {
+                    if (safeHasError()) return;
+                    syncFriendsTimelineUI(true);
+                });
+            },
+            onDismissForced: (tid) => {
+                if (!isContextValid()) return;
+                locallyMarkedSeen.add(tid);
+                chrome.runtime.sendMessage({
+                    action: 'X_DISMISS_FORCED_TWEET',
+                    payload: { tweetId: tid }
+                }, () => {
+                    if (safeHasError()) return;
+                    syncFriendsTimelineUI(true);
+                });
+            },
+            onSyncNow: (doneCb) => {
+                if (!isContextValid()) {
+                    if (doneCb) doneCb();
+                    return;
+                }
+                chrome.runtime.sendMessage({
+                    action: 'X_FRIENDS_FORCE_SYNC'
+                }, () => {
+                    if (doneCb) doneCb();
+                    if (safeHasError()) return;
+                    checkedTweetsGeneration++;
+                    syncFriendsTimelineUI(true);
+                });
+            },
+            onSelectFriendsTab: () => {
+                syncFriendsTimelineUI(true);
+            }
+        };
+
+        // 1. Immediately inject/update the "Friends" tab in X's tablist synchronously
+        if (tabList && typeof window.XLocationUI.ensureFriendsTimelineTab === 'function') {
+            window.XLocationUI.ensureFriendsTimelineTab(tabList, cachedTimelineData, callbacks);
+        }
+
+        const applyView = (data) => {
+            if (tabList && typeof window.XLocationUI.ensureFriendsTimelineTab === 'function') {
+                window.XLocationUI.ensureFriendsTimelineTab(tabList, data, callbacks);
+            }
+
+            const isFriendsSelected = typeof window.XLocationUI.isFriendsTimelineTabSelected === 'function'
+                && window.XLocationUI.isFriendsTimelineTabSelected();
+
+            const timelineRoot = document.getElementById('x-friends-timeline-root');
+
+            if (isFriendsSelected && host) {
+                if (nativeFeed) {
+                    nativeFeed.classList.add('x-native-feed-hidden');
+                    nativeFeed.style.display = '';
+                    nativeFeed.querySelectorAll('video').forEach(v => {
+                        try {
+                            if (!v.paused && typeof v.pause === 'function') v.pause();
+                        } catch (e) {}
+                    });
+                }
+                if (typeof window.XLocationUI.renderFriendsTimeline === 'function') {
+                    const root = window.XLocationUI.renderFriendsTimeline(host, data, callbacks);
+                    if (root) root.style.display = '';
+                }
+                if (typeof window.XLocationUI.evaluateVideoAutoplay === 'function') {
+                    window.XLocationUI.evaluateVideoAutoplay();
+                }
+            } else {
+                if (timelineRoot) {
+                    timelineRoot.style.display = 'none';
+                }
+                if (nativeFeed) {
+                    const wasHidden = nativeFeed.classList.contains('x-native-feed-hidden') || nativeFeed.style.display === 'none';
+                    nativeFeed.classList.remove('x-native-feed-hidden');
+                    nativeFeed.style.display = '';
+                    if (wasHidden && typeof window.dispatchEvent === 'function' && typeof Event !== 'undefined') {
+                        window.dispatchEvent(new Event('resize'));
+                        requestAnimationFrame(() => {
+                            window.dispatchEvent(new Event('resize'));
+                        });
+                    }
+                    if (typeof window.XLocationUI.renderForcedPostsInHomeFeed === 'function') {
+                        window.XLocationUI.renderForcedPostsInHomeFeed(nativeFeed, data.unseenForcedPosts || [], callbacks);
+                    }
+                }
+            }
+
+            observeTimelineArticles();
+        };
+
+        applyView(cachedTimelineData);
+
+        const now = Date.now();
+        if (!forceRefresh && hasLoadedTimelineOnce && (now - lastTimelineFetchMs) < 6000) {
+            return;
+        }
+        lastTimelineFetchMs = now;
+
+        try {
+            chrome.runtime.sendMessage({
+                action: 'X_GET_FRIENDS_TIMELINE'
+            }, (response) => {
+                if (safeHasError() || !response || !response.success) return;
+                hasLoadedTimelineOnce = true;
+                cachedTimelineData = response;
+                applyView(response);
+            });
+        } catch (err) {}
     }
 
     function ensureIntersectionObserver() {
@@ -133,11 +667,16 @@
                 const tweetId = article.dataset?.xTweetId || extractTweetIdFromArticle(article);
                 if (!tweetId) continue;
 
+                const isCustomCard = Boolean(article.classList && article.classList.contains('x-friend-tweet-card'));
+                const isSkeletonCard = Boolean(article.querySelector && article.querySelector('.x-friend-card-skeleton'));
+
                 if (entry.isIntersecting && entry.intersectionRatio >= VISIBILITY_THRESHOLD) {
-                    if (!locallyMarkedSeen.has(tweetId) && !dwellTimers.has(tweetId)) {
+                    if (isSkeletonCard) continue;
+                    const needsSessionViewMark = isCustomCard && article.dataset?.xViewedInSession !== 'true';
+                    if ((!locallyMarkedSeen.has(tweetId) || needsSessionViewMark) && !dwellTimers.has(tweetId)) {
                         const timerId = setTimeout(() => {
                             dwellTimers.delete(tweetId);
-                            recordTweetSeen(tweetId);
+                            recordTweetSeen(tweetId, article);
                         }, DWELL_TIME_MS);
                         dwellTimers.set(tweetId, timerId);
                     }
@@ -147,6 +686,9 @@
                         clearTimeout(existingTimer);
                         dwellTimers.delete(tweetId);
                     }
+                    if (!entry.isIntersecting && isCustomCard && article.classList.contains('is-seen-by-me')) {
+                        handleWindowScrollForSeenCards();
+                    }
                 }
             }
         }, {
@@ -154,10 +696,16 @@
         });
     }
 
-    function scanTweetsForFriendsSync() {
+    function scanTweetsForFriendsSync(forceRecheck = false) {
         if (!isFriendsSyncActive || !isContextValid()) return;
 
+        if (forceRecheck) {
+            checkedTweetsGeneration++;
+        }
+
         ensureIntersectionObserver();
+        syncFriendsTimelineUI(forceRecheck);
+
         const articles = document.querySelectorAll('article[data-testid="tweet"]');
         if (articles.length === 0) return;
 
@@ -173,13 +721,22 @@
                 tweetIntersectionObserver.observe(article);
             }
 
-            const headerElem = article.querySelector('[data-testid="User-Name"], [data-testid="UserName"]');
-            if (headerElem) {
-                const screenName = extractScreenNameFromUserCell(headerElem);
-                const list = tweetMap.get(tweetId) || [];
-                list.push({ article, headerElem, screenName });
-                tweetMap.set(tweetId, list);
+            if (window.XLocationUI && typeof window.XLocationUI.renderForceTweetButton === 'function') {
+                if (!article.querySelector('.x-force-friend-btn')) {
+                    window.XLocationUI.renderForceTweetButton(article, tweetId, {}, handleToggleForceTweet);
+                }
             }
+
+            if (!forceRecheck && article._xSeenCheckGen === checkedTweetsGeneration) {
+                return;
+            }
+            article._xSeenCheckGen = checkedTweetsGeneration;
+
+            const headerElem = article.querySelector('[data-testid="User-Name"], [data-testid="UserName"]');
+            const screenName = headerElem ? extractScreenNameFromUserCell(headerElem) : null;
+            const list = tweetMap.get(tweetId) || [];
+            list.push({ article, headerElem, screenName });
+            tweetMap.set(tweetId, list);
         });
 
         const tweetIds = Array.from(tweetMap.keys());
@@ -190,13 +747,28 @@
                 action: 'X_CHECK_TWEETS_SEEN',
                 payload: { tweetIds }
             }, (response) => {
-                if (safeHasError() || !response || !response.success || !response.seenMap) return;
+                if (safeHasError() || !response || !response.success) return;
 
-                for (const [tweetId, seenByFriends] of Object.entries(response.seenMap)) {
-                    const targets = tweetMap.get(tweetId) || [];
-                    for (const { headerElem, screenName } of targets) {
-                        if (window.XLocationUI && typeof window.XLocationUI.renderFriendSeenBadge === 'function') {
-                            window.XLocationUI.renderFriendSeenBadge(headerElem, screenName, seenByFriends);
+                const seenMap = response.seenMap || {};
+                const forcedMap = response.forcedMap || {};
+                const myForcedSet = new Set(Array.isArray(response.myForcedIds) ? response.myForcedIds : []);
+
+                for (const [tweetId, targets] of tweetMap.entries()) {
+                    const seenByFriends = seenMap[tweetId] || [];
+                    const forcedByFriends = forcedMap[tweetId] || [];
+                    const forcedByMe = myForcedSet.has(tweetId);
+
+                    for (const { article, headerElem, screenName } of targets) {
+                        if (headerElem && (seenByFriends.length > 0 || forcedByFriends.length > 0)) {
+                            if (window.XLocationUI && typeof window.XLocationUI.renderFriendSeenBadge === 'function') {
+                                window.XLocationUI.renderFriendSeenBadge(headerElem, screenName, seenByFriends, forcedByFriends);
+                            }
+                        }
+                        if (article && window.XLocationUI && typeof window.XLocationUI.renderForceTweetButton === 'function') {
+                            window.XLocationUI.renderForceTweetButton(article, tweetId, {
+                                forcedByMe,
+                                forcedByFriends
+                            }, handleToggleForceTweet);
                         }
                     }
                 }
@@ -428,6 +1000,12 @@
             } else {
                 target.style.display = 'none';
             }
+            if (isFriendsSyncActive && target.tagName === 'ARTICLE') {
+                const realTweetId = target.dataset?.xTweetId || target.getAttribute?.('data-tweet-id') || extractTweetIdFromArticle(target);
+                if (realTweetId && /^\d+$/.test(String(realTweetId))) {
+                    recordTweetSeen(String(realTweetId), target);
+                }
+            }
         } else if (target.classList && target.classList.contains('x-tweet-blocked')) {
             if (window.XLocationUI && typeof window.XLocationUI.unfilterTweet === 'function') {
                 window.XLocationUI.unfilterTweet(target);
@@ -557,23 +1135,41 @@
     // Track explicit user interactions (click, like, expand, video play) as immediate "seen"
     function handleUserInteraction(e) {
         if (!isFriendsSyncActive || !isContextValid() || !e.target || !e.target.closest) return;
+        if (e.target.closest('.x-force-friend-btn, .vsc-download-btn')) return;
         const article = e.target.closest('article[data-testid="tweet"]');
         if (!article) return;
         const tweetId = article.dataset?.xTweetId || extractTweetIdFromArticle(article);
         if (tweetId) {
-            recordTweetSeen(tweetId);
+            recordTweetSeen(tweetId, article);
         }
     }
 
     document.addEventListener('click', handleUserInteraction, { capture: true, passive: true });
     document.addEventListener('play', handleUserInteraction, { capture: true, passive: true });
 
+    // Remove seen cards only after the user has scrolled past them and scrolling has settled
+    let scrollCleanupTimer = null;
+    function handleWindowScrollForSeenCards() {
+        if (!isFriendsSyncActive) return;
+        if (scrollCleanupTimer) {
+            clearTimeout(scrollCleanupTimer);
+        }
+        scrollCleanupTimer = setTimeout(() => {
+            scrollCleanupTimer = null;
+            if (window.XLocationUI && typeof window.XLocationUI.removeSeenCardsScrolledPast === 'function') {
+                window.XLocationUI.removeSeenCardsScrolledPast();
+            }
+        }, 150);
+    }
+
+    window.addEventListener('scroll', handleWindowScrollForSeenCards, { passive: true });
+
     // Listen for background sync broadcasts so checkmarks appear live
     try {
         if (chrome.runtime && chrome.runtime.onMessage) {
             chrome.runtime.onMessage.addListener((request) => {
                 if (request && request.action === 'X_FRIENDS_SEEN_UPDATED') {
-                    scanTweetsForFriendsSync();
+                    scanTweetsForFriendsSync(true);
                 }
             });
         }
@@ -593,9 +1189,30 @@
         }
     } catch (e) {}
 
-    // Start MutationObserver
-    observer = new MutationObserver(() => {
-        scanDOM();
+    // Start MutationObserver (ignore removal-only mutations and counter text updates to prevent re-scan loops)
+    observer = new MutationObserver((mutations) => {
+        if (!Array.isArray(mutations) || mutations.length === 0) {
+            scanDOM();
+            return;
+        }
+        let hasRelevantAddition = false;
+        for (let i = 0; i < mutations.length; i++) {
+            const m = mutations[i];
+            if (!m.addedNodes || m.addedNodes.length === 0) continue;
+            const target = m.target;
+            if (
+                target &&
+                target.closest &&
+                target.closest('.x-friends-tab-badge, .x-friends-filter-pill, .x-forced-home-title, .x-friends-load-more-btn')
+            ) {
+                continue;
+            }
+            hasRelevantAddition = true;
+            break;
+        }
+        if (hasRelevantAddition) {
+            scanDOM();
+        }
     });
 
     function initObserver() {

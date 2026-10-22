@@ -74,41 +74,51 @@ describe('xEnv.js', () => {
         expect(originalVolumeDescriptor.get.call(video)).toBe(1.0);
     });
 
-    it('should inject a white, clickable, interactive download button into video players', () => {
+    it('should inject download button into the tweet action bar to the left of the bookmark button', () => {
+        const article = document.createElement('article');
+        article.setAttribute('data-testid', 'tweet');
+        article.setAttribute('data-tweet-id', '2113383149011140730');
+
         const player = document.createElement('div');
         player.setAttribute('data-testid', 'videoPlayer');
 
         const video = document.createElement('video');
         video.src = 'https://video.twimg.com/ext_tw_video/123/pu/vid/720x1280/test.mp4';
-        // Mock React Fiber/Props on video
         video.__reactProps$test = {
             variants: [
                 { url: 'https://video.twimg.com/ext_tw_video/123/pu/vid/720x1280/test.mp4', bitrate: 2176000, contentType: 'video/mp4' }
             ]
         };
         player.appendChild(video);
+        article.appendChild(player);
 
-        const settingsBtn = document.createElement('button');
-        settingsBtn.setAttribute('aria-label', 'Settings');
-        const controlGroup = document.createElement('div');
-        controlGroup.appendChild(settingsBtn);
-        player.appendChild(controlGroup);
+        const actionBar = document.createElement('div');
+        actionBar.setAttribute('role', 'group');
 
-        document.body.appendChild(player);
+        const bookmarkWrap = document.createElement('div');
+        const bookmarkBtn = document.createElement('button');
+        bookmarkBtn.setAttribute('data-testid', 'bookmark');
+        bookmarkWrap.appendChild(bookmarkBtn);
+        actionBar.appendChild(bookmarkWrap);
 
-        // Run injection
+        article.appendChild(actionBar);
+        document.body.appendChild(article);
+
         const postMessageSpy = jest.spyOn(window, 'postMessage');
         XEnv.injectDownloadButtons();
 
-        const btn = player.querySelector('.vsc-download-btn');
+        // Download button should NOT be inside the video player frame
+        expect(player.querySelector('.vsc-download-btn')).toBeNull();
+
+        // Download button should be inside .x-force-friend-btn-wrap immediately to the left of bookmarkWrap
+        const btnWrap = actionBar.querySelector('.x-force-friend-btn-wrap');
+        expect(btnWrap).not.toBeNull();
+        expect(btnWrap.nextSibling).toBe(bookmarkWrap);
+
+        const btn = btnWrap.querySelector('.vsc-download-btn');
         expect(btn).not.toBeNull();
         expect(btn.getAttribute('aria-label')).toBe('Download Video');
         expect(btn.style.cursor).toBe('pointer');
-
-        // Check SVG fill
-        const svg = btn.querySelector('svg');
-        expect(svg).not.toBeNull();
-        expect(svg.innerHTML).toContain('fill="#ffffff"');
 
         // Click button
         btn.click();
@@ -116,7 +126,8 @@ describe('xEnv.js', () => {
             expect.objectContaining({
                 type: 'X_DOWNLOAD_REQUEST',
                 payload: expect.objectContaining({
-                    url: 'https://video.twimg.com/ext_tw_video/123/pu/vid/720x1280/test.mp4'
+                    url: 'https://video.twimg.com/ext_tw_video/123/pu/vid/720x1280/test.mp4',
+                    filename: 'X_Video_2113383149011140730.mp4'
                 })
             }),
             '*'
