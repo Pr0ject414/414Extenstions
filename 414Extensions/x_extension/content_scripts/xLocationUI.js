@@ -69,7 +69,7 @@
         svg.setAttribute('fill', 'currentColor');
 
         const dLower = (deviceStr || '').toLowerCase();
-        if (dLower.includes('iphone') || dLower.includes('ipad') || dLower.includes('mac') || dLower.includes('ios')) {
+        if (dLower.includes('iphone') || dLower.includes('ipad') || dLower.includes('mac') || dLower.includes('ios') || dLower.includes('app store')) {
             // Apple SVG
             svg.innerHTML = '<path d="M17.05 12.5c-.03-2.5 2.04-3.7 2.13-3.76-1.16-1.7-2.97-1.93-3.61-1.96-1.54-.16-3 .9-3.78.9-.78 0-1.98-.88-3.25-.86-1.67.03-3.21.97-4.07 2.46-1.74 3.02-.45 7.49 1.25 9.94.83 1.2 1.82 2.55 3.12 2.5 1.25-.05 1.72-.81 3.23-.81 1.51 0 1.94.81 3.26.78 1.35-.02 2.2-1.22 3.02-2.43.95-1.39 1.34-2.74 1.36-2.81-.03-.01-2.61-1-2.64-3.99zM14.6 5.1c.69-.83 1.15-1.99 1.02-3.14-.99.04-2.19.66-2.9 1.49-.64.73-1.2 1.91-1.05 3.03 1.1.09 2.24-.56 2.93-1.38z"/>';
         } else if (dLower.includes('android')) {
@@ -338,6 +338,9 @@
 
         const placeholder = document.createElement('div');
         placeholder.className = 'x-tweet-filtered-placeholder';
+        placeholder.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
 
         const contentDiv = document.createElement('div');
         contentDiv.className = 'x-tweet-filtered-content';

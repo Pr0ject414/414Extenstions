@@ -36,11 +36,13 @@ class MockNostrRelayHub {
                     const subId = msg[1];
                     const filters = msg.slice(2);
                     setTimeout(() => {
-                        for (const ev of hub.events.values()) {
-                            if (hub.matchesAnyFilter(ev, filters)) {
-                                if (ws.onmessage) {
-                                    ws.onmessage({ data: JSON.stringify(['EVENT', subId, ev]) });
-                                }
+                        // Real Nostr relays return matching events newest-first (created_at DESC)
+                        const matching = Array.from(hub.events.values())
+                            .filter(ev => hub.matchesAnyFilter(ev, filters))
+                            .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+                        for (const ev of matching) {
+                            if (ws.onmessage) {
+                                ws.onmessage({ data: JSON.stringify(['EVENT', subId, ev]) });
                             }
                         }
                         if (ws.onmessage) {
@@ -188,5 +190,48 @@ describe('XFriendsSyncManager', () => {
         expect(manager.isSnowflakeWithinAge(expiredSnowflake, nowMs)).toBe(false);
         expect(manager.isValidRecentTweetId(recentSnowflake)).toBe(true);
         expect(manager.isValidRecentTweetId('not-a-tweet-id')).toBe(false);
+    });
+
+    test('should keep receiving updates when a friend reinstalls/rotates keys and relay returns newest handshake before old handshake', async () => {
+        const aliceManager = new XFriendsSyncManager({
+            relays: ['wss://mock.relay'],
+            webSocketFactory: () => relayHub.createSocket()
+        });
+        const bobOldInstall = new XFriendsSyncManager({
+            relays: ['wss://mock.relay'],
+            webSocketFactory: () => relayHub.createSocket()
+        });
+
+        // Yesterday: Alice and Bob connect and Bob sees tweet 111
+        await aliceManager.setIdentity('alice@example.com', 'Alice');
+        await aliceManager.addFriend('bob@example.com');
+
+        storageMap.clear();
+        await bobOldInstall.setIdentity('bob@example.com', 'Bob');
+        await bobOldInstall.acceptFriend('alice@example.com');
+        await bobOldInstall.markTweetsSeen(['1850000000000000111']);
+        await bobOldInstall.publishMySeenSnapshot();
+
+        // Today: Bob reinstalls extension (fresh storage -> new pubkey & seenFeedKey) and sees tweet 222
+        storageMap.clear();
+        const bobNewInstall = new XFriendsSyncManager({
+            relays: ['wss://mock.relay'],
+            webSocketFactory: () => relayHub.createSocket()
+        });
+        await bobNewInstall.setIdentity('bob@example.com', 'Bob');
+        await bobNewInstall.addFriend('alice@example.com');
+        await bobNewInstall.markTweetsSeen(['1850000000000000222']);
+        await bobNewInstall.publishMySeenSnapshot();
+
+        // Alice syncs: relay returns Bob's NEW handshake first and Bob's OLD handshake second
+        const aliceState = await aliceManager.syncWithRelays();
+        expect(aliceState.friends[0].status).toBe('connected');
+        expect(aliceState.friends[0].pubkeyHex).toBeUndefined(); // public state hides raw key
+        expect(aliceManager.state.friends['bob@example.com'].pubkeyHex).toBe(bobNewInstall.state.identity.pubkeyHex);
+
+        // Alice should see both Bob's new seen tweet (222) and old seen tweet (111)
+        const seen = aliceManager.checkTweetsSeen(['1850000000000000111', '1850000000000000222']);
+        expect(seen['1850000000000000222']).toEqual(['Bob (bob@example.com)']);
+        expect(seen['1850000000000000111']).toEqual(['Bob (bob@example.com)']);
     });
 });

@@ -49,6 +49,7 @@ export class XFriendsSyncManager {
                 this.state.friends = loaded.friends || {};
                 this.state.mySeenIds = Array.isArray(loaded.mySeenIds) ? loaded.mySeenIds : [];
                 this.state.friendSeenMap = loaded.friendSeenMap || {};
+                this.state.hasUnpublishedSeen = Boolean(loaded.hasUnpublishedSeen);
             }
         } catch (err) {
             console.warn('X Friends Sync: Failed to load state from storage', err);
@@ -277,6 +278,7 @@ export class XFriendsSyncManager {
                 const arr = Array.from(this.mySeenSet).slice(-FRIEND_SYNC_CONFIG.MAX_SEEN_IDS);
                 this.mySeenSet = new Set(arr);
             }
+            this.state.hasUnpublishedSeen = true;
             await this.saveState();
             this.scheduleSnapshotFlush();
         }
@@ -411,6 +413,10 @@ export class XFriendsSyncManager {
         const event = await this.buildSeenSnapshotEvent();
         if (!event) return false;
         await this.publishEventsToRelays([event]);
+        if (this.state.hasUnpublishedSeen) {
+            this.state.hasUnpublishedSeen = false;
+            await this.saveState();
+        }
         return true;
     }
 
@@ -421,6 +427,15 @@ export class XFriendsSyncManager {
 
         this.isSyncing = true;
         try {
+            if (this.flushTimeout) {
+                clearTimeout(this.flushTimeout);
+                this.flushTimeout = null;
+                this.state.hasUnpublishedSeen = true;
+            }
+            if (this.state.hasUnpublishedSeen) {
+                await this.publishMySeenSnapshot().catch(() => {});
+            }
+
             const { inboxTag, inboxKeyHex } = await deriveInboxInfo(id.email);
             const tTagsToQuery = [inboxTag];
             const pairwiseMap = new Map(); // incomingTag -> { friendEmail, pairKeyHex }
@@ -444,10 +459,24 @@ export class XFriendsSyncManager {
 
             const discoveryEvents = await this.queryRelays(discoveryFilters);
             let stateChanged = false;
+            // Track all valid (pubkeyHex -> seenFeedKeyHex) per friend so multi-device / reinstalled keys all sync
+            const friendFeedsMap = new Map(); // friendEmail -> Map<pubkeyHex, { seenFeedKeyHex, timestamp }>
+
+            for (const [fEmail, fObj] of Object.entries(this.state.friends)) {
+                if (fObj.pubkeyHex && fObj.seenFeedKeyHex) {
+                    const m = new Map();
+                    m.set(fObj.pubkeyHex, {
+                        seenFeedKeyHex: fObj.seenFeedKeyHex,
+                        timestamp: fObj.handshakeTimestamp || 0
+                    });
+                    friendFeedsMap.set(fEmail, m);
+                }
+            }
 
             for (const ev of discoveryEvents) {
                 const tTagValues = (ev.tags || []).filter(t => t[0] === 't').map(t => t[1]);
                 const dTagValue = (ev.tags || []).find(t => t[0] === 'd')?.[1] || '';
+                const evTimeMs = (ev.created_at || 0) * 1000;
 
                 // Check if it's an inbox invite for us
                 if (tTagValues.includes(inboxTag) || dTagValue.startsWith(inboxTag)) {
@@ -474,7 +503,7 @@ export class XFriendsSyncManager {
                                     friendEmail: fromEmail,
                                     pairKeyHex: pairInfo.pairKeyHex
                                 });
-                            } else if (existing. displayName === existing.email && invite.fromName) {
+                            } else if (existing.displayName === existing.email && invite.fromName) {
                                 existing.displayName = invite.fromName;
                                 stateChanged = true;
                             }
@@ -490,13 +519,35 @@ export class XFriendsSyncManager {
                         if (hs && hs.type === '414x_handshake_v1' && hs.seenFeedKeyHex && hs.pubkeyHex) {
                             const friend = this.state.friends[pairMeta.friendEmail];
                             if (friend) {
-                                friend.pubkeyHex = hs.pubkeyHex;
-                                friend.seenFeedKeyHex = hs.seenFeedKeyHex;
-                                if (hs.displayName) friend.displayName = hs.displayName;
+                                const hsTime = hs.timestamp || evTimeMs;
+                                let feeds = friendFeedsMap.get(pairMeta.friendEmail);
+                                if (!feeds) {
+                                    feeds = new Map();
+                                    friendFeedsMap.set(pairMeta.friendEmail, feeds);
+                                }
+                                feeds.set(hs.pubkeyHex, {
+                                    seenFeedKeyHex: hs.seenFeedKeyHex,
+                                    timestamp: hsTime
+                                });
+
+                                // Only overwrite primary pubkey/seenFeedKey if this handshake is newer or equal
+                                const prevHsTime = friend.handshakeTimestamp || 0;
+                                if (!friend.pubkeyHex || !friend.seenFeedKeyHex || hsTime >= prevHsTime) {
+                                    if (friend.pubkeyHex !== hs.pubkeyHex || friend.seenFeedKeyHex !== hs.seenFeedKeyHex) {
+                                        stateChanged = true;
+                                    }
+                                    friend.pubkeyHex = hs.pubkeyHex;
+                                    friend.seenFeedKeyHex = hs.seenFeedKeyHex;
+                                    friend.handshakeTimestamp = hsTime;
+                                }
+                                if (hs.displayName && friend.displayName !== hs.displayName) {
+                                    friend.displayName = hs.displayName;
+                                    stateChanged = true;
+                                }
                                 if (friend.status === 'pending_outgoing') {
                                     friend.status = 'connected';
+                                    stateChanged = true;
                                 }
-                                stateChanged = true;
                             }
                         }
                     }
@@ -509,43 +560,65 @@ export class XFriendsSyncManager {
             );
 
             if (connectedFriends.length > 0) {
-                const pubkeyToFriends = new Map();
+                const pubkeyToTargets = new Map(); // pubkeyHex -> Array<{ friend, seenFeedKeyHex }>
                 for (const f of connectedFriends) {
-                    const list = pubkeyToFriends.get(f.pubkeyHex) || [];
-                    list.push(f);
-                    pubkeyToFriends.set(f.pubkeyHex, list);
+                    const feeds = friendFeedsMap.get(f.email);
+                    if (feeds && feeds.size > 0) {
+                        for (const [pk, meta] of feeds.entries()) {
+                            const list = pubkeyToTargets.get(pk) || [];
+                            list.push({ friend: f, seenFeedKeyHex: meta.seenFeedKeyHex });
+                            pubkeyToTargets.set(pk, list);
+                        }
+                    } else {
+                        const list = pubkeyToTargets.get(f.pubkeyHex) || [];
+                        list.push({ friend: f, seenFeedKeyHex: f.seenFeedKeyHex });
+                        pubkeyToTargets.set(f.pubkeyHex, list);
+                    }
                 }
 
                 const feedFilter = [
                     {
                         kinds: [FRIEND_SYNC_CONFIG.NOSTR_KIND_APP_DATA],
-                        authors: Array.from(pubkeyToFriends.keys()),
+                        authors: Array.from(pubkeyToTargets.keys()),
                         '#d': ['414x-seen-v1']
                     }
                 ];
 
                 const feedEvents = await this.queryRelays(feedFilter);
                 const now = Date.now();
+                const mergedFriendIds = new Map(); // friendEmail -> Set<string>
 
                 for (const ev of feedEvents) {
-                    const matchingFriends = pubkeyToFriends.get(ev.pubkey) || [];
-                    for (const friend of matchingFriends) {
-                        const decrypted = await decryptJson(ev.content, friend.seenFeedKeyHex);
+                    const targets = pubkeyToTargets.get(ev.pubkey) || [];
+                    for (const { friend, seenFeedKeyHex } of targets) {
+                        const decrypted = await decryptJson(ev.content, seenFeedKeyHex);
                         if (decrypted && Array.isArray(decrypted.ids)) {
-                            const validIds = decrypted.ids
-                                .map(x => String(x).trim())
-                                .filter(tid => this.isValidRecentTweetId(tid, now))
-                                .slice(-FRIEND_SYNC_CONFIG.MAX_SEEN_IDS);
-
-                            this.state.friendSeenMap[friend.email] = validIds;
-                            friend.lastSyncedAt = now;
-                            friend.seenCount = validIds.length;
+                            let idSet = mergedFriendIds.get(friend.email);
+                            if (!idSet) {
+                                idSet = new Set();
+                                mergedFriendIds.set(friend.email, idSet);
+                            }
+                            for (const rawId of decrypted.ids) {
+                                const tid = String(rawId).trim();
+                                if (this.isValidRecentTweetId(tid, now)) {
+                                    idSet.add(tid);
+                                }
+                            }
                             if (decrypted.displayName) {
                                 friend.displayName = decrypted.displayName;
                             }
-                            stateChanged = true;
                         }
                     }
+                }
+
+                for (const [fEmail, idSet] of mergedFriendIds.entries()) {
+                    const friend = this.state.friends[fEmail];
+                    if (!friend) continue;
+                    const validIds = Array.from(idSet).slice(-FRIEND_SYNC_CONFIG.MAX_SEEN_IDS);
+                    this.state.friendSeenMap[fEmail] = validIds;
+                    friend.lastSyncedAt = now;
+                    friend.seenCount = validIds.length;
+                    stateChanged = true;
                 }
             }
 
@@ -804,6 +877,7 @@ export class XFriendsSyncManager {
             const valid = await verifyEvent(ev);
             if (valid) verifiedEvents.push(ev);
         }
+        verifiedEvents.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
         return verifiedEvents;
     }
 }

@@ -234,16 +234,46 @@
         return null;
     }
 
-    function applyTweetFilterForElement(tweet, userData, settings) {
-        if (!tweet || !userData) return;
-        tweet._xPrimaryLocationData = userData;
+    function getFilterTargetForUserElement(elem) {
+        if (!elem || !elem.closest) return null;
+        const tweet = elem.closest('article[data-testid="tweet"]');
+        if (!tweet) return null;
+
+        const primaryHeader = tweet.querySelector
+            ? tweet.querySelector('[data-testid="User-Name"], [data-testid="UserName"]')
+            : null;
+
+        if (!primaryHeader || elem === primaryHeader || elem.contains(primaryHeader) || primaryHeader.contains(elem)) {
+            return tweet;
+        }
+
+        // Quoted tweet inside the article: prefer its [role="link"] card container
+        const roleLink = elem.closest('[role="link"]');
+        if (roleLink && tweet.contains(roleLink) && roleLink !== tweet && !roleLink.contains(primaryHeader)) {
+            return roleLink;
+        }
+
+        // Fallback: walk up to highest container inside the article that does not contain the outer author header
+        let curr = elem;
+        while (curr.parentElement && curr.parentElement !== tweet && !curr.parentElement.contains(primaryHeader)) {
+            curr = curr.parentElement;
+        }
+        return curr !== elem ? curr : (elem.parentElement || tweet);
+    }
+
+    function applyTweetFilterForElement(target, userData, settings) {
+        if (!target || !userData) return;
+        target._xPrimaryLocationData = userData;
+        if (target.dataset) {
+            target.dataset.xFilterTarget = 'true';
+        }
 
         const matchedRule = findMatchedFilterRule(userData, settings);
-        const tweetId = tweet.dataset?.xTweetId || extractTweetIdFromArticle(tweet);
+        const tweetId = target.dataset?.xTweetId || extractTweetIdFromArticle(target) || userData.screenName;
 
         if (matchedRule) {
             if (window.XLocationUI && typeof window.XLocationUI.filterTweet === 'function') {
-                window.XLocationUI.filterTweet(tweet, {
+                window.XLocationUI.filterTweet(target, {
                     reason: matchedRule,
                     screenName: userData.screenName,
                     location: userData.location,
@@ -251,13 +281,13 @@
                     tweetId
                 });
             } else {
-                tweet.style.display = 'none';
+                target.style.display = 'none';
             }
-        } else if (tweet.classList && tweet.classList.contains('x-tweet-blocked')) {
+        } else if (target.classList && target.classList.contains('x-tweet-blocked')) {
             if (window.XLocationUI && typeof window.XLocationUI.unfilterTweet === 'function') {
-                window.XLocationUI.unfilterTweet(tweet);
+                window.XLocationUI.unfilterTweet(target);
             } else {
-                tweet.style.display = '';
+                target.style.display = '';
             }
         }
     }
@@ -277,18 +307,18 @@
                     settings.isXModuleEnabled !== false &&
                     settings.isXLocationEnabled !== false;
 
-                const tweets = document.querySelectorAll('article[data-testid="tweet"]');
-                tweets.forEach(tweet => {
+                const targets = document.querySelectorAll('article[data-testid="tweet"], [data-x-filter-target="true"]');
+                targets.forEach(target => {
                     if (!isEnabled) {
                         if (window.XLocationUI && typeof window.XLocationUI.unfilterTweet === 'function') {
-                            window.XLocationUI.unfilterTweet(tweet);
+                            window.XLocationUI.unfilterTweet(target);
                         } else {
-                            tweet.style.display = '';
+                            target.style.display = '';
                         }
                         return;
                     }
-                    if (tweet._xPrimaryLocationData) {
-                        applyTweetFilterForElement(tweet, tweet._xPrimaryLocationData, settings);
+                    if (target._xPrimaryLocationData) {
+                        applyTweetFilterForElement(target, target._xPrimaryLocationData, settings);
                     }
                 });
             });
@@ -355,10 +385,10 @@
                                         window.XLocationUI.renderInlineBadge(elem, response.data);
                                     }
 
-                                    // Apply Location & Device-Based Tweet Filtering
-                                    const tweet = elem.closest('article[data-testid="tweet"]');
-                                    if (tweet) {
-                                        applyTweetFilterForElement(tweet, response.data, settings);
+                                    // Apply Location & Device-Based Tweet Filtering (outer tweet or inner quoted tweet)
+                                    const filterTarget = getFilterTargetForUserElement(elem);
+                                    if (filterTarget) {
+                                        applyTweetFilterForElement(filterTarget, response.data, settings);
                                     }
                                 }
                             });
