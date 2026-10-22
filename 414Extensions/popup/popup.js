@@ -131,63 +131,218 @@ document.addEventListener('DOMContentLoaded', () => {
             'Vietnam': '🇻🇳', 'Wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿', 'Yemen': '🇾🇪', 'Zimbabwe': '🇿🇼'
         };
 
-        const xCountrySelect = document.getElementById('xCountrySelect');
-        const xAddCountryBtn = document.getElementById('xAddCountryBtn');
-        const xBlockedChipsContainer = document.getElementById('xBlockedChipsContainer');
+        const DEVICE_REGION_MAP = {
+            // Regions
+            'Africa': '🌍',
+            'Australasia': '🌏',
+            'Central America': '🌎',
+            'Central Asia': '🌏',
+            'East Asia': '🌏',
+            'East Asia & Pacific': '🌏',
+            'Eastern Europe': '🌍',
+            'Europe': '🌍',
+            'Latin America': '🌎',
+            'Middle East': '🌍',
+            'North Africa': '🌍',
+            'North America': '🌎',
+            'Oceania': '🌏',
+            'South America': '🌎',
+            'South Asia': '🌏',
+            'Southeast Asia': '🌏',
+            'West Asia': '🌍',
+            'Western Europe': '🌍',
+            // Device Stores & Platforms
+            'App Store': '🍎',
+            'Google Play': '🤖',
+            'Android': '🤖',
+            'Android App': '🤖',
+            'iPhone': '🍎',
+            'iPad': '🍎',
+            'iOS': '🍎',
+            'Mac': '🍎',
+            'Web': '🌐',
+            'X for Web': '🌐',
+            // Regional Stores
+            'Africa App Store': '🌍',
+            'Africa Android App': '🌍',
+            'Australasia App Store': '🌏',
+            'Australasia Android App': '🌏',
+            'East Asia & Pacific App Store': '🌏',
+            'East Asia & Pacific Android App': '🌏',
+            'Europe App Store': '🌍',
+            'Europe Android App': '🌍',
+            'Middle East App Store': '🌍',
+            'Middle East Android App': '🌍',
+            'North Africa App Store': '🌍',
+            'North Africa Android App': '🌍',
+            'North America App Store': '🌎',
+            'North America Android App': '🌎',
+            'South America App Store': '🌎',
+            'South America Android App': '🌎',
+            'South Asia App Store': '🌏',
+            'South Asia Android App': '🌏',
+            'Southeast Asia App Store': '🌏',
+            'Southeast Asia Android App': '🌏',
+            'West Asia App Store': '🌍',
+            'West Asia Android App': '🌍'
+        };
 
-        if (xCountrySelect && xBlockedChipsContainer) {
-            const sortedNames = Object.keys(COUNTRY_FLAGS_MAP).sort();
-            sortedNames.forEach(country => {
-                const opt = document.createElement('option');
-                opt.value = country;
-                opt.textContent = `${COUNTRY_FLAGS_MAP[country]} ${country}`;
-                xCountrySelect.appendChild(opt);
-            });
+        function setupFilterableBlockSection({
+            searchInput,
+            selectEl,
+            addBtn,
+            chipsContainer,
+            itemsMap,
+            storageKey,
+            placeholderText,
+            emptyChipsText,
+            defaultIcon
+        }) {
+            if (!selectEl || !chipsContainer) return;
 
+            const sortedNames = Object.keys(itemsMap).sort();
             let currentBlocked = [];
 
+            function populateSelectOptions(filterText = '') {
+                const rawTrimmed = (filterText || '').trim();
+                const query = rawTrimmed.toLowerCase();
+
+                selectEl.innerHTML = '';
+                const placeholderOpt = document.createElement('option');
+                placeholderOpt.value = '';
+                placeholderOpt.textContent = placeholderText;
+                selectEl.appendChild(placeholderOpt);
+
+                const matchingNames = sortedNames.filter(name =>
+                    !query || name.toLowerCase().includes(query)
+                );
+
+                matchingNames.forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = `${itemsMap[name]} ${name}`;
+                    selectEl.appendChild(opt);
+                });
+
+                const hasExactMatch = matchingNames.some(
+                    name => name.toLowerCase() === query
+                );
+
+                if (query && !hasExactMatch) {
+                    const customOpt = document.createElement('option');
+                    customOpt.value = rawTrimmed;
+                    customOpt.textContent = `${defaultIcon} ${rawTrimmed} (Custom)`;
+                    selectEl.appendChild(customOpt);
+                }
+
+                if (query) {
+                    const exactMatch = matchingNames.find(n => n.toLowerCase() === query);
+                    const startsWithMatch = matchingNames.find(n => n.toLowerCase().startsWith(query));
+                    if (exactMatch) {
+                        selectEl.value = exactMatch;
+                    } else if (startsWithMatch) {
+                        selectEl.value = startsWithMatch;
+                    } else if (matchingNames.length > 0) {
+                        selectEl.value = matchingNames[0];
+                    } else {
+                        selectEl.value = rawTrimmed;
+                    }
+                } else {
+                    selectEl.value = '';
+                }
+            }
+
             function renderBlockedChips() {
-                xBlockedChipsContainer.innerHTML = '';
+                chipsContainer.innerHTML = '';
                 if (currentBlocked.length === 0) {
-                    xBlockedChipsContainer.innerHTML = '<span style="font-size: 0.8em; color: #888;">No countries blocked yet.</span>';
+                    chipsContainer.innerHTML = `<span style="font-size: 0.8em; color: #888;">${emptyChipsText}</span>`;
                     return;
                 }
 
-                currentBlocked.forEach(country => {
+                currentBlocked.forEach(item => {
                     const chip = document.createElement('span');
                     chip.style.cssText = 'display: inline-flex; align-items: center; gap: 4px; background: rgba(211,47,47,0.25); border: 1px solid rgba(211,47,47,0.5); border-radius: 12px; padding: 2px 8px; font-size: 0.8em; color: #ff8a80;';
-                    const flag = COUNTRY_FLAGS_MAP[country] || '🌐';
-                    chip.innerHTML = `${flag} ${country} <span class="chip-remove" style="cursor: pointer; font-weight: bold; margin-left: 4px; color: #fff;">&times;</span>`;
+                    const icon = itemsMap[item] || defaultIcon;
+                    chip.innerHTML = `${icon} ${item} <span class="chip-remove" style="cursor: pointer; font-weight: bold; margin-left: 4px; color: #fff;">&times;</span>`;
 
                     chip.querySelector('.chip-remove').addEventListener('click', () => {
-                        currentBlocked = currentBlocked.filter(c => c !== country);
-                        chrome.storage.local.set({ blockedCountries: currentBlocked }, () => {
+                        currentBlocked = currentBlocked.filter(c => c !== item);
+                        chrome.storage.local.set({ [storageKey]: currentBlocked }, () => {
                             renderBlockedChips();
                         });
                     });
 
-                    xBlockedChipsContainer.appendChild(chip);
+                    chipsContainer.appendChild(chip);
                 });
             }
 
-            chrome.storage.local.get(['blockedCountries'], (res) => {
-                currentBlocked = res.blockedCountries || [];
-                renderBlockedChips();
-            });
+            function handleAddSelected() {
+                const selected = selectEl.value || (searchInput ? searchInput.value.trim() : '');
+                if (!selected) return;
 
-            if (xAddCountryBtn) {
-                xAddCountryBtn.addEventListener('click', () => {
-                    const selected = xCountrySelect.value;
-                    if (selected && !currentBlocked.includes(selected)) {
-                        currentBlocked.push(selected);
-                        chrome.storage.local.set({ blockedCountries: currentBlocked }, () => {
-                            renderBlockedChips();
-                            xCountrySelect.value = '';
-                        });
+                const alreadyExists = currentBlocked.some(
+                    existing => existing.toLowerCase() === selected.toLowerCase()
+                );
+                if (!alreadyExists) {
+                    currentBlocked.push(selected);
+                    chrome.storage.local.set({ [storageKey]: currentBlocked }, () => {
+                        renderBlockedChips();
+                        if (searchInput) searchInput.value = '';
+                        populateSelectOptions('');
+                    });
+                } else {
+                    if (searchInput) searchInput.value = '';
+                    populateSelectOptions('');
+                }
+            }
+
+            populateSelectOptions('');
+
+            if (searchInput) {
+                searchInput.addEventListener('input', () => {
+                    populateSelectOptions(searchInput.value);
+                });
+                searchInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddSelected();
                     }
                 });
             }
+
+            chrome.storage.local.get([storageKey], (res) => {
+                currentBlocked = (res && Array.isArray(res[storageKey])) ? res[storageKey] : [];
+                renderBlockedChips();
+            });
+
+            if (addBtn) {
+                addBtn.addEventListener('click', handleAddSelected);
+            }
         }
+
+        setupFilterableBlockSection({
+            searchInput: document.getElementById('xCountrySearchInput'),
+            selectEl: document.getElementById('xCountrySelect'),
+            addBtn: document.getElementById('xAddCountryBtn'),
+            chipsContainer: document.getElementById('xBlockedChipsContainer'),
+            itemsMap: COUNTRY_FLAGS_MAP,
+            storageKey: 'blockedCountries',
+            placeholderText: '-- Select Country to Block --',
+            emptyChipsText: 'No countries blocked yet.',
+            defaultIcon: '🌐'
+        });
+
+        setupFilterableBlockSection({
+            searchInput: document.getElementById('xDeviceRegionSearchInput'),
+            selectEl: document.getElementById('xDeviceRegionSelect'),
+            addBtn: document.getElementById('xAddDeviceRegionBtn'),
+            chipsContainer: document.getElementById('xBlockedDeviceRegionChipsContainer'),
+            itemsMap: DEVICE_REGION_MAP,
+            storageKey: 'blockedDeviceRegions',
+            placeholderText: '-- Select Device / Region to Block --',
+            emptyChipsText: 'No device stores or regions blocked yet.',
+            defaultIcon: '📱'
+        });
 
         // --- X Friends Seen Post Sync UI ---
         const xFriendsSyncToggle = document.getElementById('xFriendsSyncToggle');

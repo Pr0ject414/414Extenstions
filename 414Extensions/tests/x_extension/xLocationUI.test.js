@@ -132,4 +132,117 @@ describe('xLocationUI.js', () => {
         expect(inlineBadges[0].querySelector('.x-location-flag')).not.toBeNull();
         expect(inlineBadges[0].querySelector('.x-friend-seen-badge')).not.toBeNull();
     });
+
+    test('filterTweet should replace tweet with "Tweet filtered" placeholder and allow showing the tweet', () => {
+        const cellWrapper = document.createElement('div');
+        const tweet = document.createElement('article');
+        tweet.setAttribute('data-testid', 'tweet');
+        tweet.textContent = 'Filtered tweet body content';
+        cellWrapper.appendChild(tweet);
+        document.body.appendChild(cellWrapper);
+
+        const placeholder = window.XLocationUI.filterTweet(tweet, {
+            reason: 'East Asia & Pacific',
+            screenName: 'someuser',
+            location: 'East Asia & Pacific',
+            device: 'East Asia & Pacific App Store',
+            tweetId: '111222333'
+        });
+
+        expect(placeholder).not.toBeNull();
+        expect(tweet.style.display).toBe('none');
+        expect(tweet.classList.contains('x-tweet-blocked')).toBe(true);
+        expect(placeholder.classList.contains('x-tweet-filtered-placeholder')).toBe(true);
+        expect(placeholder.textContent).toContain('Tweet filtered');
+        expect(placeholder.textContent).toContain('@someuser');
+        expect(placeholder.textContent).toContain('East Asia & Pacific');
+
+        const showBtn = placeholder.querySelector('.x-tweet-filtered-show-btn');
+        expect(showBtn).not.toBeNull();
+        expect(showBtn.textContent).toBe('Show');
+
+        // Click "Show" to reveal the filtered tweet
+        showBtn.click();
+
+        expect(tweet.style.display).toBe('');
+        expect(tweet.classList.contains('x-tweet-blocked')).toBe(false);
+        expect(cellWrapper.querySelector('.x-tweet-filtered-placeholder')).toBeNull();
+
+        // Calling filterTweet again on the same revealed tweet should not re-hide it
+        const secondAttempt = window.XLocationUI.filterTweet(tweet, {
+            reason: 'East Asia & Pacific',
+            screenName: 'someuser',
+            tweetId: '111222333'
+        });
+        expect(secondAttempt).toBeNull();
+        expect(tweet.style.display).toBe('');
+    });
+
+    test('xObserver should filter tweets matching blockedDeviceRegions or blockedCountries with Tweet filtered banner', async () => {
+        jest.useFakeTimers();
+        delete window.XObserverInjected;
+
+        global.chrome = {
+            runtime: {
+                id: 'test-ext-id',
+                lastError: null,
+                onMessage: { addListener: jest.fn() },
+                sendMessage: jest.fn((msg, cb) => {
+                    if (msg.action === 'X_FETCH_USER_INFO') {
+                        cb({
+                            success: true,
+                            data: {
+                                screenName: 'regionuser',
+                                location: 'East Asia & Pacific',
+                                device: 'East Asia & Pacific App Store'
+                            }
+                        });
+                    }
+                })
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXFriendsSyncEnabled: false,
+                            blockedCountries: [],
+                            blockedDeviceRegions: ['East Asia & Pacific']
+                        });
+                    })
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+
+        const cell = document.createElement('div');
+        const tweet = document.createElement('article');
+        tweet.setAttribute('data-testid', 'tweet');
+        const userNameElem = document.createElement('div');
+        userNameElem.setAttribute('data-testid', 'User-Name');
+        userNameElem.textContent = '@regionuser';
+        tweet.appendChild(userNameElem);
+        cell.appendChild(tweet);
+        document.body.appendChild(cell);
+
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(200);
+
+        expect(tweet.style.display).toBe('none');
+        const placeholder = cell.querySelector('.x-tweet-filtered-placeholder');
+        expect(placeholder).not.toBeNull();
+        expect(placeholder.textContent).toContain('Tweet filtered');
+
+        const showBtn = placeholder.querySelector('.x-tweet-filtered-show-btn');
+        showBtn.click();
+        expect(tweet.style.display).toBe('');
+        expect(cell.querySelector('.x-tweet-filtered-placeholder')).toBeNull();
+
+        jest.useRealTimers();
+    });
 });

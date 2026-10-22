@@ -31,7 +31,13 @@
         'tunisia': '🇹🇳', 'turkey': '🇹🇷', 'türkiye': '🇹🇷', 'uganda': '🇺🇬', 'ukraine': '🇺🇦',
         'united arab emirates': '🇦🇪', 'uae': '🇦🇪', 'united kingdom': '🇬🇧', 'uk': '🇬🇧',
         'united states': '🇺🇸', 'usa': '🇺🇸', 'us': '🇺🇸', 'uruguay': '🇺🇾', 'uzbekistan': '🇺🇿',
-        'venezuela': '🇻🇪', 'vietnam': '🇻🇳', 'yemen': '🇾🇪', 'zimbabwe': '🇿🇼'
+        'venezuela': '🇻🇪', 'vietnam': '🇻🇳', 'wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿', 'yemen': '🇾🇪', 'zimbabwe': '🇿🇼',
+        // Regions
+        'east asia & pacific': '🌏', 'east asia': '🌏', 'southeast asia': '🌏', 'south asia': '🌏',
+        'central asia': '🌏', 'australasia': '🌏', 'oceania': '🌏', 'west asia': '🌍',
+        'middle east': '🌍', 'north africa': '🌍', 'africa': '🌍', 'eastern europe': '🌍',
+        'western europe': '🌍', 'north america': '🌎', 'south america': '🌎',
+        'central america': '🌎', 'latin america': '🌎'
     };
 
     function getFlagHtml(locationStr) {
@@ -302,10 +308,126 @@
         seenSpan.setAttribute('aria-label', `Seen by ${listStr}`);
     }
 
+    function createFilteredIconSVG() {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '16');
+        svg.setAttribute('height', '16');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '2');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        svg.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
+        return svg;
+    }
+
+    function filterTweet(tweet, filterInfo = {}) {
+        if (!tweet) return null;
+
+        const currentKey = filterInfo.tweetId || filterInfo.screenName || 'revealed';
+        if (tweet.dataset && tweet.dataset.xFilterRevealed === currentKey) {
+            return null;
+        }
+
+        if (tweet._xFilteredPlaceholder && tweet._xFilteredPlaceholder.isConnected) {
+            tweet.style.display = 'none';
+            tweet.classList.add('x-tweet-blocked');
+            return tweet._xFilteredPlaceholder;
+        }
+
+        const placeholder = document.createElement('div');
+        placeholder.className = 'x-tweet-filtered-placeholder';
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'x-tweet-filtered-content';
+
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'x-tweet-filtered-icon';
+        iconSpan.appendChild(createFilteredIconSVG());
+        contentDiv.appendChild(iconSpan);
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'x-tweet-filtered-text';
+        textSpan.textContent = 'Tweet filtered';
+        contentDiv.appendChild(textSpan);
+
+        const detailParts = [];
+        if (filterInfo.screenName) {
+            detailParts.push(`@${filterInfo.screenName}`);
+        }
+        if (filterInfo.reason) {
+            detailParts.push(filterInfo.reason);
+        } else if (filterInfo.location || filterInfo.device) {
+            detailParts.push([filterInfo.location, filterInfo.device].filter(Boolean).join(' • '));
+        }
+
+        if (detailParts.length > 0) {
+            const detailSpan = document.createElement('span');
+            detailSpan.className = 'x-tweet-filtered-detail';
+            detailSpan.textContent = `(${detailParts.join(' • ')})`;
+            contentDiv.appendChild(detailSpan);
+        }
+
+        const showBtn = document.createElement('button');
+        showBtn.type = 'button';
+        showBtn.className = 'x-tweet-filtered-show-btn';
+        showBtn.textContent = 'Show';
+
+        showBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (tweet.dataset) {
+                tweet.dataset.xFilterRevealed = currentKey;
+            }
+            unfilterTweet(tweet);
+        });
+
+        placeholder.appendChild(contentDiv);
+        placeholder.appendChild(showBtn);
+
+        const videos = tweet.querySelectorAll ? tweet.querySelectorAll('video') : [];
+        videos.forEach(v => {
+            try {
+                if (typeof v.pause === 'function') v.pause();
+            } catch (err) {}
+        });
+
+        tweet.style.display = 'none';
+        tweet.classList.add('x-tweet-blocked');
+
+        if (tweet.parentNode) {
+            tweet.parentNode.insertBefore(placeholder, tweet);
+        } else {
+            tweet.appendChild(placeholder);
+        }
+        tweet._xFilteredPlaceholder = placeholder;
+
+        return placeholder;
+    }
+
+    function unfilterTweet(tweet) {
+        if (!tweet) return;
+        const placeholder = tweet._xFilteredPlaceholder ||
+            (tweet.previousElementSibling && tweet.previousElementSibling.classList &&
+             tweet.previousElementSibling.classList.contains('x-tweet-filtered-placeholder')
+                ? tweet.previousElementSibling
+                : null);
+
+        if (placeholder && placeholder.parentNode) {
+            placeholder.parentNode.removeChild(placeholder);
+        }
+        tweet._xFilteredPlaceholder = null;
+        tweet.style.display = '';
+        tweet.classList.remove('x-tweet-blocked');
+    }
+
     window.XLocationUI = {
         renderInlineBadge,
         renderFriendSeenBadge,
         showHovercard,
-        hideHovercard
+        hideHovercard,
+        filterTweet,
+        unfilterTweet
     };
 })();

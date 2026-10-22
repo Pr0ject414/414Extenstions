@@ -113,14 +113,57 @@ export const COUNTRY_FLAGS = {
 export const REGION_DATA = [
     { name: 'Africa', key: 'africa', flag: '🌍' },
     { name: 'Australasia', key: 'australasia', flag: '🌏' },
+    { name: 'Central America', key: 'central america', flag: '🌎' },
+    { name: 'Central Asia', key: 'central asia', flag: '🌏' },
+    { name: 'East Asia', key: 'east asia', flag: '🌏' },
     { name: 'East Asia & Pacific', key: 'east asia & pacific', flag: '🌏' },
+    { name: 'Eastern Europe', key: 'eastern europe', flag: '🌍' },
     { name: 'Europe', key: 'europe', flag: '🌍' },
+    { name: 'Latin America', key: 'latin america', flag: '🌎' },
+    { name: 'Middle East', key: 'middle east', flag: '🌍' },
     { name: 'North Africa', key: 'north africa', flag: '🌍' },
     { name: 'North America', key: 'north america', flag: '🌎' },
+    { name: 'Oceania', key: 'oceania', flag: '🌏' },
     { name: 'South America', key: 'south america', flag: '🌎' },
     { name: 'South Asia', key: 'south asia', flag: '🌏' },
     { name: 'Southeast Asia', key: 'southeast asia', flag: '🌏' },
-    { name: 'West Asia', key: 'west asia', flag: '🌍' }
+    { name: 'West Asia', key: 'west asia', flag: '🌍' },
+    { name: 'Western Europe', key: 'western europe', flag: '🌍' }
+];
+
+export const DEVICE_STORE_DATA = [
+    { name: 'App Store', key: 'app store', flag: '🍎' },
+    { name: 'Google Play', key: 'google play', flag: '🤖' },
+    { name: 'Android', key: 'android', flag: '🤖' },
+    { name: 'Android App', key: 'android app', flag: '🤖' },
+    { name: 'iPhone', key: 'iphone', flag: '🍎' },
+    { name: 'iPad', key: 'ipad', flag: '🍎' },
+    { name: 'iOS', key: 'ios', flag: '🍎' },
+    { name: 'Mac', key: 'mac', flag: '🍎' },
+    { name: 'Web', key: 'web', flag: '🌐' },
+    { name: 'X for Web', key: 'x for web', flag: '🌐' },
+    { name: 'Africa App Store', key: 'africa app store', flag: '🌍' },
+    { name: 'Africa Android App', key: 'africa android app', flag: '🌍' },
+    { name: 'Australasia App Store', key: 'australasia app store', flag: '🌏' },
+    { name: 'Australasia Android App', key: 'australasia android app', flag: '🌏' },
+    { name: 'East Asia & Pacific App Store', key: 'east asia & pacific app store', flag: '🌏' },
+    { name: 'East Asia & Pacific Android App', key: 'east asia & pacific android app', flag: '🌏' },
+    { name: 'Europe App Store', key: 'europe app store', flag: '🌍' },
+    { name: 'Europe Android App', key: 'europe android app', flag: '🌍' },
+    { name: 'Middle East App Store', key: 'middle east app store', flag: '🌍' },
+    { name: 'Middle East Android App', key: 'middle east android app', flag: '🌍' },
+    { name: 'North Africa App Store', key: 'north africa app store', flag: '🌍' },
+    { name: 'North Africa Android App', key: 'north africa android app', flag: '🌍' },
+    { name: 'North America App Store', key: 'north america app store', flag: '🌎' },
+    { name: 'North America Android App', key: 'north america android app', flag: '🌎' },
+    { name: 'South America App Store', key: 'south america app store', flag: '🌎' },
+    { name: 'South America Android App', key: 'south america android app', flag: '🌎' },
+    { name: 'South Asia App Store', key: 'south asia app store', flag: '🌏' },
+    { name: 'South Asia Android App', key: 'south asia android app', flag: '🌏' },
+    { name: 'Southeast Asia App Store', key: 'southeast asia app store', flag: '🌏' },
+    { name: 'Southeast Asia Android App', key: 'southeast asia android app', flag: '🌏' },
+    { name: 'West Asia App Store', key: 'west asia app store', flag: '🌍' },
+    { name: 'West Asia Android App', key: 'west asia android app', flag: '🌍' }
 ];
 
 export const REGION_FLAGS = Object.fromEntries(

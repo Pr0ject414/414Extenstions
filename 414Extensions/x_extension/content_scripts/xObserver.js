@@ -206,6 +206,95 @@
         }
     }
 
+    function findMatchedFilterRule(userData, settings) {
+        if (!userData || !settings) return null;
+
+        const locLower = (userData.location || '').toLowerCase();
+        const devLower = (userData.device || '').toLowerCase();
+        if (!locLower && !devLower) return null;
+
+        const blockedCountries = Array.isArray(settings.blockedCountries) ? settings.blockedCountries : [];
+        for (const country of blockedCountries) {
+            if (!country) continue;
+            const needle = country.trim().toLowerCase();
+            if (needle && (locLower.includes(needle) || devLower.includes(needle))) {
+                return country.trim();
+            }
+        }
+
+        const blockedDeviceRegions = Array.isArray(settings.blockedDeviceRegions) ? settings.blockedDeviceRegions : [];
+        for (const item of blockedDeviceRegions) {
+            if (!item) continue;
+            const needle = item.trim().toLowerCase();
+            if (needle && (devLower.includes(needle) || locLower.includes(needle))) {
+                return item.trim();
+            }
+        }
+
+        return null;
+    }
+
+    function applyTweetFilterForElement(tweet, userData, settings) {
+        if (!tweet || !userData) return;
+        tweet._xPrimaryLocationData = userData;
+
+        const matchedRule = findMatchedFilterRule(userData, settings);
+        const tweetId = tweet.dataset?.xTweetId || extractTweetIdFromArticle(tweet);
+
+        if (matchedRule) {
+            if (window.XLocationUI && typeof window.XLocationUI.filterTweet === 'function') {
+                window.XLocationUI.filterTweet(tweet, {
+                    reason: matchedRule,
+                    screenName: userData.screenName,
+                    location: userData.location,
+                    device: userData.device,
+                    tweetId
+                });
+            } else {
+                tweet.style.display = 'none';
+            }
+        } else if (tweet.classList && tweet.classList.contains('x-tweet-blocked')) {
+            if (window.XLocationUI && typeof window.XLocationUI.unfilterTweet === 'function') {
+                window.XLocationUI.unfilterTweet(tweet);
+            } else {
+                tweet.style.display = '';
+            }
+        }
+    }
+
+    function reevaluateAllTweets() {
+        if (!isContextValid()) return;
+        try {
+            chrome.storage.local.get([
+                'isXLocationEnabled',
+                'isXModuleEnabled',
+                'isGlobalMasterSwitchEnabled',
+                'blockedCountries',
+                'blockedDeviceRegions'
+            ], (settings) => {
+                if (safeHasError() || !settings) return;
+                const isEnabled = settings.isGlobalMasterSwitchEnabled !== false &&
+                    settings.isXModuleEnabled !== false &&
+                    settings.isXLocationEnabled !== false;
+
+                const tweets = document.querySelectorAll('article[data-testid="tweet"]');
+                tweets.forEach(tweet => {
+                    if (!isEnabled) {
+                        if (window.XLocationUI && typeof window.XLocationUI.unfilterTweet === 'function') {
+                            window.XLocationUI.unfilterTweet(tweet);
+                        } else {
+                            tweet.style.display = '';
+                        }
+                        return;
+                    }
+                    if (tweet._xPrimaryLocationData) {
+                        applyTweetFilterForElement(tweet, tweet._xPrimaryLocationData, settings);
+                    }
+                });
+            });
+        } catch (err) {}
+    }
+
     function scanDOM() {
         if (!isContextValid()) {
             if (observer) observer.disconnect();
@@ -224,7 +313,8 @@
                     'isXFriendsSyncEnabled',
                     'isXModuleEnabled',
                     'isGlobalMasterSwitchEnabled',
-                    'blockedCountries'
+                    'blockedCountries',
+                    'blockedDeviceRegions'
                 ], (settings) => {
                     if (safeHasError() || !settings) return;
                     if (settings.isGlobalMasterSwitchEnabled === false || settings.isXModuleEnabled === false) {
@@ -265,19 +355,10 @@
                                         window.XLocationUI.renderInlineBadge(elem, response.data);
                                     }
 
-                                    // Apply Location-Based Tweet Filtering
+                                    // Apply Location & Device-Based Tweet Filtering
                                     const tweet = elem.closest('article[data-testid="tweet"]');
-                                    if (tweet && response.data.location) {
-                                        const blocked = settings.blockedCountries || [];
-                                        if (Array.isArray(blocked) && blocked.length > 0) {
-                                            const locLower = response.data.location.toLowerCase();
-                                            const isBlocked = blocked.some(country => 
-                                                country && locLower.includes(country.trim().toLowerCase())
-                                            );
-                                            if (isBlocked) {
-                                                tweet.style.display = 'none';
-                                            }
-                                        }
+                                    if (tweet) {
+                                        applyTweetFilterForElement(tweet, response.data, settings);
                                     }
                                 }
                             });
@@ -312,6 +393,19 @@
             chrome.runtime.onMessage.addListener((request) => {
                 if (request && request.action === 'X_FRIENDS_SEEN_UPDATED') {
                     scanTweetsForFriendsSync();
+                }
+            });
+        }
+        if (chrome.storage && chrome.storage.onChanged) {
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'local' && (
+                    changes.blockedCountries ||
+                    changes.blockedDeviceRegions ||
+                    changes.isXLocationEnabled ||
+                    changes.isXModuleEnabled ||
+                    changes.isGlobalMasterSwitchEnabled
+                )) {
+                    reevaluateAllTweets();
                 }
             });
         }

@@ -262,6 +262,7 @@
 
             <div class="setting" style="flex-direction: column; align-items: stretch; gap: 8px;">
                 <label for="xCountrySelect">Filter / Hide Posts by Origin Country:</label>
+                <input type="text" id="xCountrySearchInput" placeholder="Type country to filter dropdown..." autocomplete="off">
                 <div style="display: flex; gap: 6px;">
                     <select id="xCountrySelect" style="flex: 1;">
                         <option value="">-- Select Country to Block --</option>
@@ -269,6 +270,18 @@
                     <button id="xAddCountryBtn" class="btn-danger" style="padding: 6px 14px;">Block</button>
                 </div>
                 <div id="xBlockedChipsContainer" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;"></div>
+            </div>
+
+            <div class="setting" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <label for="xDeviceRegionSelect">Filter / Hide Posts by Device Store &amp; Region:</label>
+                <input type="text" id="xDeviceRegionSearchInput" placeholder="Type device store or region to filter..." autocomplete="off">
+                <div style="display: flex; gap: 6px;">
+                    <select id="xDeviceRegionSelect" style="flex: 1;">
+                        <option value="">-- Select Device / Region to Block --</option>
+                    </select>
+                    <button id="xAddDeviceRegionBtn" class="btn-danger" style="padding: 6px 14px;">Block</button>
+                </div>
+                <div id="xBlockedDeviceRegionChipsContainer" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;"></div>
             </div>
 
             <div class="stats-section">

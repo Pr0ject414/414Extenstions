@@ -128,4 +128,54 @@ describe('popup.js', () => {
         expect(indicator.classList.contains('status-ok-active')).toBe(true);
         expect(label.textContent).toBe('Active');
     });
+
+    test('should filter country dropdown when typing in xCountrySearchInput and block country', () => {
+        const searchInput = document.getElementById('xCountrySearchInput');
+        const countrySelect = document.getElementById('xCountrySelect');
+        const addBtn = document.getElementById('xAddCountryBtn');
+        const chipsContainer = document.getElementById('xBlockedChipsContainer');
+
+        expect(searchInput).not.toBeNull();
+        expect(countrySelect).not.toBeNull();
+
+        searchInput.value = 'japan';
+        searchInput.dispatchEvent(new Event('input'));
+
+        expect(countrySelect.value).toBe('Japan');
+        const options = Array.from(countrySelect.options).map(o => o.value).filter(Boolean);
+        expect(options).toEqual(['Japan']);
+
+        addBtn.click();
+
+        expect(mockStorageData.blockedCountries).toEqual(['Japan']);
+        expect(chipsContainer.textContent).toContain('Japan');
+        expect(searchInput.value).toBe('');
+    });
+
+    test('should filter device store & region dropdown and block selected region or device store', () => {
+        const searchInput = document.getElementById('xDeviceRegionSearchInput');
+        const selectEl = document.getElementById('xDeviceRegionSelect');
+        const addBtn = document.getElementById('xAddDeviceRegionBtn');
+        const chipsContainer = document.getElementById('xBlockedDeviceRegionChipsContainer');
+
+        expect(searchInput).not.toBeNull();
+        expect(selectEl).not.toBeNull();
+        expect(addBtn).not.toBeNull();
+        expect(chipsContainer).not.toBeNull();
+
+        searchInput.value = 'east asia';
+        searchInput.dispatchEvent(new Event('input'));
+
+        const options = Array.from(selectEl.options).map(o => o.value).filter(Boolean);
+        expect(options).toContain('East Asia');
+        expect(options).toContain('East Asia & Pacific');
+        expect(options).toContain('East Asia & Pacific App Store');
+        expect(selectEl.value).toBe('East Asia');
+
+        addBtn.click();
+
+        expect(mockStorageData.blockedDeviceRegions).toEqual(['East Asia']);
+        expect(chipsContainer.textContent).toContain('East Asia');
+        expect(searchInput.value).toBe('');
+    });
 });

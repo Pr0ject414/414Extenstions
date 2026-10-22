@@ -27,6 +27,7 @@ export const X_PREFER_DEVICE_FLAG_KEY = 'preferDeviceFlag';
 export const X_SHOW_VPN_WARN_KEY = 'showVpnWarn';
 export const X_ENABLE_COMMUNITY_CACHE_KEY = 'enableCommunityCache';
 export const X_BLOCKED_COUNTRIES_KEY = 'blockedCountries';
+export const X_BLOCKED_DEVICE_REGIONS_KEY = 'blockedDeviceRegions';
 export const X_FRIENDS_SYNC_ENABLED_KEY = 'isXFriendsSyncEnabled';
 export const X_FRIENDS_STATE_KEY = 'x_friends_sync_state_v1';
 
