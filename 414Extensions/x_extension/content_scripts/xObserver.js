@@ -206,8 +206,146 @@
         }
     }
 
-    function findMatchedFilterRule(userData, settings) {
-        if (!userData || !settings) return null;
+    const NAME_FLAG_EMOJIS = {
+        // Pride, Identity & Special Flags
+        'transgender flag': ['🏳️‍⚧️', '⚧️', '⚧'],
+        'transgender symbol': ['⚧️', '⚧'],
+        'rainbow / pride flag': ['🏳️‍🌈'],
+        'rainbow': ['🌈'],
+        'pirate flag': ['🏴‍☠️'],
+        'red flag': ['🚩'],
+        'black flag': ['🏴'],
+        'white flag': ['🏳️'],
+        'checkered flag': ['🏁'],
+        'crossed flags': ['🎌'],
+        'european union': ['🇪🇺'],
+        'united nations': ['🇺🇳'],
+        // Common Display-Name Symbols
+        'watermelon': ['🍉'],
+        'hammer & sickle': ['☭'],
+        'rose': ['🌹'],
+        'sunflower': ['🌻'],
+        'syringe': ['💉'],
+        'face mask': ['😷'],
+        'blue heart': ['💙'],
+        'raised fist': ['✊', '✊🏻', '✊🏼', '✊🏽', '✊🏾', '✊🏿'],
+        'peace symbol': ['☮️', '☮'],
+        'star of david': ['✡️', '✡'],
+        'star & crescent': ['☪️', '☪'],
+        'latin cross': ['✝️', '✝'],
+        'orthodox cross': ['☦️', '☦'],
+        // Countries & Territories
+        'afghanistan': ['🇦🇫'], 'albania': ['🇦🇱'], 'algeria': ['🇩🇿'], 'andorra': ['🇦🇩'], 'angola': ['🇦🇴'],
+        'argentina': ['🇦🇷'], 'armenia': ['🇦🇲'], 'australia': ['🇦🇺'], 'austria': ['🇦🇹'], 'azerbaijan': ['🇦🇿'],
+        'bahamas': ['🇧🇸'], 'bahrain': ['🇧🇭'], 'bangladesh': ['🇧🇩'], 'barbados': ['🇧🇧'], 'belarus': ['🇧🇾'],
+        'belgium': ['🇧🇪'], 'belize': ['🇧🇿'], 'benin': ['🇧🇯'], 'bhutan': ['🇧🇹'], 'bolivia': ['🇧🇴'],
+        'bosnia and herzegovina': ['🇧🇦'], 'botswana': ['🇧🇼'], 'brazil': ['🇧🇷'], 'brunei': ['🇧🇳'],
+        'bulgaria': ['🇧🇬'], 'burkina faso': ['🇧🇫'], 'burundi': ['🇧🇮'], 'cambodia': ['🇰🇭'], 'cameroon': ['🇨🇲'],
+        'canada': ['🇨🇦'], 'chile': ['🇨🇱'], 'china': ['🇨🇳'], 'colombia': ['🇨🇴'], 'costa rica': ['🇨🇷'],
+        'croatia': ['🇭🇷'], 'cuba': ['🇨🇺'], 'cyprus': ['🇨🇾'], 'czech republic': ['🇨🇿'], 'czechia': ['🇨🇿'],
+        'denmark': ['🇩🇰'], 'dominican republic': ['🇩🇴'], 'ecuador': ['🇪🇨'], 'egypt': ['🇪🇬'], 'el salvador': ['🇸🇻'],
+        'england': ['🏴󠁧󠁢󠁥󠁮󠁧󠁿'], 'estonia': ['🇪🇪'], 'ethiopia': ['🇪🇹'], 'finland': ['🇫🇮'], 'france': ['🇫🇷'],
+        'georgia': ['🇬🇪'], 'germany': ['🇩🇪'], 'ghana': ['🇬🇭'], 'greece': ['🇬🇷'], 'guatemala': ['🇬🇹'],
+        'haiti': ['🇭🇹'], 'honduras': ['🇭🇳'], 'hong kong': ['🇭🇰'], 'hungary': ['🇭🇺'], 'iceland': ['🇮🇸'],
+        'india': ['🇮🇳'], 'indonesia': ['🇮🇩'], 'iran': ['🇮🇷'], 'iraq': ['🇮🇶'], 'ireland': ['🇮🇪'],
+        'israel': ['🇮🇱'], 'italy': ['🇮🇹'], 'jamaica': ['🇯🇲'], 'japan': ['🇯🇵'], 'jordan': ['🇯🇴'],
+        'kazakhstan': ['🇰🇿'], 'kenya': ['🇰🇪'], 'kosovo': ['🇽🇰'], 'kuwait': ['🇰🇼'], 'latvia': ['🇱🇻'],
+        'lebanon': ['🇱🇧'], 'lithuania': ['🇱🇹'], 'luxembourg': ['🇱🇺'], 'malaysia': ['🇲🇾'], 'maldives': ['🇲🇻'],
+        'malta': ['🇲🇹'], 'mexico': ['🇲🇽'], 'moldova': ['🇲🇩'], 'monaco': ['🇲🇨'], 'mongolia': ['🇲🇳'],
+        'montenegro': ['🇲🇪'], 'morocco': ['🇲🇦'], 'nepal': ['🇳🇵'], 'netherlands': ['🇳🇱'], 'new zealand': ['🇳🇿'],
+        'nicaragua': ['🇳🇮'], 'nigeria': ['🇳🇬'], 'north korea': ['🇰🇵'], 'norway': ['🇳🇴'], 'oman': ['🇴🇲'],
+        'pakistan': ['🇵🇰'], 'palestine': ['🇵🇸'], 'panama': ['🇵🇦'], 'paraguay': ['🇵🇾'], 'peru': ['🇵🇪'],
+        'philippines': ['🇵🇭'], 'poland': ['🇵🇱'], 'portugal': ['🇵🇹'], 'puerto rico': ['🇵🇷'], 'qatar': ['🇶🇦'],
+        'romania': ['🇷🇴'], 'russia': ['🇷🇺'], 'saudi arabia': ['🇸🇦'], 'scotland': ['🏴󠁧󠁢󠁳󠁣󠁴󠁿'], 'senegal': ['🇸🇳'],
+        'serbia': ['🇷🇸'], 'singapore': ['🇸🇬'], 'slovakia': ['🇸🇰'], 'slovenia': ['🇸🇮'], 'south africa': ['🇿🇦'],
+        'south korea': ['🇰🇷'], 'spain': ['🇪🇸'], 'sri lanka': ['🇱🇰'], 'sudan': ['🇸🇩'], 'sweden': ['🇸🇪'],
+        'switzerland': ['🇨🇭'], 'syria': ['🇸🇾'], 'taiwan': ['🇹🇼'], 'thailand': ['🇹🇭'], 'tunisia': ['🇹🇳'],
+        'turkey': ['🇹🇷'], 'türkiye': ['🇹🇷'], 'uganda': ['🇺🇬'], 'ukraine': ['🇺🇦'],
+        'united arab emirates': ['🇦🇪'], 'uae': ['🇦🇪'], 'united kingdom': ['🇬🇧'], 'uk': ['🇬🇧'],
+        'united states': ['🇺🇸'], 'usa': ['🇺🇸'], 'uruguay': ['🇺🇾'], 'uzbekistan': ['🇺🇿'],
+        'venezuela': ['🇻🇪'], 'vietnam': ['🇻🇳'], 'wales': ['🏴󠁧󠁢󠁷󠁬󠁳󠁿'], 'yemen': ['🇾🇪'], 'zimbabwe': ['🇿🇼']
+    };
+
+    function stripVariationSelectors(str) {
+        return (str || '').replace(/[\uFE0E\uFE0F]/g, '');
+    }
+
+    function extractDisplayNameContent(userCell, userData = null) {
+        const parts = [];
+        if (userData && userData.meta && typeof userData.meta.name === 'string') {
+            parts.push(userData.meta.name);
+        }
+        if (userData && typeof userData.displayName === 'string') {
+            parts.push(userData.displayName);
+        }
+        if (userCell) {
+            if (userCell.querySelectorAll) {
+                const imgs = userCell.querySelectorAll('img[alt]');
+                for (const img of imgs) {
+                    if (img.closest && img.closest('.x-location-inline-badge')) continue;
+                    const alt = img.getAttribute('alt');
+                    if (alt) parts.push(alt);
+                }
+            }
+            if (typeof userCell.textContent === 'string') {
+                parts.push(userCell.textContent);
+            }
+        }
+        return parts.join(' ');
+    }
+
+    function findMatchedNameFlagRule(displayNameStr, settings) {
+        if (!displayNameStr || !settings) return null;
+        const blockedNameFlags = Array.isArray(settings.blockedNameFlags) ? settings.blockedNameFlags : [];
+        if (blockedNameFlags.length === 0) return null;
+
+        const normDisplay = stripVariationSelectors(displayNameStr);
+        // For standalone white/black flag checks, strip composite ZWJ flags first
+        const normDisplayWithoutComposite = normDisplay
+            .replace(/\u{1F3F3}\u200D\u{26A7}/gu, '')
+            .replace(/\u{1F3F3}\u200D\u{1F308}/gu, '')
+            .replace(/\u{1F3F4}\u200D\u{2620}/gu, '');
+
+        for (const item of blockedNameFlags) {
+            if (!item) continue;
+            const rawRule = item.trim();
+            const ruleLower = rawRule.toLowerCase();
+            if (!ruleLower) continue;
+
+            const mappedEmojis = NAME_FLAG_EMOJIS[ruleLower];
+            if (mappedEmojis && mappedEmojis.length > 0) {
+                const haystack = (ruleLower === 'white flag' || ruleLower === 'black flag')
+                    ? normDisplayWithoutComposite
+                    : normDisplay;
+                for (const emoji of mappedEmojis) {
+                    const normEmoji = stripVariationSelectors(emoji);
+                    if (normEmoji && haystack.includes(normEmoji)) {
+                        return `Name Flag: ${mappedEmojis[0]} ${rawRule}`;
+                    }
+                }
+            } else {
+                // Custom emoji or text rule entered by user
+                const normCustom = stripVariationSelectors(rawRule).toLowerCase();
+                if (normCustom && normDisplay.toLowerCase().includes(normCustom)) {
+                    return `Name Flag: ${rawRule}`;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function findMatchedFilterRule(userData, settings, headerElem = null) {
+        if (!settings) return null;
+
+        // 1. Check Display Name Flags & Symbols (independent of account origin country)
+        const displayNameContent = extractDisplayNameContent(headerElem, userData);
+        const matchedNameFlag = findMatchedNameFlagRule(displayNameContent, settings);
+        if (matchedNameFlag) {
+            return matchedNameFlag;
+        }
+
+        if (!userData) return null;
 
         const locLower = (userData.location || '').toLowerCase();
         const devLower = (userData.device || '').toLowerCase();
@@ -261,23 +399,30 @@
         return curr !== elem ? curr : (elem.parentElement || tweet);
     }
 
-    function applyTweetFilterForElement(target, userData, settings) {
-        if (!target || !userData) return;
-        target._xPrimaryLocationData = userData;
+    function applyTweetFilterForElement(target, userData, settings, headerElem = null) {
+        if (!target) return;
+        if (userData) {
+            target._xPrimaryLocationData = userData;
+        }
+        if (headerElem) {
+            target._xHeaderElem = headerElem;
+        }
         if (target.dataset) {
             target.dataset.xFilterTarget = 'true';
         }
 
-        const matchedRule = findMatchedFilterRule(userData, settings);
-        const tweetId = target.dataset?.xTweetId || extractTweetIdFromArticle(target) || userData.screenName;
+        const effectiveUser = target._xPrimaryLocationData || userData || {};
+        const effectiveHeader = target._xHeaderElem || headerElem || null;
+        const matchedRule = findMatchedFilterRule(effectiveUser, settings, effectiveHeader);
+        const tweetId = target.dataset?.xTweetId || extractTweetIdFromArticle(target) || effectiveUser.screenName;
 
         if (matchedRule) {
             if (window.XLocationUI && typeof window.XLocationUI.filterTweet === 'function') {
                 window.XLocationUI.filterTweet(target, {
                     reason: matchedRule,
-                    screenName: userData.screenName,
-                    location: userData.location,
-                    device: userData.device,
+                    screenName: effectiveUser.screenName,
+                    location: effectiveUser.location,
+                    device: effectiveUser.device,
                     tweetId
                 });
             } else {
@@ -300,7 +445,8 @@
                 'isXModuleEnabled',
                 'isGlobalMasterSwitchEnabled',
                 'blockedCountries',
-                'blockedDeviceRegions'
+                'blockedDeviceRegions',
+                'blockedNameFlags'
             ], (settings) => {
                 if (safeHasError() || !settings) return;
                 const isEnabled = settings.isGlobalMasterSwitchEnabled !== false &&
@@ -317,8 +463,8 @@
                         }
                         return;
                     }
-                    if (target._xPrimaryLocationData) {
-                        applyTweetFilterForElement(target, target._xPrimaryLocationData, settings);
+                    if (target._xPrimaryLocationData || target._xHeaderElem) {
+                        applyTweetFilterForElement(target, target._xPrimaryLocationData, settings, target._xHeaderElem);
                     }
                 });
             });
@@ -344,7 +490,8 @@
                     'isXModuleEnabled',
                     'isGlobalMasterSwitchEnabled',
                     'blockedCountries',
-                    'blockedDeviceRegions'
+                    'blockedDeviceRegions',
+                    'blockedNameFlags'
                 ], (settings) => {
                     if (safeHasError() || !settings) return;
                     if (settings.isGlobalMasterSwitchEnabled === false || settings.isXModuleEnabled === false) {
@@ -368,6 +515,11 @@
                         const screenName = extractScreenNameFromUserCell(elem);
                         if (!screenName) return;
 
+                        const filterTarget = getFilterTargetForUserElement(elem);
+                        if (filterTarget) {
+                            applyTweetFilterForElement(filterTarget, filterTarget._xPrimaryLocationData || { screenName }, settings, elem);
+                        }
+
                         try {
                             // Request location data from background bridge
                             chrome.runtime.sendMessage({
@@ -385,10 +537,9 @@
                                         window.XLocationUI.renderInlineBadge(elem, response.data);
                                     }
 
-                                    // Apply Location & Device-Based Tweet Filtering (outer tweet or inner quoted tweet)
-                                    const filterTarget = getFilterTargetForUserElement(elem);
+                                    // Apply Location, Device & Name-Flag Tweet Filtering (outer tweet or inner quoted tweet)
                                     if (filterTarget) {
-                                        applyTweetFilterForElement(filterTarget, response.data, settings);
+                                        applyTweetFilterForElement(filterTarget, response.data, settings, elem);
                                     }
                                 }
                             });
@@ -431,6 +582,7 @@
                 if (area === 'local' && (
                     changes.blockedCountries ||
                     changes.blockedDeviceRegions ||
+                    changes.blockedNameFlags ||
                     changes.isXLocationEnabled ||
                     changes.isXModuleEnabled ||
                     changes.isGlobalMasterSwitchEnabled

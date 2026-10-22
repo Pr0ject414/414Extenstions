@@ -187,6 +187,38 @@ document.addEventListener('DOMContentLoaded', () => {
             'West Asia Android App': '🌍'
         };
 
+        const NAME_FLAG_MAP = {
+            // Pride, Identity & Special Flags
+            'Transgender Flag': '🏳️‍⚧️',
+            'Transgender Symbol': '⚧️',
+            'Rainbow / Pride Flag': '🏳️‍🌈',
+            'Rainbow': '🌈',
+            'Pirate Flag': '🏴‍☠️',
+            'Red Flag': '🚩',
+            'Black Flag': '🏴',
+            'White Flag': '🏳️',
+            'Checkered Flag': '🏁',
+            'Crossed Flags': '🎌',
+            'European Union': '🇪🇺',
+            'United Nations': '🇺🇳',
+            // Common Display-Name Symbols
+            'Watermelon': '🍉',
+            'Hammer & Sickle': '☭',
+            'Rose': '🌹',
+            'Sunflower': '🌻',
+            'Syringe': '💉',
+            'Face Mask': '😷',
+            'Blue Heart': '💙',
+            'Raised Fist': '✊',
+            'Peace Symbol': '☮️',
+            'Star of David': '✡️',
+            'Star & Crescent': '☪️',
+            'Latin Cross': '✝️',
+            'Orthodox Cross': '☦️',
+            // All Country & Territory Flags
+            ...COUNTRY_FLAGS_MAP
+        };
+
         function setupFilterableBlockSection({
             searchInput,
             selectEl,
@@ -214,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectEl.appendChild(placeholderOpt);
 
                 const matchingNames = sortedNames.filter(name =>
-                    !query || name.toLowerCase().includes(query)
+                    !query || name.toLowerCase().includes(query) || (itemsMap[name] && itemsMap[name].toLowerCase().includes(query))
                 );
 
                 matchingNames.forEach(name => {
@@ -342,6 +374,18 @@ document.addEventListener('DOMContentLoaded', () => {
             placeholderText: '-- Select Device / Region to Block --',
             emptyChipsText: 'No device stores or regions blocked yet.',
             defaultIcon: '📱'
+        });
+
+        setupFilterableBlockSection({
+            searchInput: document.getElementById('xNameFlagSearchInput'),
+            selectEl: document.getElementById('xNameFlagSelect'),
+            addBtn: document.getElementById('xAddNameFlagBtn'),
+            chipsContainer: document.getElementById('xBlockedNameFlagChipsContainer'),
+            itemsMap: NAME_FLAG_MAP,
+            storageKey: 'blockedNameFlags',
+            placeholderText: '-- Select Name Flag / Symbol to Block --',
+            emptyChipsText: 'No display name flags or symbols blocked yet.',
+            defaultIcon: '🚩'
         });
 
         // --- X Friends Seen Post Sync UI ---

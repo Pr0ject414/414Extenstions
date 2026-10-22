@@ -441,4 +441,129 @@ describe('xLocationUI.js', () => {
 
         jest.useRealTimers();
     });
+
+    test('xObserver should filter tweets by Display Name Flags (e.g. Transgender Flag or Russian Flag in name) even when account location is United States, while ignoring injected location badge flags', () => {
+        jest.useFakeTimers();
+        delete window.XObserverInjected;
+
+        global.chrome = {
+            runtime: {
+                id: 'test-ext-id',
+                lastError: null,
+                onMessage: { addListener: jest.fn() },
+                sendMessage: jest.fn((msg, cb) => {
+                    if (msg.action === 'X_FETCH_USER_INFO') {
+                        if (msg.payload.screenName === 'transflag_user') {
+                            cb({
+                                success: true,
+                                data: {
+                                    screenName: 'transflag_user',
+                                    location: 'United States',
+                                    device: 'United States App Store'
+                                }
+                            });
+                        } else if (msg.payload.screenName === 'ruflag_in_us') {
+                            cb({
+                                success: true,
+                                data: {
+                                    screenName: 'ruflag_in_us',
+                                    location: 'United States',
+                                    device: 'Web'
+                                }
+                            });
+                        } else if (msg.payload.screenName === 'actual_russian_no_name_flag') {
+                            cb({
+                                success: true,
+                                data: {
+                                    screenName: 'actual_russian_no_name_flag',
+                                    location: 'Russia',
+                                    device: 'Web'
+                                }
+                            });
+                        }
+                    }
+                })
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXFriendsSyncEnabled: false,
+                            blockedCountries: [], // Russia is NOT blocked by origin country
+                            blockedDeviceRegions: [],
+                            blockedNameFlags: ['Transgender Flag', 'Russia']
+                        });
+                    })
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+
+        // Tweet 1: US user with Twemoji Transgender Flag <img> in display name -> should be filtered
+        const cell1 = document.createElement('div');
+        const tweet1 = document.createElement('article');
+        tweet1.setAttribute('data-testid', 'tweet');
+        const header1 = document.createElement('div');
+        header1.setAttribute('data-testid', 'User-Name');
+        const nameSpan1 = document.createElement('span');
+        nameSpan1.textContent = 'Alex ';
+        const flagImg1 = document.createElement('img');
+        flagImg1.setAttribute('alt', '🏳️‍⚧️');
+        nameSpan1.appendChild(flagImg1);
+        const handle1 = document.createElement('span');
+        handle1.textContent = ' @transflag_user';
+        header1.appendChild(nameSpan1);
+        header1.appendChild(handle1);
+        tweet1.appendChild(header1);
+        cell1.appendChild(tweet1);
+        document.body.appendChild(cell1);
+
+        // Tweet 2: US user with Russian Flag 🇷🇺 in display name -> should be filtered
+        const cell2 = document.createElement('div');
+        const tweet2 = document.createElement('article');
+        tweet2.setAttribute('data-testid', 'tweet');
+        const header2 = document.createElement('div');
+        header2.setAttribute('data-testid', 'User-Name');
+        const flagImg2 = document.createElement('img');
+        flagImg2.setAttribute('alt', '🇷🇺');
+        header2.appendChild(flagImg2);
+        const handle2 = document.createElement('span');
+        handle2.textContent = ' @ruflag_in_us';
+        header2.appendChild(handle2);
+        tweet2.appendChild(header2);
+        cell2.appendChild(tweet2);
+        document.body.appendChild(cell2);
+
+        // Tweet 3: User located in Russia (so our badge injects <img alt="🇷🇺"> inside .x-location-inline-badge),
+        // but NO Russian flag in their display name, and Russia is NOT in blockedCountries -> should NOT be filtered
+        const cell3 = document.createElement('div');
+        const tweet3 = document.createElement('article');
+        tweet3.setAttribute('data-testid', 'tweet');
+        const header3 = document.createElement('div');
+        header3.setAttribute('data-testid', 'User-Name');
+        header3.textContent = 'Ivan @actual_russian_no_name_flag';
+        tweet3.appendChild(header3);
+        cell3.appendChild(tweet3);
+        document.body.appendChild(cell3);
+
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(200);
+
+        expect(tweet1.style.display).toBe('none');
+        expect(cell1.querySelector('.x-tweet-filtered-placeholder').textContent).toContain('Name Flag: 🏳️‍⚧️ Transgender Flag');
+
+        expect(tweet2.style.display).toBe('none');
+        expect(cell2.querySelector('.x-tweet-filtered-placeholder').textContent).toContain('Name Flag: 🇷🇺 Russia');
+
+        expect(tweet3.style.display).toBe('');
+        expect(cell3.querySelector('.x-tweet-filtered-placeholder')).toBeNull();
+
+        jest.useRealTimers();
+    });
 });

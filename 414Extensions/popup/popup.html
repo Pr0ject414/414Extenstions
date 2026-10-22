@@ -284,6 +284,18 @@
                 <div id="xBlockedDeviceRegionChipsContainer" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;"></div>
             </div>
 
+            <div class="setting" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                <label for="xNameFlagSelect">Filter / Hide Posts by Display Name Flags &amp; Symbols:</label>
+                <input type="text" id="xNameFlagSearchInput" placeholder="Type flag, country, or paste emoji..." autocomplete="off">
+                <div style="display: flex; gap: 6px;">
+                    <select id="xNameFlagSelect" style="flex: 1;">
+                        <option value="">-- Select Name Flag / Symbol to Block --</option>
+                    </select>
+                    <button id="xAddNameFlagBtn" class="btn-danger" style="padding: 6px 14px;">Block</button>
+                </div>
+                <div id="xBlockedNameFlagChipsContainer" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;"></div>
+            </div>
+
             <div class="stats-section">
                 <p><span>Cached Account Dossiers:</span> <strong id="xCachedCountDisplay">0</strong></p>
                 <button id="xClearCacheBtn" class="btn-secondary" style="width: 100%; margin-top: 8px; padding: 7px;">Clear Location Cache</button>
