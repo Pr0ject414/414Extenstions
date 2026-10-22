@@ -3,26 +3,50 @@ import * as AppState from '../shared_modules/appState.js';
 import { XLocationApiClient } from './xLocationApi.js';
 import { locationCache } from './xLocationCache.js';
 import { XCloudCacheClient } from './xCloudCache.js';
+import { friendsSync } from './xFriendsSync.js';
+import { FRIEND_SYNC_CONFIG } from './xLocationConstants.js';
 
 const CONTEXT_MENU_ID = "x_download_video";
+const FRIENDS_SYNC_ALARM = "x_friends_sync_alarm";
 const apiClient = new XLocationApiClient();
 const cloudCache = new XCloudCacheClient();
+
+function setupFriendsSyncAlarm() {
+    if (typeof chrome !== 'undefined' && chrome.alarms && chrome.alarms.create) {
+        chrome.alarms.create(FRIENDS_SYNC_ALARM, {
+            periodInMinutes: FRIEND_SYNC_CONFIG.SYNC_INTERVAL_MINUTES
+        });
+    }
+}
 
 // --- Lifecycle Functions ---
 export async function init() {
     await locationCache.init();
     await apiClient.loadHeadersFromStorage();
+    await friendsSync.init();
+    setupFriendsSyncAlarm();
 }
 
 export async function onStartup() {
     await locationCache.init();
     await apiClient.loadHeadersFromStorage();
+    await friendsSync.init();
+    setupFriendsSyncAlarm();
+    friendsSync.syncWithRelays().catch(() => {});
 }
 
 export async function onInstalled(details) {
     await locationCache.init();
     await apiClient.loadHeadersFromStorage();
+    await friendsSync.init();
+    setupFriendsSyncAlarm();
     createContextMenu();
+}
+
+export async function handleAlarm(alarm) {
+    if (alarm && alarm.name === FRIENDS_SYNC_ALARM) {
+        await friendsSync.syncWithRelays();
+    }
 }
 
 function createContextMenu() {
@@ -134,6 +158,85 @@ export function handleMessage(request, sender, sendResponse) {
     if (request.action === "X_CLEAR_LOCATION_CACHE") {
         locationCache.clear().then(() => {
             sendResponse({ success: true });
+        });
+        return true;
+    }
+
+    if (request.action === "X_FRIENDS_GET_STATE") {
+        friendsSync.init().then(() => {
+            sendResponse({ success: true, state: friendsSync.getPublicState() });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_FRIENDS_SET_IDENTITY") {
+        const { email, displayName } = request.payload || {};
+        friendsSync.setIdentity(email, displayName).then(state => {
+            sendResponse({ success: true, state });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_FRIENDS_ADD") {
+        const { email, displayName } = request.payload || {};
+        friendsSync.addFriend(email, displayName).then(state => {
+            sendResponse({ success: true, state });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_FRIENDS_ACCEPT") {
+        const { email } = request.payload || {};
+        friendsSync.acceptFriend(email).then(state => {
+            sendResponse({ success: true, state });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_FRIENDS_REMOVE") {
+        const { email } = request.payload || {};
+        friendsSync.removeFriend(email).then(state => {
+            sendResponse({ success: true, state });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_FRIENDS_FORCE_SYNC") {
+        friendsSync.syncWithRelays().then(state => {
+            sendResponse({ success: true, state });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_MARK_TWEETS_SEEN") {
+        const { tweetIds } = request.payload || {};
+        friendsSync.markTweetsSeen(tweetIds).then(res => {
+            sendResponse({ success: true, ...res });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    if (request.action === "X_CHECK_TWEETS_SEEN") {
+        const { tweetIds } = request.payload || {};
+        friendsSync.init().then(() => {
+            const seenMap = friendsSync.checkTweetsSeen(tweetIds);
+            sendResponse({ success: true, seenMap });
+        }).catch(err => {
+            sendResponse({ success: false, error: err.message });
         });
         return true;
     }

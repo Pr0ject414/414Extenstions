@@ -91,6 +91,20 @@
         return svg;
     }
 
+    function createSeenCheckSVG() {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '11');
+        svg.setAttribute('height', '11');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '3');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        svg.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+        return svg;
+    }
+
     // Hovercard Dossier Overlay Manager
     let hovercardRoot = null;
     let hovercardTimeout = null;
@@ -148,6 +162,12 @@
                 <span class="x-hovercard-label">User ID:</span>
                 <span class="x-hovercard-val">${restId}</span>
             </div>
+            ${Array.isArray(data.seenBy) && data.seenBy.length > 0 ? `
+            <div class="x-hovercard-row">
+                <span class="x-hovercard-icon">✅</span>
+                <span class="x-hovercard-label">Seen by:</span>
+                <span class="x-hovercard-val">${data.seenBy.join(', ')}</span>
+            </div>` : ''}
         `;
 
         const rect = targetElem.getBoundingClientRect();
@@ -195,40 +215,14 @@
         return { target: container, ref: null };
     }
 
-    function renderInlineBadge(containerElem, data) {
-        if (!containerElem || containerElem.querySelector('.x-location-inline-badge')) return;
+    function getOrCreateInlineBadge(containerElem, screenName) {
+        let badge = containerElem.querySelector('.x-location-inline-badge');
+        if (badge) return badge;
 
-        const badge = document.createElement('span');
+        badge = document.createElement('span');
         badge.className = 'x-location-inline-badge';
 
-        // 1. Flag
-        const flagSpan = document.createElement('span');
-        flagSpan.className = 'x-location-flag';
-        flagSpan.innerHTML = getFlagHtml(data.location);
-        flagSpan.title = data.location ? `Account Location: ${data.location}` : 'Location Unknown';
-        badge.appendChild(flagSpan);
-
-        // 2. Device Icon
-        if (data.device) {
-            const devSpan = document.createElement('span');
-            devSpan.className = 'x-location-device-icon';
-            devSpan.title = `Device: ${data.device}`;
-            devSpan.appendChild(createDeviceSVG(data.device));
-            badge.appendChild(devSpan);
-        }
-
-        // 3. Info (i) button
-        const infoBtn = document.createElement('span');
-        infoBtn.className = 'x-location-info-btn';
-        infoBtn.title = 'View Account Dossier';
-        infoBtn.appendChild(createInfoSVG());
-
-        infoBtn.addEventListener('mouseenter', () => showHovercard(infoBtn, data));
-        infoBtn.addEventListener('mouseleave', () => hideHovercard());
-
-        badge.appendChild(infoBtn);
-
-        const insertion = findInsertionPoint(containerElem, data.screenName);
+        const insertion = findInsertionPoint(containerElem, screenName);
         if (insertion && insertion.target) {
             if (insertion.ref) {
                 insertion.target.insertBefore(badge, insertion.ref);
@@ -238,10 +232,79 @@
         } else {
             containerElem.appendChild(badge);
         }
+        return badge;
+    }
+
+    function renderInlineBadge(containerElem, data) {
+        if (!containerElem || containerElem.querySelector('.x-location-flag')) return;
+
+        const badge = getOrCreateInlineBadge(containerElem, data.screenName);
+        const existingSeenBadge = badge.querySelector('.x-friend-seen-badge');
+
+        const insertPart = (node) => {
+            if (existingSeenBadge) {
+                badge.insertBefore(node, existingSeenBadge);
+            } else {
+                badge.appendChild(node);
+            }
+        };
+
+        // 1. Flag
+        const flagSpan = document.createElement('span');
+        flagSpan.className = 'x-location-flag';
+        flagSpan.innerHTML = getFlagHtml(data.location);
+        flagSpan.title = data.location ? `Account Location: ${data.location}` : 'Location Unknown';
+        insertPart(flagSpan);
+
+        // 2. Device Icon
+        if (data.device) {
+            const devSpan = document.createElement('span');
+            devSpan.className = 'x-location-device-icon';
+            devSpan.title = `Device: ${data.device}`;
+            devSpan.appendChild(createDeviceSVG(data.device));
+            insertPart(devSpan);
+        }
+
+        // 3. Info (i) button
+        const infoBtn = document.createElement('span');
+        infoBtn.className = 'x-location-info-btn';
+        infoBtn.title = 'View Account Dossier';
+        infoBtn.appendChild(createInfoSVG());
+
+        infoBtn.addEventListener('mouseenter', () => {
+            const seenElem = badge.querySelector('.x-friend-seen-badge');
+            const seenByAttr = seenElem ? seenElem.getAttribute('data-seen-by') : '';
+            const enrichedData = seenByAttr
+                ? { ...data, seenBy: seenByAttr.split(', ').filter(Boolean) }
+                : data;
+            showHovercard(infoBtn, enrichedData);
+        });
+        infoBtn.addEventListener('mouseleave', () => hideHovercard());
+
+        insertPart(infoBtn);
+    }
+
+    function renderFriendSeenBadge(containerElem, screenName, seenByFriends) {
+        if (!containerElem || !Array.isArray(seenByFriends) || seenByFriends.length === 0) return;
+
+        const badge = getOrCreateInlineBadge(containerElem, screenName);
+        let seenSpan = badge.querySelector('.x-friend-seen-badge');
+        if (!seenSpan) {
+            seenSpan = document.createElement('span');
+            seenSpan.className = 'x-friend-seen-badge';
+            seenSpan.appendChild(createSeenCheckSVG());
+            badge.appendChild(seenSpan);
+        }
+
+        const listStr = seenByFriends.join(', ');
+        seenSpan.title = `Seen by: ${listStr}`;
+        seenSpan.setAttribute('data-seen-by', listStr);
+        seenSpan.setAttribute('aria-label', `Seen by ${listStr}`);
     }
 
     window.XLocationUI = {
         renderInlineBadge,
+        renderFriendSeenBadge,
         showHovercard,
         hideHovercard
     };

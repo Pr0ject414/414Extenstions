@@ -102,4 +102,34 @@ describe('xLocationUI.js', () => {
         expect(hovercard.innerHTML).toContain('@superstar');
         expect(hovercard.innerHTML).toContain('987654321');
     });
+
+    test('renderFriendSeenBadge should render green checkmark alongside location badge and standalone', () => {
+        const container = document.createElement('div');
+        const userHeader = document.createElement('div');
+        const handleLink = document.createElement('a');
+        handleLink.textContent = '@kyle';
+        userHeader.appendChild(handleLink);
+        container.appendChild(userHeader);
+        document.body.appendChild(container);
+
+        // 1. Render seen badge first (e.g., before location loads or when location is disabled)
+        window.XLocationUI.renderFriendSeenBadge(container, 'kyle', ['friend1@test.com', 'friend2@test.com']);
+
+        const seenBadge = container.querySelector('.x-friend-seen-badge');
+        expect(seenBadge).not.toBeNull();
+        expect(seenBadge.title).toBe('Seen by: friend1@test.com, friend2@test.com');
+        expect(seenBadge.querySelector('svg')).not.toBeNull();
+
+        // 2. Render location badge afterward -> should share the same .x-location-inline-badge container
+        window.XLocationUI.renderInlineBadge(container, {
+            screenName: 'kyle',
+            location: 'United States',
+            device: 'Twitter Web App'
+        });
+
+        const inlineBadges = container.querySelectorAll('.x-location-inline-badge');
+        expect(inlineBadges.length).toBe(1);
+        expect(inlineBadges[0].querySelector('.x-location-flag')).not.toBeNull();
+        expect(inlineBadges[0].querySelector('.x-friend-seen-badge')).not.toBeNull();
+    });
 });

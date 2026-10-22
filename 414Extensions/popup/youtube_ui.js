@@ -25,13 +25,13 @@ document.addEventListener('DOMContentLoaded', () => {
     youTubeModulePowerToggle.addEventListener('change', () => {
         const isEnabled = youTubeModulePowerToggle.checked;
         chrome.storage.local.set({ [YOUTUBE_MODULE_ENABLED_KEY]: isEnabled });
-        chrome.runtime.sendMessage({ action: "setYouTubeModuleEnabled", enabled: isEnabled }, updateYouTubeStatsDisplay);
+        chrome.runtime.sendMessage({ action: "setYouTubeModuleEnabled", enabled: isEnabled }, () => { void chrome.runtime.lastError; updateYouTubeStatsDisplay(); });
     });
 
     youTubeNoSuggestionsToggle.addEventListener('change', () => {
         const isEnabled = youTubeNoSuggestionsToggle.checked;
         chrome.storage.local.set({ [YOUTUBE_NO_SUGGESTIONS_ENABLED_KEY]: isEnabled });
-        chrome.runtime.sendMessage({ action: "setYouTubeNoSuggestionsEnabled", enabled: isEnabled }, updateYouTubeStatsDisplay);
+        chrome.runtime.sendMessage({ action: "setYouTubeNoSuggestionsEnabled", enabled: isEnabled }, () => { void chrome.runtime.lastError; updateYouTubeStatsDisplay(); });
     });
 
     // --- New Auto HD Controls ---

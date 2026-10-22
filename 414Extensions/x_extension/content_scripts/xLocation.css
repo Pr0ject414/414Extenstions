@@ -45,6 +45,32 @@
     transform: scale(1.1);
 }
 
+.x-friend-seen-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.55);
+    color: #10B981;
+    cursor: help;
+    transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.x-friend-seen-badge:hover {
+    background: rgba(16, 185, 129, 0.35);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.45);
+    transform: scale(1.12);
+}
+
+:root[data-x-theme="light"] .x-friend-seen-badge {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: rgba(5, 150, 105, 0.5);
+    color: #059669;
+}
+
 .x-location-vpn-warn {
     display: inline-flex;
     align-items: center;

@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fabModulePowerToggle.addEventListener('change', () => {
         const isEnabled = fabModulePowerToggle.checked;
         chrome.storage.local.set({ [FAB_MODULE_ENABLED_KEY]: isEnabled });
-        chrome.runtime.sendMessage({ action: "setFabModuleEnabled", enabled: isEnabled }, updateFabStatsDisplay);
+        chrome.runtime.sendMessage({ action: "setFabModuleEnabled", enabled: isEnabled }, () => { void chrome.runtime.lastError; updateFabStatsDisplay(); });
     });
 
     fabFilterToggle.addEventListener('change', () => chrome.storage.local.set({ [FAB_FILTER_ENABLED_KEY]: fabFilterToggle.checked }));
@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fabQueueProcessingToggle.addEventListener('change', () => {
         const isEnabled = fabQueueProcessingToggle.checked;
         chrome.storage.local.set({ [FAB_QUEUE_PROCESSING_ENABLED_KEY]: isEnabled });
-        chrome.runtime.sendMessage({ action: "setFabQueueProcessingEnabled", enabled: isEnabled }, updateFabStatsDisplay);
+        chrome.runtime.sendMessage({ action: "setFabQueueProcessingEnabled", enabled: isEnabled }, () => { void chrome.runtime.lastError; updateFabStatsDisplay(); });
     });
 
     function updateFabStatsDisplay() {

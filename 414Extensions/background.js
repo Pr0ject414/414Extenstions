@@ -33,7 +33,15 @@ moduleManager.register(XBackground, {
         "X_CAPTURE_HEADERS",
         "X_FETCH_USER_INFO",
         "X_GET_LOCATION_STATS",
-        "X_CLEAR_LOCATION_CACHE"
+        "X_CLEAR_LOCATION_CACHE",
+        "X_FRIENDS_GET_STATE",
+        "X_FRIENDS_SET_IDENTITY",
+        "X_FRIENDS_ADD",
+        "X_FRIENDS_ACCEPT",
+        "X_FRIENDS_REMOVE",
+        "X_FRIENDS_FORCE_SYNC",
+        "X_MARK_TWEETS_SEEN",
+        "X_CHECK_TWEETS_SEEN"
     ]
 });
 
@@ -144,6 +152,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (!AppState.globalMasterSwitchEnabled) return;
     const wasLimited = AppState.isRateLimited();
     if (alarm.name.startsWith("fab") && AppState.fabModuleEnabled) await FabBackground.handleAlarm(alarm);
+    if (alarm.name.startsWith("x_") && AppState.xModuleEnabled && typeof XBackground.handleAlarm === 'function') {
+        await XBackground.handleAlarm(alarm);
+    }
     if (wasLimited !== AppState.isRateLimited()) broadcastStateChanges();
 });
 

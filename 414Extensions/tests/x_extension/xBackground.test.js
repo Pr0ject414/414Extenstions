@@ -106,4 +106,32 @@ describe('xBackground', () => {
         const handled = handleMessage({ action: 'UNKNOWN_ACTION' }, {}, sendResponse);
         expect(handled).toBe(false);
     });
+
+    test('X_FRIENDS_GET_STATE and X_MARK_TWEETS_SEEN should route to friendsSync', async () => {
+        global.chrome.storage.local.get.mockResolvedValue({});
+        global.chrome.storage.local.set.mockResolvedValue();
+
+        const sendResponseState = jest.fn();
+        const handledState = handleMessage({ action: 'X_FRIENDS_GET_STATE' }, {}, sendResponseState);
+        expect(handledState).toBe(true);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(sendResponseState).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            state: expect.objectContaining({
+                friends: expect.any(Array)
+            })
+        }));
+
+        const sendResponseSeen = jest.fn();
+        const handledSeen = handleMessage({
+            action: 'X_MARK_TWEETS_SEEN',
+            payload: { tweetIds: ['1234567890123'] }
+        }, {}, sendResponseSeen);
+        expect(handledSeen).toBe(true);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(sendResponseSeen).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            added: 1
+        }));
+    });
 });

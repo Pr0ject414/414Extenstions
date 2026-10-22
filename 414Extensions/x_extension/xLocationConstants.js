@@ -28,6 +28,23 @@ export const CLOUD_CACHE_CONFIG = {
     RETRY_DELAY_MS: 2000
 };
 
+export const FRIEND_SYNC_CONFIG = {
+    RELAYS: [
+        'wss://nos.lol',
+        'wss://offchain.pub',
+        'wss://relay.primal.net',
+        'wss://nostr.mom'
+    ],
+    NOSTR_KIND_APP_DATA: 30078, // NIP-78 Parameterized Replaceable Event
+    DWELL_TIME_MS: 1200,        // 1.2s at >= 60% visibility marks post as seen
+    VISIBILITY_THRESHOLD: 0.6,
+    BATCH_FLUSH_DELAY_MS: 15000, // Debounce before publishing updated seen snapshot
+    SYNC_INTERVAL_MINUTES: 2,    // Background alarm interval for pulling friends' updates
+    MAX_SEEN_IDS: 3000,
+    MAX_AGE_MS: 14 * 24 * 60 * 60 * 1000, // 14 days
+    RELAY_TIMEOUT_MS: 5000
+};
+
 export const SELECTORS = {
     USERNAME: '[data-testid="UserName"], [data-testid="User-Name"]',
     TWEET: 'article[data-testid="tweet"]',

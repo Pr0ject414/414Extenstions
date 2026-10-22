@@ -82,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (xCachedCountDisplay) {
             chrome.runtime.sendMessage({ action: 'X_GET_LOCATION_STATS' }, (res) => {
+                if (chrome.runtime.lastError) return;
                 if (res && res.success && res.stats) {
                     xCachedCountDisplay.textContent = res.stats.totalCached || 0;
                 }
@@ -91,6 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (xClearCacheBtn) {
             xClearCacheBtn.addEventListener('click', () => {
                 chrome.runtime.sendMessage({ action: 'X_CLEAR_LOCATION_CACHE' }, (res) => {
+                    if (chrome.runtime.lastError) return;
                     if (res && res.success) {
                         if (xCachedCountDisplay) xCachedCountDisplay.textContent = '0';
                     }
@@ -187,6 +189,184 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // --- X Friends Seen Post Sync UI ---
+        const xFriendsSyncToggle = document.getElementById('xFriendsSyncToggle');
+        const xMyEmailInput = document.getElementById('xMyEmailInput');
+        const xSaveIdentityBtn = document.getElementById('xSaveIdentityBtn');
+        const xFriendEmailInput = document.getElementById('xFriendEmailInput');
+        const xAddFriendBtn = document.getElementById('xAddFriendBtn');
+        const xPendingFriendsContainer = document.getElementById('xPendingFriendsContainer');
+        const xFriendsListContainer = document.getElementById('xFriendsListContainer');
+        const xMySeenCountDisplay = document.getElementById('xMySeenCountDisplay');
+        const xSyncFriendsNowBtn = document.getElementById('xSyncFriendsNowBtn');
+        const xFriendsStatusMsg = document.getElementById('xFriendsStatusMsg');
+
+        function setFriendsStatus(msg, isError = false) {
+            if (!xFriendsStatusMsg) return;
+            xFriendsStatusMsg.textContent = msg;
+            xFriendsStatusMsg.style.color = isError ? 'var(--status-red)' : 'var(--status-green)';
+            if (msg) {
+                setTimeout(() => {
+                    if (xFriendsStatusMsg.textContent === msg) {
+                        xFriendsStatusMsg.textContent = '';
+                    }
+                }, 3500);
+            }
+        }
+
+        function renderFriendsSyncState(state) {
+            if (!state) return;
+            if (xMyEmailInput && state.identity && state.identity.email && !xMyEmailInput.value) {
+                xMyEmailInput.value = state.identity.email;
+            }
+            if (xMySeenCountDisplay) {
+                xMySeenCountDisplay.textContent = state.mySeenCount || 0;
+            }
+
+            const friends = Array.isArray(state.friends) ? state.friends : [];
+            const incoming = friends.filter(f => f.status === 'pending_incoming');
+            const others = friends.filter(f => f.status !== 'pending_incoming');
+
+            if (xPendingFriendsContainer) {
+                xPendingFriendsContainer.innerHTML = '';
+                incoming.forEach(req => {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 8px; padding: 4px 8px; font-size: 0.8em; color: #fcd34d;';
+                    row.innerHTML = `
+                        <span>Invite: <strong>${req.email}</strong></span>
+                        <span style="display: inline-flex; gap: 4px;">
+                            <button class="btn-accept-friend btn-primary" style="padding: 2px 8px; font-size: 0.9em;">Accept</button>
+                            <button class="btn-reject-friend btn-secondary" style="padding: 2px 6px; font-size: 0.9em;">&times;</button>
+                        </span>
+                    `;
+                    row.querySelector('.btn-accept-friend').addEventListener('click', () => {
+                        chrome.runtime.sendMessage({ action: 'X_FRIENDS_ACCEPT', payload: { email: req.email } }, (res) => {
+                            if (chrome.runtime.lastError) return;
+                            if (res && res.success) {
+                                renderFriendsSyncState(res.state);
+                                setFriendsStatus(`Connected with ${req.email}!`);
+                            }
+                        });
+                    });
+                    row.querySelector('.btn-reject-friend').addEventListener('click', () => {
+                        chrome.runtime.sendMessage({ action: 'X_FRIENDS_REMOVE', payload: { email: req.email } }, (res) => {
+                            if (chrome.runtime.lastError) return;
+                            if (res && res.success) renderFriendsSyncState(res.state);
+                        });
+                    });
+                    xPendingFriendsContainer.appendChild(row);
+                });
+            }
+
+            if (xFriendsListContainer) {
+                xFriendsListContainer.innerHTML = '';
+                if (others.length === 0 && incoming.length === 0) {
+                    xFriendsListContainer.innerHTML = '<span style="font-size: 0.8em; color: #888;">No friends added yet.</span>';
+                } else {
+                    others.forEach(friend => {
+                        const isConnected = friend.status === 'connected';
+                        const chip = document.createElement('span');
+                        chip.style.cssText = isConnected
+                            ? 'display: inline-flex; align-items: center; gap: 4px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); border-radius: 12px; padding: 2px 8px; font-size: 0.8em; color: #6ee7b7;'
+                            : 'display: inline-flex; align-items: center; gap: 4px; background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 12px; padding: 2px 8px; font-size: 0.8em; color: #cbd5e1;';
+                        const icon = isConnected ? '✓' : '⏳';
+                        const countText = isConnected ? ` (${friend.seenCount || 0})` : ' (pending)';
+                        chip.innerHTML = `${icon} ${friend.email}${countText} <span class="friend-remove" style="cursor: pointer; font-weight: bold; margin-left: 4px; color: #fff;">&times;</span>`;
+                        chip.querySelector('.friend-remove').addEventListener('click', () => {
+                            chrome.runtime.sendMessage({ action: 'X_FRIENDS_REMOVE', payload: { email: friend.email } }, (res) => {
+                                if (chrome.runtime.lastError) return;
+                                if (res && res.success) renderFriendsSyncState(res.state);
+                            });
+                        });
+                        xFriendsListContainer.appendChild(chip);
+                    });
+                }
+            }
+        }
+
+        if (xFriendsSyncToggle) {
+            chrome.storage.local.get(['isXFriendsSyncEnabled'], (res) => {
+                xFriendsSyncToggle.checked = res.isXFriendsSyncEnabled !== false;
+            });
+            xFriendsSyncToggle.addEventListener('change', () => {
+                chrome.storage.local.set({ isXFriendsSyncEnabled: xFriendsSyncToggle.checked });
+            });
+        }
+
+        if (xFriendsListContainer) {
+            chrome.runtime.sendMessage({ action: 'X_FRIENDS_GET_STATE' }, (res) => {
+                if (chrome.runtime.lastError) return;
+                if (res && res.success && res.state) {
+                    renderFriendsSyncState(res.state);
+                }
+            });
+        }
+
+        if (xSaveIdentityBtn && xMyEmailInput) {
+            xSaveIdentityBtn.addEventListener('click', () => {
+                const email = xMyEmailInput.value.trim();
+                if (!email) {
+                    setFriendsStatus('Please enter your email or alias.', true);
+                    return;
+                }
+                setFriendsStatus('Saving & syncing...');
+                chrome.runtime.sendMessage({ action: 'X_FRIENDS_SET_IDENTITY', payload: { email } }, (res) => {
+                    if (chrome.runtime.lastError) {
+                        setFriendsStatus('Extension background not ready. Reload extension.', true);
+                        return;
+                    }
+                    if (res && res.success) {
+                        renderFriendsSyncState(res.state);
+                        setFriendsStatus('Identity saved!');
+                    } else {
+                        setFriendsStatus(res?.error || 'Failed to save identity.', true);
+                    }
+                });
+            });
+        }
+
+        if (xAddFriendBtn && xFriendEmailInput) {
+            xAddFriendBtn.addEventListener('click', () => {
+                const email = xFriendEmailInput.value.trim();
+                if (!email) {
+                    setFriendsStatus('Please enter a friend email or alias.', true);
+                    return;
+                }
+                setFriendsStatus('Sending invite over Nostr...');
+                chrome.runtime.sendMessage({ action: 'X_FRIENDS_ADD', payload: { email } }, (res) => {
+                    if (chrome.runtime.lastError) {
+                        setFriendsStatus('Extension background not ready. Reload extension.', true);
+                        return;
+                    }
+                    if (res && res.success) {
+                        xFriendEmailInput.value = '';
+                        renderFriendsSyncState(res.state);
+                        setFriendsStatus(`Added ${email}!`);
+                    } else {
+                        setFriendsStatus(res?.error || 'Failed to add friend.', true);
+                    }
+                });
+            });
+        }
+
+        if (xSyncFriendsNowBtn) {
+            xSyncFriendsNowBtn.addEventListener('click', () => {
+                setFriendsStatus('Syncing with Nostr relays...');
+                chrome.runtime.sendMessage({ action: 'X_FRIENDS_FORCE_SYNC' }, (res) => {
+                    if (chrome.runtime.lastError) {
+                        setFriendsStatus('Extension background not ready. Reload extension.', true);
+                        return;
+                    }
+                    if (res && res.success) {
+                        renderFriendsSyncState(res.state);
+                        setFriendsStatus('Synced with relays!');
+                    } else {
+                        setFriendsStatus(res?.error || 'Sync failed.', true);
+                    }
+                });
+            });
+        }
+
         refreshTabVisibility();
         setDependentModulesState();
     });
@@ -222,6 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // The message now has a callback that explicitly tells the module UIs to refresh
         chrome.runtime.sendMessage({ action: "setGlobalMasterSwitch", enabled: isEnabled }, () => {
+            void chrome.runtime.lastError;
             setDependentModulesState();
             // Manually trigger the status updates for each module
             if (window.updateFabStatsDisplay) window.updateFabStatsDisplay();
@@ -382,6 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     action: "getCurrentVolumeForPopup", 
                     tabId: tabs[0].id 
                 }, (response) => {
+                    if (chrome.runtime.lastError) return;
                     if (response && response.volume !== undefined) {
                         const volPercent = Math.round(response.volume * 100);
                         volumeSlider.value = volPercent;
