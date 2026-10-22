@@ -227,5 +227,212 @@ describe('video_speed_controller/controller.js', () => {
             expect(visInfo.visibleTop).toBe(100); // Clamped to container top
         });
     });
+
+    describe('typing detection and Spacebar handling', () => {
+        let video;
+
+        beforeEach(() => {
+            document.body.innerHTML = '';
+            Object.defineProperty(document, 'fullscreenElement', {
+                value: null,
+                writable: true,
+                configurable: true
+            });
+
+            chrome.storage.local.get.mockImplementation((keys, cb) => {
+                cb({
+                    [VSC.VSC_STORAGE_KEYS.IS_ENABLED]: true,
+                    [VSC.VSC_STORAGE_KEYS.VISIBLE]: true,
+                    [VSC.VSC_STORAGE_KEYS.GLOBAL_MASTER_SWITCH]: true,
+                    [VSC.VSC_STORAGE_KEYS.OPTIONS]: { ...VSC.DEFAULT_VSC_OPTIONS }
+                });
+            });
+
+            VSC.checkBlacklistAndInit();
+
+            video = document.createElement('video');
+            video.getBoundingClientRect = () => ({
+                top: 50, bottom: 250, left: 50, right: 350, width: 300, height: 200
+            });
+            video.play = jest.fn(() => {
+                Object.defineProperty(video, 'paused', { value: false, configurable: true });
+                return Promise.resolve();
+            });
+            video.pause = jest.fn(() => {
+                Object.defineProperty(video, 'paused', { value: true, configurable: true });
+            });
+            Object.defineProperty(video, 'paused', { value: true, configurable: true });
+
+            document.body.appendChild(video);
+            video.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        });
+
+        it('detects typing in standard inputs, contenteditable children, ARIA textboxes, and Shadow DOM inputs', () => {
+            // 1. Child span inside contenteditable (e.g. X Draft.js composer)
+            const editor = document.createElement('div');
+            editor.setAttribute('contenteditable', 'true');
+            const span = document.createElement('span');
+            editor.appendChild(span);
+            document.body.appendChild(editor);
+
+            expect(VSC.isTypingOrEditing({ target: span })).toBe(true);
+
+            // 2. ARIA role="textbox" / "combobox"
+            const roleBox = document.createElement('div');
+            roleBox.setAttribute('role', 'textbox');
+            const inner = document.createElement('div');
+            roleBox.appendChild(inner);
+            document.body.appendChild(roleBox);
+
+            expect(VSC.isTypingOrEditing({ target: inner })).toBe(true);
+
+            // 3. Shadow DOM input where document.activeElement is the shadow host
+            const shadowHost = document.createElement('div');
+            const shadowRoot = shadowHost.attachShadow({ mode: 'open' });
+            const shadowInput = document.createElement('input');
+            shadowRoot.appendChild(shadowInput);
+            document.body.appendChild(shadowHost);
+
+            expect(VSC.isTypingOrEditing({
+                target: shadowHost,
+                composedPath: () => [shadowInput, shadowRoot, shadowHost, document.body, document]
+            })).toBe(true);
+        });
+
+        it('does NOT hijack Spacebar or toggle un-clicked videos on the page', () => {
+            // Video is visible on screen, but was never clicked into
+            const keydownEvent = new KeyboardEvent('keydown', {
+                code: 'Space',
+                key: ' ',
+                bubbles: true,
+                cancelable: true
+            });
+            const keyupEvent = new KeyboardEvent('keyup', {
+                code: 'Space',
+                key: ' ',
+                bubbles: true,
+                cancelable: true
+            });
+
+            document.dispatchEvent(keydownEvent);
+            document.dispatchEvent(keyupEvent);
+
+            expect(keydownEvent.defaultPrevented).toBe(false);
+            expect(keyupEvent.defaultPrevented).toBe(false);
+            expect(video.play).not.toHaveBeenCalled();
+            expect(video.pause).not.toHaveBeenCalled();
+        });
+
+        it('does NOT pause or start videos when pressing Spacebar while typing in an X composer or input', () => {
+            // Even if user previously clicked the video, clicking into a composer clears the target
+            video.dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                button: 0,
+                clientX: 100,
+                clientY: 100
+            }));
+            expect(VSC.getSpaceTargetVideo()).toBe(video);
+
+            const composer = document.createElement('div');
+            composer.setAttribute('role', 'textbox');
+            composer.setAttribute('contenteditable', 'true');
+            const textNodeWrapper = document.createElement('span');
+            composer.appendChild(textNodeWrapper);
+            document.body.appendChild(composer);
+
+            // Click into composer
+            textNodeWrapper.dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                button: 0,
+                clientX: 10,
+                clientY: 10
+            }));
+            expect(VSC.getSpaceTargetVideo()).toBeNull();
+
+            // Press Spacebar multiple times while typing words
+            for (let i = 0; i < 3; i++) {
+                const kd = new KeyboardEvent('keydown', {
+                    code: 'Space',
+                    key: ' ',
+                    bubbles: true,
+                    cancelable: true
+                });
+                const ku = new KeyboardEvent('keyup', {
+                    code: 'Space',
+                    key: ' ',
+                    bubbles: true,
+                    cancelable: true
+                });
+                textNodeWrapper.dispatchEvent(kd);
+                textNodeWrapper.dispatchEvent(ku);
+
+                expect(kd.defaultPrevented).toBe(false);
+                expect(ku.defaultPrevented).toBe(false);
+            }
+
+            expect(video.play).not.toHaveBeenCalled();
+            expect(video.pause).not.toHaveBeenCalled();
+        });
+
+        it('allows Spacebar to toggle play/pause ONLY after the video is explicitly clicked into, and stops after clicking outside', () => {
+            // Click into the video
+            video.dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                button: 0,
+                clientX: 100,
+                clientY: 100
+            }));
+            video.dispatchEvent(new MouseEvent('mouseup', {
+                bubbles: true,
+                cancelable: true,
+                button: 0,
+                clientX: 100,
+                clientY: 100
+            }));
+
+            expect(VSC.getSpaceTargetVideo()).toBe(video);
+
+            // Tap Space -> plays the clicked video
+            const kd1 = new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true, cancelable: true });
+            const ku1 = new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true, cancelable: true });
+            document.dispatchEvent(kd1);
+            document.dispatchEvent(ku1);
+
+            expect(kd1.defaultPrevented).toBe(true);
+            expect(video.play).toHaveBeenCalledTimes(1);
+
+            // Tap Space again -> pauses the clicked video
+            const kd2 = new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true, cancelable: true });
+            const ku2 = new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true, cancelable: true });
+            document.dispatchEvent(kd2);
+            document.dispatchEvent(ku2);
+
+            expect(video.pause).toHaveBeenCalledTimes(1);
+
+            // Click outside the video on the page background
+            document.body.dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                button: 0,
+                clientX: 500,
+                clientY: 500
+            }));
+
+            expect(VSC.getSpaceTargetVideo()).toBeNull();
+
+            // Tap Space now -> should NOT affect the video
+            const kd3 = new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true, cancelable: true });
+            const ku3 = new KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true, cancelable: true });
+            document.dispatchEvent(kd3);
+            document.dispatchEvent(ku3);
+
+            expect(kd3.defaultPrevented).toBe(false);
+            expect(video.play).toHaveBeenCalledTimes(1);
+            expect(video.pause).toHaveBeenCalledTimes(1);
+        });
+    });
 });
 

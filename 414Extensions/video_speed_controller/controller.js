@@ -230,6 +230,8 @@ function deinit() {
     // Remove UI from all videos
     activeHosts.forEach(el => el.remove());
     activeHosts.clear();
+    activeClickedVideo = null;
+    spaceTargetVideo = null;
 
     // Clear Dataset attached flag so we can re-attach later
     attachedVideos.forEach(v => {
@@ -434,6 +436,7 @@ function attachController(video, initialSpeed) {
 
     // Create Host
     const host = document.createElement('div');
+    host._vscVideo = video;
     activeHosts.add(host);
     host.className = 'vsc-controller-host';
     host.style.position = 'fixed';
@@ -612,6 +615,8 @@ function attachController(video, initialSpeed) {
             host.remove();
             activeHosts.delete(host);
             attachedVideos.delete(video);
+            if (activeClickedVideo === video) activeClickedVideo = null;
+            if (spaceTargetVideo === video) spaceTargetVideo = null;
             delete video.dataset.vscAttached;
             videoTargetSpeeds.delete(video);
             videoAnchors.delete(video);
@@ -741,11 +746,137 @@ let overrideTriggeredByKey = false;
 let shouldSuppressClick = false;
 let spaceKeyPending = false;
 let spaceTimer = null;
+let activeClickedVideo = null;
+let spaceTargetVideo = null;
+
+function isElementEditable(el) {
+    if (!el || typeof el !== 'object') return false;
+    if (el.nodeType && el.nodeType !== 1) return false;
+
+    const tagName = el.tagName ? el.tagName.toUpperCase() : '';
+    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') {
+        return true;
+    }
+
+    if (el.isContentEditable === true) {
+        return true;
+    }
+
+    if (typeof el.getAttribute === 'function') {
+        const ce = el.getAttribute('contenteditable');
+        if (ce === '' || ce === 'true' || ce === 'plaintext-only') {
+            return true;
+        }
+        const role = (el.getAttribute('role') || '').toLowerCase();
+        if (role === 'textbox' || role === 'searchbox' || role === 'combobox') {
+            return true;
+        }
+    }
+
+    if (typeof el.closest === 'function') {
+        const editableAncestor = el.closest(
+            'input, textarea, select, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"], [role="textbox"], [role="searchbox"], [role="combobox"]'
+        );
+        if (editableAncestor) return true;
+    }
+
+    return false;
+}
+
+function isTypingOrEditing(e) {
+    if (e && (e.isComposing || e.ctrlKey || e.altKey || e.metaKey)) {
+        return true;
+    }
+
+    if (e && isElementEditable(e.target)) {
+        return true;
+    }
+
+    if (e && typeof e.composedPath === 'function') {
+        const path = e.composedPath();
+        for (const node of path) {
+            if (isElementEditable(node)) return true;
+        }
+    }
+
+    let active = document.activeElement;
+    while (active) {
+        if (isElementEditable(active)) return true;
+        if (active.shadowRoot && active.shadowRoot.activeElement && active.shadowRoot.activeElement !== active) {
+            active = active.shadowRoot.activeElement;
+        } else {
+            break;
+        }
+    }
+
+    return false;
+}
+
+function isInteractiveControlFocused(e) {
+    const el = (e && e.target && e.target.nodeType === 1) ? e.target : document.activeElement;
+    if (!el || typeof el.closest !== 'function') return false;
+    const interactive = el.closest(
+        'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [role="radio"], [role="tab"]'
+    );
+    if (!interactive) return false;
+    const rect = typeof interactive.getBoundingClientRect === 'function' ? interactive.getBoundingClientRect() : { width: 0, height: 0 };
+    if (rect.width > 300 && rect.height > 300) return false; // Large video surface overlay
+    return true;
+}
+
+function getSpaceTargetVideo() {
+    const videos = Array.from(attachedVideos);
+
+    // 1. Priority: Fullscreen Video
+    const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsElement) {
+        if (fsElement.nodeName === 'VIDEO' || (currentConfig.options.audio && fsElement.nodeName === 'AUDIO')) {
+            return fsElement;
+        }
+        const fsVideo = videos.find(v => fsElement.contains(v));
+        if (fsVideo) return fsVideo;
+    }
+
+    // 2. Explicitly clicked video (must still be connected and visible)
+    if (activeClickedVideo && activeClickedVideo.isConnected && attachedVideos.has(activeClickedVideo)) {
+        if (activeClickedVideo.nodeName === 'AUDIO' || isVideoVisibleOnScreen(activeClickedVideo)) {
+            return activeClickedVideo;
+        }
+    }
+
+    return null;
+}
 
 document.addEventListener('mousedown', (e) => {
-    if (isGloballyDisabled) return;
+    if (isGloballyDisabled || !isInitialized) return;
 
-    // 1. Basic Filters: Ignore clicks on interactive elements, controls, or our own UI
+    // 0. Track whether the user clicked into a video or clicked elsewhere (e.g. text input or page background)
+    if (isTypingOrEditing(e)) {
+        activeClickedVideo = null;
+        return;
+    }
+
+    const hostEl = (e.target && typeof e.target.closest === 'function') ? e.target.closest('.vsc-controller-host') : null;
+    if (hostEl) {
+        if (hostEl._vscVideo) activeClickedVideo = hostEl._vscVideo;
+        return;
+    }
+
+    const videos = Array.from(attachedVideos);
+    const targetVideo = videos.find(video => {
+        if (!video || !video.isConnected) return false;
+        if (e.target === video) return true;
+        const rect = video.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        return (
+            e.clientX >= rect.left && e.clientX <= rect.right &&
+            e.clientY >= rect.top && e.clientY <= rect.bottom
+        );
+    });
+
+    activeClickedVideo = targetVideo || null;
+
+    // 1. Basic Filters for Hold-to-Override: Ignore non-left clicks, interactive controls, or links
     if (e.button !== 0) return;
 
     const excludedRoles = ['button', 'slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
@@ -756,7 +887,6 @@ document.addEventListener('mousedown', (e) => {
         e.target.tagName === 'INPUT' ||
         e.target.closest('a') ||
         e.target.closest(roleSelector) ||
-        e.target.closest('.vsc-controller-host') ||
         e.target.closest('[aria-label="Volume slider"]')
     ) {
         // Size-based exclusion
@@ -773,18 +903,6 @@ document.addEventListener('mousedown', (e) => {
              return; // Other excluded type
         }
     }
-
-    // 2. Find Video
-    const videos = Array.from(attachedVideos);
-
-    const targetVideo = videos.find(video => {
-        if (e.target === video) return true;
-        const rect = video.getBoundingClientRect();
-        return (
-            e.clientX >= rect.left && e.clientX <= rect.right &&
-            e.clientY >= rect.top && e.clientY <= rect.bottom
-        );
-    });
 
     if (targetVideo) {
         // Delay activation to distinguish click vs hold
@@ -862,65 +980,50 @@ document.addEventListener('click', (e) => {
 }, true);
 
 document.addEventListener('keydown', (e) => {
-    if (isGloballyDisabled) return;
+    if (isGloballyDisabled || !isInitialized) return;
 
     // Space bar check
     if (e.code === 'Space') {
-        if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
+        if (isTypingOrEditing(e) || isInteractiveControlFocused(e)) {
+            if (spaceKeyPending) {
+                clearTimeout(spaceTimer);
+                spaceKeyPending = false;
+                spaceTargetVideo = null;
+            }
+            return;
+        }
 
-        // HIJACK: Stop site from seeing Space
+        const target = spaceTargetVideo || getSpaceTargetVideo();
+        if (!target) return;
+
+        // HIJACK: Stop site from seeing Space only when controlling an explicitly clicked or fullscreen video
         e.stopImmediatePropagation();
         e.preventDefault();
 
         // If already overriding, ignore active holds (but handle repeats if we were pending)
         if (overrideTriggeredByKey) return;
 
-        const videos = Array.from(attachedVideos);
-
-        // Helper to find target
-        const getTarget = () => {
-             // 1. Priority: Fullscreen Video
-             const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
-             if (fsElement) {
-                 if (fsElement.nodeName === 'VIDEO' || (currentConfig.options.audio && fsElement.nodeName === 'AUDIO')) {
-                     return fsElement;
-                 }
-                 const fsVideo = videos.find(v => fsElement.contains(v));
-                 if (fsVideo) return fsVideo;
-             }
-
-             // 2. Priority: Playing Video
-             let t = videos.find(v => !v.paused);
-             if (t) return t;
-
-             // 3. Priority: Visible Video
-             return videos.find(v => isVideoVisibleOnScreen(v));
-        };
-
         // If we are pending (waiting to decide Tap vs Hold) and getting repeats, confirm Hold now
         if (spaceKeyPending && e.repeat) {
              clearTimeout(spaceTimer);
              spaceKeyPending = false;
              overrideTriggeredByKey = true;
-             const target = getTarget();
-             if (target) {
-                 target.play().catch(()=>{}); // Force play
-                 triggerOverride(target, true);
-             }
+             target.play().catch(()=>{}); // Force play
+             triggerOverride(target, true);
              return;
         }
 
         // New Press
         if (!spaceKeyPending) {
             spaceKeyPending = true;
+            spaceTargetVideo = target;
             // 200ms threshold for Space (quicker than mouse)
             spaceTimer = setTimeout(() => {
                 spaceKeyPending = false;
                 overrideTriggeredByKey = true;
-                const target = getTarget();
-                if (target) {
-                    target.play().catch(()=>{});
-                    triggerOverride(target, true);
+                if (spaceTargetVideo) {
+                    spaceTargetVideo.play().catch(()=>{});
+                    triggerOverride(spaceTargetVideo, true);
                 }
             }, 200);
         }
@@ -928,31 +1031,44 @@ document.addEventListener('keydown', (e) => {
 }, true); // Capture
 
 document.addEventListener('keyup', (e) => {
-    if (isGloballyDisabled) return;
+    if (isGloballyDisabled || !isInitialized) return;
 
     if (e.code === 'Space') {
-         if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
+         if (isTypingOrEditing(e)) {
+             if (spaceKeyPending) {
+                 clearTimeout(spaceTimer);
+                 spaceKeyPending = false;
+             }
+             if (overrideTriggeredByKey) {
+                 overrideTriggeredByKey = false;
+                 const videos = Array.from(attachedVideos);
+                 videos.forEach(v => triggerOverride(v, false));
+             }
+             spaceTargetVideo = null;
+             return;
+         }
 
-         // Always stop prop for Space if we are managing it
+         if (!spaceKeyPending && !overrideTriggeredByKey) return;
+
+         // Stop propagation for Space only when we managed the press
          e.stopImmediatePropagation();
          e.preventDefault();
+
+         const target = spaceTargetVideo || getSpaceTargetVideo();
+         spaceTargetVideo = null;
 
          if (spaceKeyPending) {
              // Released before timer -> TAP
              clearTimeout(spaceTimer);
              spaceKeyPending = false;
 
-             // Toggle Play/Pause Manually
-             const selector = currentConfig.options.audio ? 'video, audio' : 'video';
-             const videos = Array.from(document.querySelectorAll(selector));
-             // Toggle specific target or all? Usually site toggles active one.
-             // Best guess: Find playing -> pause. Else find first visible -> play.
-             const playing = videos.find(v => !v.paused);
-             if (playing) {
-                 playing.pause();
-             } else {
-                 const visible = videos.find(v => isVideoVisibleOnScreen(v));
-                 if (visible) visible.play().catch(()=>{});
+             // Toggle Play/Pause only on the target video that was clicked into (or fullscreen)
+             if (target) {
+                 if (!target.paused) {
+                     target.pause();
+                 } else {
+                     target.play().catch(()=>{});
+                 }
              }
          }
          else if (overrideTriggeredByKey) {
@@ -1025,7 +1141,7 @@ function updateSpeed(video, diff, reset = false, targetValue = null) {
 // SHORTCUTS (Configurable)
 // -----------------------------------------------------------------------------
 function handleKeyDown(e) {
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) {
+    if (isTypingOrEditing(e)) {
         return;
     }
     
@@ -1105,7 +1221,9 @@ if (typeof window !== 'undefined') {
         checkBlacklistAndInit,
         getElementVisibilityInfo,
         isElementVisibleOnScreen,
-        isVideoVisibleOnScreen
+        isVideoVisibleOnScreen,
+        isTypingOrEditing,
+        getSpaceTargetVideo
     };
 }
 
