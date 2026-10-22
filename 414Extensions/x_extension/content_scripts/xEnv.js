@@ -497,18 +497,10 @@
     // we still run a loose observer to catch them, but the prototype hijack covers most JS interactions.
     // X.com relies heavily on JS, so this should suffice.
     
-    // We also hijack setAttribute just in case
-    const originalSetAttribute = Element.prototype.setAttribute;
-    Element.prototype.setAttribute = function(name, value) {
-        if (this.tagName === 'VIDEO' && name === 'muted') {
-            // Setting 'muted' attribute -> Muted=true.
-            // Removing it -> Muted=false.
-            // HTML attributes are reflected in property, but let's just let the property hijack handle the reflection if possible.
-            // However, setAttribute('muted', '') forces muted=true. strict.
-            // X might use removeAttribute('muted') to unmute.
-        }
-        return originalSetAttribute.apply(this, arguments);
-    };
+    // NOTE: We intentionally do not wrap Element.prototype.setAttribute because
+    // setting 'muted' is already allowed, and wrapping setAttribute in the MAIN
+    // world causes X.com's own inline-event feature detection (e.g. setAttribute('onload', ...))
+    // to trigger CSP violations with xEnv.js in the stack trace.
     
     // NOTE: removeAttribute detection
     const originalRemoveAttribute = Element.prototype.removeAttribute;

@@ -13,12 +13,14 @@ const __dirname = path.dirname(__filename);
 describe('xEnv.js', () => {
     let originalMutedDescriptor;
     let originalVolumeDescriptor;
+    let originalSetAttribute;
     let XEnv;
 
     beforeAll(() => {
         // We need to capture the descriptors BEFORE they are hijacked by the script
         originalMutedDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
         originalVolumeDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume');
+        originalSetAttribute = Element.prototype.setAttribute;
 
         const scriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xEnv.js');
         const scriptContent = fs.readFileSync(scriptPath, 'utf8');
@@ -38,6 +40,10 @@ describe('xEnv.js', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+    });
+
+    it('should not hijack Element.prototype.setAttribute (avoids CSP attribution errors)', () => {
+        expect(Element.prototype.setAttribute).toBe(originalSetAttribute);
     });
 
     it('should hijack HTMLMediaElement.prototype.muted', () => {
