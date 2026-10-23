@@ -178,4 +178,18 @@ describe('popup.js', () => {
         expect(chipsContainer.textContent).toContain('East Asia');
         expect(searchInput.value).toBe('');
     });
+
+    test('should toggle Hide Promoted Ads (xHideAdsToggle) and persist isXHideAdsEnabled', () => {
+        const hideAdsToggle = document.getElementById('xHideAdsToggle');
+        expect(hideAdsToggle).not.toBeNull();
+        expect(hideAdsToggle.checked).toBe(true);
+
+        hideAdsToggle.checked = false;
+        hideAdsToggle.dispatchEvent(new Event('change'));
+        expect(mockStorageData.isXHideAdsEnabled).toBe(false);
+
+        hideAdsToggle.checked = true;
+        hideAdsToggle.dispatchEvent(new Event('change'));
+        expect(mockStorageData.isXHideAdsEnabled).toBe(true);
+    });
 });

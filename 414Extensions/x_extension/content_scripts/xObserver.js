@@ -702,6 +702,73 @@
         });
     }
 
+    function checkIsAdTweet(article) {
+        if (!article) return false;
+        if (window.XLocationUI && typeof window.XLocationUI.isAdTweet === 'function') {
+            return window.XLocationUI.isAdTweet(article);
+        }
+        if (!article.querySelectorAll) return false;
+        const caretBtns = article.querySelectorAll('[data-testid="caret"]');
+        for (const caretBtn of caretBtns) {
+            const roleLink = caretBtn.closest ? caretBtn.closest('[role="link"]') : null;
+            if (roleLink && article.contains(roleLink) && roleLink !== article) continue;
+            let curr = caretBtn.parentElement;
+            let cluster = null;
+            let depth = 0;
+            while (curr && curr !== article && depth < 6) {
+                if (curr.querySelector && curr.querySelector('[data-testid="User-Name"], [data-testid="UserName"], [data-testid="tweetText"]')) {
+                    break;
+                }
+                cluster = curr;
+                curr = curr.parentElement;
+                depth++;
+            }
+            const searchRoot = cluster || caretBtn.parentElement;
+            if (searchRoot && searchRoot.querySelectorAll) {
+                const spans = searchRoot.querySelectorAll('span');
+                for (const span of spans) {
+                    if (span.closest && span.closest('button, a, time, [data-testid="User-Name"], [data-testid="UserName"], [data-testid="tweetText"], .x-location-inline-badge')) {
+                        continue;
+                    }
+                    const txt = (span.textContent || '').trim();
+                    if (txt === 'Ad' || txt === 'Promoted') return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    function applyAdStealthState(article, shouldHide) {
+        if (!article) return false;
+        const isAd = checkIsAdTweet(article);
+        if (isAd && shouldHide) {
+            if (window.XLocationUI && typeof window.XLocationUI.collapseAdTweet === 'function') {
+                window.XLocationUI.collapseAdTweet(article);
+            } else {
+                article.style.setProperty('max-height', '0px', 'important');
+                article.style.setProperty('min-height', '0px', 'important');
+                article.style.setProperty('height', '0px', 'important');
+                article.style.setProperty('overflow', 'hidden', 'important');
+                article.style.setProperty('opacity', '0', 'important');
+                article.style.setProperty('pointer-events', 'none', 'important');
+                article._xAdCollapsed = true;
+            }
+            return true;
+        }
+        if (window.XLocationUI && typeof window.XLocationUI.restoreAdTweet === 'function') {
+            window.XLocationUI.restoreAdTweet(article);
+        } else if (article._xAdCollapsed) {
+            article.style.removeProperty('max-height');
+            article.style.removeProperty('min-height');
+            article.style.removeProperty('height');
+            article.style.removeProperty('overflow');
+            article.style.removeProperty('opacity');
+            article.style.removeProperty('pointer-events');
+            article._xAdCollapsed = false;
+        }
+        return isAd;
+    }
+
     function scanTweetsForFriendsSync(forceRecheck = false) {
         if (!isFriendsSyncActive || !isContextValid()) return;
 
@@ -718,6 +785,7 @@
         const tweetMap = new Map(); // tweetId -> Array<{ article, headerElem, screenName }>
 
         articles.forEach(article => {
+            if (article._xAdCollapsed || checkIsAdTweet(article)) return;
             const tweetId = extractTweetIdFromArticle(article);
             if (!tweetId) return;
             article.dataset.xTweetId = tweetId;
@@ -1026,6 +1094,7 @@
         try {
             chrome.storage.local.get([
                 'isXLocationEnabled',
+                'isXHideAdsEnabled',
                 'isXModuleEnabled',
                 'isGlobalMasterSwitchEnabled',
                 'blockedCountries',
@@ -1033,13 +1102,19 @@
                 'blockedNameFlags'
             ], (settings) => {
                 if (safeHasError() || !settings) return;
-                const isEnabled = settings.isGlobalMasterSwitchEnabled !== false &&
-                    settings.isXModuleEnabled !== false &&
-                    settings.isXLocationEnabled !== false;
+                const isModuleActive = settings.isGlobalMasterSwitchEnabled !== false &&
+                    settings.isXModuleEnabled !== false;
+                const isLocationEnabled = isModuleActive && settings.isXLocationEnabled !== false;
+                const shouldHideAds = isModuleActive && settings.isXHideAdsEnabled !== false;
+
+                const articles = document.querySelectorAll('article[data-testid="tweet"]');
+                articles.forEach(article => {
+                    applyAdStealthState(article, shouldHideAds);
+                });
 
                 const targets = document.querySelectorAll('article[data-testid="tweet"], [data-x-filter-target="true"]');
                 targets.forEach(target => {
-                    if (!isEnabled) {
+                    if (!isLocationEnabled) {
                         if (window.XLocationUI && typeof window.XLocationUI.unfilterTweet === 'function') {
                             window.XLocationUI.unfilterTweet(target);
                         } else {
@@ -1047,6 +1122,7 @@
                         }
                         return;
                     }
+                    if (target._xAdCollapsed) return;
                     if (target._xPrimaryLocationData || target._xHeaderElem) {
                         applyTweetFilterForElement(target, target._xPrimaryLocationData, settings, target._xHeaderElem);
                     }
@@ -1070,6 +1146,7 @@
             try {
                 chrome.storage.local.get([
                     'isXLocationEnabled',
+                    'isXHideAdsEnabled',
                     'isXFriendsSyncEnabled',
                     'isXModuleEnabled',
                     'isGlobalMasterSwitchEnabled',
@@ -1080,8 +1157,16 @@
                     if (safeHasError() || !settings) return;
                     if (settings.isGlobalMasterSwitchEnabled === false || settings.isXModuleEnabled === false) {
                         isFriendsSyncActive = false;
+                        document.querySelectorAll('article[data-testid="tweet"]').forEach(article => {
+                            applyAdStealthState(article, false);
+                        });
                         return;
                     }
+
+                    const shouldHideAds = settings.isXHideAdsEnabled !== false;
+                    document.querySelectorAll('article[data-testid="tweet"]').forEach(article => {
+                        applyAdStealthState(article, shouldHideAds);
+                    });
 
                     isFriendsSyncActive = settings.isXFriendsSyncEnabled !== false;
                     if (isFriendsSyncActive) {
@@ -1095,6 +1180,11 @@
                     const userNames = document.querySelectorAll('[data-testid="User-Name"], [data-testid="UserName"], [data-testid="UserCell"]');
                     userNames.forEach(elem => {
                         if (processedElements.has(elem) || !isContextValid()) return;
+
+                        const enclosingArticle = elem.closest ? elem.closest('article[data-testid="tweet"]') : null;
+                        if (enclosingArticle && (enclosingArticle._xAdCollapsed || (shouldHideAds && checkIsAdTweet(enclosingArticle)))) {
+                            return;
+                        }
                         
                         const screenName = extractScreenNameFromUserCell(elem);
                         if (!screenName) return;
@@ -1143,7 +1233,7 @@
         if (!isFriendsSyncActive || !isContextValid() || !e.target || !e.target.closest) return;
         if (e.target.closest('.x-force-friend-btn, .vsc-download-btn')) return;
         const article = e.target.closest('article[data-testid="tweet"]');
-        if (!article) return;
+        if (!article || article._xAdCollapsed || checkIsAdTweet(article)) return;
         const tweetId = article.dataset?.xTweetId || extractTweetIdFromArticle(article);
         if (tweetId) {
             recordTweetSeen(tweetId, article);
@@ -1186,10 +1276,14 @@
                     changes.blockedDeviceRegions ||
                     changes.blockedNameFlags ||
                     changes.isXLocationEnabled ||
+                    changes.isXHideAdsEnabled ||
                     changes.isXModuleEnabled ||
                     changes.isGlobalMasterSwitchEnabled
                 )) {
                     reevaluateAllTweets();
+                    if (changes.isXHideAdsEnabled || changes.isXModuleEnabled || changes.isGlobalMasterSwitchEnabled) {
+                        scanDOM();
+                    }
                 }
             });
         }

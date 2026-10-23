@@ -68,6 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (xAlwaysMuteToggle) xAlwaysMuteToggle.checked = result[X_ALWAYS_MUTE_KEY] !== false;
 
         const xLocationToggle = document.getElementById('xLocationToggle');
+        const xHideAdsToggle = document.getElementById('xHideAdsToggle');
         const xCachedCountDisplay = document.getElementById('xCachedCountDisplay');
         const xClearCacheBtn = document.getElementById('xClearCacheBtn');
 
@@ -77,6 +78,15 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             xLocationToggle.addEventListener('change', () => {
                 chrome.storage.local.set({ isXLocationEnabled: xLocationToggle.checked });
+            });
+        }
+
+        if (xHideAdsToggle) {
+            chrome.storage.local.get(['isXHideAdsEnabled'], (res) => {
+                xHideAdsToggle.checked = res.isXHideAdsEnabled !== false;
+            });
+            xHideAdsToggle.addEventListener('change', () => {
+                chrome.storage.local.set({ isXHideAdsEnabled: xHideAdsToggle.checked });
             });
         }
 

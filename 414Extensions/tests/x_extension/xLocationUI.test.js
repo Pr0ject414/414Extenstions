@@ -1627,4 +1627,132 @@ describe('xLocationUI.js', () => {
         expect(root.querySelector('article.x-friend-tweet-card[data-tweet-id="2113700000000000202"]')).not.toBeNull();
         expect(homeForcedContainer.querySelector('article.x-friend-tweet-card[data-tweet-id="2113700000000000202"]')).not.toBeNull();
     });
+
+    test('isAdTweet, collapseAdTweet, and xObserver should stealth-collapse promoted ads without display:none or DOM removal and skip location/seen API calls', () => {
+        jest.useFakeTimers();
+        delete window.XObserverInjected;
+
+        let hideAdsEnabled = true;
+        let storageChangedListener = null;
+        const sendMessageMock = jest.fn((msg, cb) => {
+            if (msg.action === 'X_FETCH_USER_INFO') {
+                cb({
+                    success: true,
+                    data: {
+                        screenName: msg.payload.screenName,
+                        location: 'United States',
+                        device: 'Web'
+                    }
+                });
+            } else if (msg.action === 'X_CHECK_TWEETS_SEEN') {
+                cb({ success: true, seenMap: {}, forcedMap: {}, myForcedIds: [] });
+            } else if (msg.action === 'X_GET_FRIENDS_TIMELINE') {
+                cb({ success: true, timelinePosts: [], unseenForcedPosts: [], connectedFriends: [] });
+            }
+        });
+
+        global.chrome = {
+            runtime: {
+                id: 'test-ext-id',
+                lastError: null,
+                onMessage: { addListener: jest.fn() },
+                sendMessage: sendMessageMock
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXHideAdsEnabled: hideAdsEnabled,
+                            isXFriendsSyncEnabled: true,
+                            blockedCountries: [],
+                            blockedDeviceRegions: [],
+                            blockedNameFlags: []
+                        });
+                    })
+                },
+                onChanged: {
+                    addListener: jest.fn((fn) => {
+                        storageChangedListener = fn;
+                    })
+                }
+            }
+        };
+
+        // 1. Build exact UnderArmour Ad HTML inside a virtualized cellInnerDiv
+        const cellInnerDiv = document.createElement('div');
+        cellInnerDiv.setAttribute('data-testid', 'cellInnerDiv');
+        const cellBorderWrapper = document.createElement('div');
+        cellBorderWrapper.className = 'css-g5y9jx r-qklmqi';
+        const adArticle = document.createElement('article');
+        adArticle.setAttribute('data-testid', 'tweet');
+        adArticle.innerHTML = `<div class="css-g5y9jx r-zl2h9q"><div class="css-g5y9jx r-k4xj1c r-18u37iz r-1wtj0ep"><div class="css-g5y9jx r-1d09ksm r-18u37iz r-1wbh5a2"><div class="css-g5y9jx r-1wbh5a2 r-dnmrzs r-1ny4l3l"><div class="css-g5y9jx r-1wbh5a2 r-dnmrzs r-1ny4l3l r-1awozwy r-18u37iz" id="id__aj14wjjkj1u" data-testid="User-Name"><div class="css-g5y9jx r-1awozwy r-18u37iz r-1wbh5a2 r-dnmrzs"><div class="css-g5y9jx r-1wbh5a2 r-dnmrzs"><a href="/UnderArmour" role="link" class="css-g5y9jx r-1wbh5a2 r-dnmrzs r-1ny4l3l r-1loqt21"><div class="css-g5y9jx r-1awozwy r-18u37iz r-1wbh5a2 r-dnmrzs"><div dir="ltr" class="css-146c3p1"><span class="css-1jxf684"><span class="css-1jxf684">Under Armour</span></span></div></div></a></div></div><div class="css-g5y9jx r-18u37iz r-1wbh5a2 r-1ez5h0i"><div class="css-g5y9jx r-1d09ksm r-18u37iz r-1wbh5a2"><div class="css-g5y9jx r-1wbh5a2 r-dnmrzs"><a href="/UnderArmour" role="link" tabindex="-1"><div dir="ltr" class="css-146c3p1"><span class="css-1jxf684">@UnderArmour</span></div></a></div></div></div></div></div></div><div class="css-g5y9jx r-1kkk96v"><div class="css-g5y9jx r-1awozwy r-18u37iz r-1cmwbt1 r-1wtj0ep"><div dir="ltr" class="css-146c3p1" style="color: rgb(113, 118, 123);"><span class="css-1jxf684">Ad</span></div><div class="css-g5y9jx r-1awozwy r-6koalj r-18u37iz"><div class="css-g5y9jx"><div class="css-g5y9jx r-18u37iz r-1h0z5md"><button aria-expanded="false" aria-haspopup="menu" aria-label="More" role="button" data-testid="caret" type="button"></button></div></div></div></div></div></div></div>`;
+        cellBorderWrapper.appendChild(adArticle);
+        cellInnerDiv.appendChild(cellBorderWrapper);
+        document.body.appendChild(cellInnerDiv);
+
+        // 2. Build a normal tweet where author name is "Ad" and text mentions "Ad" (must NOT false-positive)
+        const normalArticle = document.createElement('article');
+        normalArticle.setAttribute('data-testid', 'tweet');
+        normalArticle.innerHTML = `
+            <div class="header-row">
+                <div data-testid="User-Name">
+                    <span>Ad</span>
+                    <a href="/realuser">@realuser</a>
+                    <a href="/realuser/status/1900000000000000123"><time datetime="2026-10-22T12:00:00Z">2h</time></a>
+                </div>
+                <div class="caret-wrap">
+                    <button data-testid="caret" type="button"></button>
+                </div>
+            </div>
+            <div data-testid="tweetText"><span>Ad</span></div>
+        `;
+        document.body.appendChild(normalArticle);
+
+        expect(window.XLocationUI.isAdTweet(adArticle)).toBe(true);
+        expect(window.XLocationUI.isAdTweet(normalArticle)).toBe(false);
+
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(200);
+
+        // Ad article and its inner cell border wrapper are stealth-collapsed (without display:none or DOM removal)
+        expect(adArticle.isConnected).toBe(true);
+        expect(adArticle.style.display).not.toBe('none');
+        expect(adArticle.style.height).toBe('0px');
+        expect(adArticle.style.maxHeight).toBe('0px');
+        expect(adArticle.style.overflow).toBe('hidden');
+        expect(adArticle.style.opacity).toBe('0');
+        expect(adArticle.style.pointerEvents).toBe('none');
+        expect(cellBorderWrapper.style.height).toBe('0px');
+        expect(cellInnerDiv.style.height).toBe('');
+
+        // Should NOT have fetched location for @UnderArmour while ad is hidden, but SHOULD have fetched for @realuser
+        const fetchedHandles = sendMessageMock.mock.calls
+            .filter(([m]) => m.action === 'X_FETCH_USER_INFO')
+            .map(([m]) => m.payload.screenName);
+        expect(fetchedHandles).toContain('realuser');
+        expect(fetchedHandles).not.toContain('UnderArmour');
+
+        // Normal tweet remains untouched and visible
+        expect(normalArticle.style.height).toBe('');
+        expect(normalArticle.style.opacity).toBe('');
+
+        // 3. Toggle isXHideAdsEnabled OFF -> ad should restore cleanly and fetch location badge
+        hideAdsEnabled = false;
+        if (storageChangedListener) {
+            storageChangedListener({ isXHideAdsEnabled: { newValue: false } }, 'local');
+        }
+        jest.advanceTimersByTime(200);
+
+        expect(adArticle.style.height).toBe('');
+        expect(adArticle.style.opacity).toBe('');
+        expect(cellBorderWrapper.style.height).toBe('');
+
+        jest.useRealTimers();
+    });
 });

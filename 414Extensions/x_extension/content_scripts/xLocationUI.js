@@ -2563,6 +2563,139 @@
         tweet.classList.remove('x-tweet-blocked');
     }
 
+    const COLLAPSED_AD_PROPS = [
+        ['max-height', '0px'],
+        ['min-height', '0px'],
+        ['height', '0px'],
+        ['overflow', 'hidden'],
+        ['opacity', '0'],
+        ['pointer-events', 'none'],
+        ['margin', '0px'],
+        ['padding', '0px'],
+        ['border', 'none']
+    ];
+
+    function isAdTweet(elem) {
+        if (!elem || !elem.querySelectorAll) return false;
+        if (elem.classList && elem.classList.contains('x-friend-tweet-card')) return false;
+
+        // 1. Check top-right header cluster around [data-testid="caret"] for "Ad" / "Promoted"
+        const caretBtns = elem.querySelectorAll('[data-testid="caret"]');
+        for (const caretBtn of caretBtns) {
+            const roleLink = caretBtn.closest ? caretBtn.closest('[role="link"]') : null;
+            if (roleLink && elem.contains(roleLink) && roleLink !== elem) continue;
+
+            let curr = caretBtn.parentElement;
+            let cluster = null;
+            let depth = 0;
+            while (curr && curr !== elem && depth < 6) {
+                if (curr.querySelector && curr.querySelector('[data-testid="User-Name"], [data-testid="UserName"], [data-testid="tweetText"]')) {
+                    break;
+                }
+                cluster = curr;
+                curr = curr.parentElement;
+                depth++;
+            }
+
+            const searchRoot = cluster || caretBtn.parentElement;
+            if (searchRoot && searchRoot.querySelectorAll) {
+                const spans = searchRoot.querySelectorAll('span');
+                for (const span of spans) {
+                    if (span.closest && span.closest('button, a, time, [data-testid="User-Name"], [data-testid="UserName"], [data-testid="tweetText"], .x-location-inline-badge')) {
+                        continue;
+                    }
+                    const txt = (span.textContent || '').trim();
+                    if (txt === 'Ad' || txt === 'Promoted') {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // 2. Check socialContext or promotedIndicator badges outside quoted cards
+        const indicators = elem.querySelectorAll('[data-testid="socialContext"], [data-testid="promotedIndicator"]');
+        for (const ind of indicators) {
+            const roleLink = ind.closest ? ind.closest('[role="link"]') : null;
+            if (roleLink && elem.contains(roleLink) && roleLink !== elem) continue;
+            const txt = (ind.textContent || '').trim();
+            if (txt === 'Ad' || txt === 'Promoted' || /^Promoted(\s+by\b|$)/i.test(txt)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function applyStealthCollapseStyles(elem) {
+        if (!elem || !elem.style) return;
+        if (elem._xSavedInlineStyle === undefined) {
+            elem._xSavedInlineStyle = elem.getAttribute ? elem.getAttribute('style') : null;
+        }
+        for (const [prop, val] of COLLAPSED_AD_PROPS) {
+            elem.style.setProperty(prop, val, 'important');
+        }
+    }
+
+    function restoreStealthCollapseStyles(elem) {
+        if (!elem || !elem.style) return;
+        if (elem._xSavedInlineStyle !== undefined) {
+            if (elem._xSavedInlineStyle === null) {
+                if (elem.removeAttribute) elem.removeAttribute('style');
+            } else if (elem.setAttribute) {
+                elem.setAttribute('style', elem._xSavedInlineStyle);
+            }
+            delete elem._xSavedInlineStyle;
+        } else {
+            for (const [prop] of COLLAPSED_AD_PROPS) {
+                elem.style.removeProperty(prop);
+            }
+        }
+    }
+
+    function getCellWrapperForArticle(article) {
+        if (!article || !article.closest) return null;
+        const cellInner = article.closest('[data-testid="cellInnerDiv"]');
+        if (!cellInner) return null;
+        let curr = article;
+        while (curr.parentElement && curr.parentElement !== cellInner) {
+            curr = curr.parentElement;
+        }
+        return curr.parentElement === cellInner ? curr : null;
+    }
+
+    function collapseAdTweet(article) {
+        if (!article) return false;
+        const mediaNodes = article.querySelectorAll ? article.querySelectorAll('video, audio') : [];
+        mediaNodes.forEach(media => {
+            try {
+                if (typeof media.pause === 'function') media.pause();
+            } catch (e) {}
+        });
+
+        applyStealthCollapseStyles(article);
+        const cellWrapper = getCellWrapperForArticle(article);
+        if (cellWrapper && cellWrapper !== article) {
+            applyStealthCollapseStyles(cellWrapper);
+            article._xAdCellWrapper = cellWrapper;
+        }
+        article._xAdCollapsed = true;
+        return true;
+    }
+
+    function restoreAdTweet(article) {
+        if (!article) return false;
+        if (article._xAdCollapsed) {
+            restoreStealthCollapseStyles(article);
+            article._xAdCollapsed = false;
+        }
+        const cellWrapper = article._xAdCellWrapper || getCellWrapperForArticle(article);
+        if (cellWrapper && cellWrapper._xSavedInlineStyle !== undefined) {
+            restoreStealthCollapseStyles(cellWrapper);
+        }
+        delete article._xAdCellWrapper;
+        return true;
+    }
+
     window.XLocationUI = {
         renderInlineBadge,
         renderFriendSeenBadge,
@@ -2582,6 +2715,9 @@
         showHovercard,
         hideHovercard,
         filterTweet,
-        unfilterTweet
+        unfilterTweet,
+        isAdTweet,
+        collapseAdTweet,
+        restoreAdTweet
     };
 })();
