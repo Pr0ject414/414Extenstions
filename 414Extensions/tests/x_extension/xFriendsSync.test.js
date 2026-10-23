@@ -291,6 +291,16 @@ describe('XFriendsSyncManager', () => {
         expect(bobTimeline.unseenForcedPosts.length).toBe(1);
         expect(bobTimeline.unseenForcedPosts[0].tweetId).toBe('1850000000000000999');
 
+        // When Bob sees the forced post, it must NOT disappear from unseenForcedPosts or timelinePosts —
+        // it should remain in both with isSeenByMe: true until explicitly dismissed
+        await bobManager.markTweetsSeen(['1850000000000000999']);
+        const bobTimelineAfterSeen = bobManager.getFriendsTimelineData();
+        expect(bobTimelineAfterSeen.unseenForcedPosts.length).toBe(1);
+        expect(bobTimelineAfterSeen.unseenForcedPosts[0].tweetId).toBe('1850000000000000999');
+        expect(bobTimelineAfterSeen.unseenForcedPosts[0].isSeenByMe).toBe(true);
+        expect(bobTimelineAfterSeen.timelinePosts[0].tweetId).toBe('1850000000000000999');
+        expect(bobTimelineAfterSeen.timelinePosts[0].isSeenByMe).toBe(true);
+
         // Bob dismisses the forced post from his Home feed -> removed from unseenForcedPosts and marked seen
         await bobManager.dismissForcedTweet('1850000000000000999');
         const bobTimelineAfterDismiss = bobManager.getFriendsTimelineData();

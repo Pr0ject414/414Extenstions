@@ -24,7 +24,9 @@ export class XFriendsSyncManager {
         this.fetchFn = options.fetchFn || ((...args) => globalThis.fetch(...args));
         this.isLoaded = false;
         this.isSyncing = false;
+        this.pendingSyncRequested = false;
         this.lastSyncTime = null;
+        this.lastPublishedCreatedAtSec = 0;
         this.flushTimeout = null;
         this.inflightHydrations = new Map();
 
@@ -135,6 +137,21 @@ export class XFriendsSyncManager {
         const existing = this.state.postMetaMap[id] || {};
 
         if (rawMeta.isUnavailable) {
+            const hasExistingContent = Boolean(
+                existing.screenName ||
+                existing.text ||
+                (Array.isArray(existing.media) && existing.media.length > 0) ||
+                existing.quotedTweet ||
+                existing.parentTweet
+            );
+            if (hasExistingContent) {
+                return {
+                    ...existing,
+                    isHydrated: true,
+                    hydrationVersion: 4,
+                    updatedAt: rawMeta.updatedAt || existing.updatedAt || Date.now()
+                };
+            }
             return {
                 id,
                 isUnavailable: true,
@@ -892,6 +909,7 @@ export class XFriendsSyncManager {
         this.state.hasUnpublishedSeen = true;
         this.pruneMySeenIds();
         await this.saveState();
+        this.broadcastSeenUpdateToTabs();
 
         if (this.flushTimeout) {
             clearTimeout(this.flushTimeout);
@@ -916,6 +934,7 @@ export class XFriendsSyncManager {
             delete this.state.myForcedMap[id];
             this.state.hasUnpublishedSeen = true;
             await this.saveState();
+            this.broadcastSeenUpdateToTabs();
 
             if (this.flushTimeout) {
                 clearTimeout(this.flushTimeout);
@@ -1009,18 +1028,18 @@ export class XFriendsSyncManager {
 
         for (const tweetId of allIds) {
             const meta = this.state.postMetaMap[tweetId] || null;
-            if (meta && meta.isUnavailable) {
-                continue;
-            }
             const seenBy = this.tweetToFriendsMap.get(tweetId) || [];
             const forcedEntries = this.tweetToForcedByMap.get(tweetId) || [];
             const forcedBy = forcedEntries.map(e => e.label);
             const myForcedObj = this.state.myForcedMap ? this.state.myForcedMap[tweetId] : null;
             const forcedByMe = Boolean(myForcedObj);
+            const isForced = forcedBy.length > 0 || forcedByMe;
+            if (meta && meta.isUnavailable && !isForced) {
+                continue;
+            }
             const myForcedAt = myForcedObj?.forcedAt || 0;
             const friendForcedAt = forcedEntries.reduce((max, e) => Math.max(max, e.forcedAt || 0), 0);
             const latestForcedAt = Math.max(myForcedAt, friendForcedAt);
-            const isForced = forcedBy.length > 0 || forcedByMe;
             const isSeenByMe = this.mySeenSet.has(tweetId);
             const isDismissed = this.dismissedForcedSet.has(tweetId);
             const snowflakeTimeMs = this.getSnowflakeTimestampMs(tweetId);
@@ -1042,7 +1061,7 @@ export class XFriendsSyncManager {
 
             timelinePosts.push(postItem);
 
-            if (forcedBy.length > 0 && !isSeenByMe && !isDismissed) {
+            if (forcedBy.length > 0 && !isDismissed) {
                 unseenForcedPosts.push(postItem);
             }
         }
@@ -1201,9 +1220,12 @@ export class XFriendsSyncManager {
         };
 
         const encryptedContent = await encryptJson(payload, id.seenFeedKeyHex);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const createdAt = Math.max(nowSec, (this.lastPublishedCreatedAtSec || 0) + 1);
+        this.lastPublishedCreatedAtSec = createdAt;
         return signEvent({
             kind: FRIEND_SYNC_CONFIG.NOSTR_KIND_APP_DATA,
-            created_at: Math.floor(Date.now() / 1000),
+            created_at: createdAt,
             tags: [
                 ['d', '414x-seen-v1']
             ],
@@ -1225,9 +1247,14 @@ export class XFriendsSyncManager {
     async syncWithRelays() {
         await this.init();
         const id = this.state.identity;
-        if (!id || this.isSyncing) return this.getPublicState();
+        if (!id) return this.getPublicState();
+        if (this.isSyncing) {
+            this.pendingSyncRequested = true;
+            return this.getPublicState();
+        }
 
         this.isSyncing = true;
+        this.pendingSyncRequested = false;
         try {
             if (this.flushTimeout) {
                 clearTimeout(this.flushTimeout);
@@ -1468,6 +1495,11 @@ export class XFriendsSyncManager {
             console.warn('X Friends Sync: Relay sync error', err);
         } finally {
             this.isSyncing = false;
+        }
+
+        if (this.pendingSyncRequested) {
+            this.pendingSyncRequested = false;
+            return this.syncWithRelays();
         }
 
         return this.getPublicState();

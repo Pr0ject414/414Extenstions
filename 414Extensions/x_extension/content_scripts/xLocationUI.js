@@ -737,6 +737,9 @@
         if (!video || !video.isConnected) {
             return { ratio: 0, centerDist: Infinity };
         }
+        if (video.closest && video.closest('.x-native-feed-hidden')) {
+            return { ratio: 0, centerDist: Infinity };
+        }
         const inFriendsRoot = video.closest && video.closest('#x-friends-timeline-root');
         if (inFriendsRoot && !isFriendsTabActive) {
             return { ratio: 0, centerDist: Infinity };
@@ -1559,7 +1562,8 @@
             const cards = document.querySelectorAll(`article.x-friend-tweet-card[data-tweet-id="${tweetId}"]`);
             cards.forEach(oldCard => {
                 if (meta.isUnavailable) {
-                    if (oldCard.parentNode) {
+                    const isForced = oldCard.classList.contains('is-forced-card') || Boolean(oldCard._xPostItem?.isForced);
+                    if (!isForced && oldCard.parentNode) {
                         oldCard.parentNode.removeChild(oldCard);
                     }
                     return;
@@ -1616,6 +1620,103 @@
         updateUnseenFilterPillCountInDOM();
     }
 
+    function isForcedCard(cardEl) {
+        if (!cardEl) return false;
+        if (cardEl.classList && cardEl.classList.contains('is-forced-card')) return true;
+        if (cardEl.closest && cardEl.closest('#x-forced-home-feed')) return true;
+        const item = cardEl._xPostItem;
+        if (item && (item.isForced || item.forcedByMe || (Array.isArray(item.forcedBy) && item.forcedBy.length > 0))) {
+            return true;
+        }
+        return false;
+    }
+
+    function syncCardStateInDOM(card, postItem, callbacks = {}) {
+        if (!card || !postItem) return;
+        const prevItem = card._xPostItem || {};
+        const wasSeen = Boolean(postItem.isSeenByMe || prevItem.isSeenByMe || card.classList.contains('is-seen-by-me'));
+        postItem.isSeenByMe = wasSeen;
+
+        card._xPostItem = postItem;
+        card._xCallbacks = callbacks;
+
+        const forcedBy = Array.isArray(postItem.forcedBy) ? postItem.forcedBy : [];
+        const forcedByMe = Boolean(postItem.forcedByMe);
+        const seenBy = Array.isArray(postItem.seenBy) ? postItem.seenBy : [];
+        const isForced = Boolean(postItem.isForced || forcedBy.length > 0 || forcedByMe);
+
+        card.classList.toggle('is-forced-card', isForced);
+        card.classList.toggle('is-seen-by-me', wasSeen);
+
+        const badgesRow = card.querySelector('.x-friend-card-badges');
+        if (badgesRow) {
+            const mySeenPill = badgesRow.querySelector('[data-testid="x-card-my-seen"]');
+            const dismissBtn = badgesRow.querySelector('.x-forced-dismiss-btn');
+
+            let forcedBadge = badgesRow.querySelector('.x-card-badge-forced');
+            if (forcedBy.length > 0) {
+                const text = `⚡ Forced by ${forcedBy.join(', ')}`;
+                if (!forcedBadge) {
+                    forcedBadge = document.createElement('span');
+                    forcedBadge.className = 'x-card-badge x-card-badge-forced';
+                    badgesRow.insertBefore(forcedBadge, badgesRow.firstChild);
+                }
+                if (forcedBadge.textContent !== text) {
+                    forcedBadge.textContent = text;
+                }
+            } else if (forcedBadge && forcedBadge.parentNode) {
+                forcedBadge.parentNode.removeChild(forcedBadge);
+            }
+
+            let myForcedBadge = badgesRow.querySelector('.x-card-badge-forced-me');
+            if (forcedByMe) {
+                const text = '⚡ Forced by You';
+                if (!myForcedBadge) {
+                    myForcedBadge = document.createElement('span');
+                    myForcedBadge.className = 'x-card-badge x-card-badge-forced-me';
+                    const refNode = badgesRow.querySelector('.x-card-badge-seen') || mySeenPill || dismissBtn || null;
+                    badgesRow.insertBefore(myForcedBadge, refNode);
+                }
+                if (myForcedBadge.textContent !== text) {
+                    myForcedBadge.textContent = text;
+                }
+            } else if (myForcedBadge && myForcedBadge.parentNode) {
+                myForcedBadge.parentNode.removeChild(myForcedBadge);
+            }
+
+            let seenBadge = badgesRow.querySelector('.x-card-badge-seen');
+            if (seenBy.length > 0) {
+                const text = `✅ Seen by ${seenBy.join(', ')}`;
+                if (!seenBadge) {
+                    seenBadge = document.createElement('span');
+                    seenBadge.className = 'x-card-badge x-card-badge-seen';
+                    const refNode = mySeenPill || dismissBtn || null;
+                    badgesRow.insertBefore(seenBadge, refNode);
+                }
+                if (seenBadge.textContent !== text) {
+                    seenBadge.textContent = text;
+                }
+            } else if (seenBadge && seenBadge.parentNode) {
+                seenBadge.parentNode.removeChild(seenBadge);
+            }
+
+            if (mySeenPill) {
+                mySeenPill.style.display = wasSeen ? '' : 'none';
+            }
+        }
+
+        renderForceTweetButton(card, postItem.tweetId, {
+            forcedByMe,
+            forcedByFriends: forcedBy
+        }, (tid, nextForced) => {
+            card.classList.toggle('is-forced-card', Boolean(nextForced || forcedBy.length > 0));
+            const activeCbs = card._xCallbacks || callbacks;
+            if (activeCbs && typeof activeCbs.onToggleForce === 'function') {
+                activeCbs.onToggleForce(tid, nextForced, card, postItem.meta);
+            }
+        });
+    }
+
     function isCardScrolledPastTop(cardEl) {
         if (!cardEl || !cardEl.isConnected) return false;
         const rectTarget = (cardEl._xFilteredPlaceholder && cardEl._xFilteredPlaceholder.isConnected)
@@ -1632,6 +1733,9 @@
 
         const targetCard = cardEl || document.querySelector(`article.x-friend-tweet-card[data-tweet-id="${id}"]`);
         if (!targetCard || !targetCard.isConnected) return false;
+
+        // Forced posts must never be automatically removed when seen or scrolled past
+        if (isForcedCard(targetCard)) return false;
 
         const isSeen = targetCard.classList.contains('is-seen-by-me') || Boolean(targetCard._xPostItem?.isSeenByMe);
         if (!isSeen) return false;
@@ -1708,10 +1812,11 @@
 
     function removeSeenCardsScrolledPast() {
         const seenCards = document.querySelectorAll(
-            '#x-friends-timeline-root article.x-friend-tweet-card.is-seen-by-me, #x-forced-home-feed article.x-friend-tweet-card.is-seen-by-me'
+            '#x-friends-timeline-root article.x-friend-tweet-card.is-seen-by-me:not(.is-forced-card)'
         );
         let removedCount = 0;
         seenCards.forEach(card => {
+            if (isForcedCard(card)) return;
             const tid = card.getAttribute('data-tweet-id') || card.dataset?.xTweetId;
             if (tid && removeCardAfterScrollPast(tid, card)) {
                 removedCount++;
@@ -1725,7 +1830,7 @@
 
         let container = document.getElementById('x-forced-home-feed');
         const activeForcedPosts = Array.isArray(unseenForcedPosts)
-            ? unseenForcedPosts.filter(p => p && !scrolledPastRemovedIds.has(p.tweetId))
+            ? unseenForcedPosts.filter(p => p && !p.isDismissed)
             : [];
 
         if (activeForcedPosts.length === 0) {
@@ -1770,7 +1875,6 @@
                 const currentPosts = container._xActiveForcedPosts || activeForcedPosts;
                 const activeCbs = container._xCallbacks || callbacks;
                 currentPosts.forEach(p => {
-                    scrolledPastRemovedIds.add(p.tweetId);
                     if (typeof activeCbs.onDismissForced === 'function') {
                         activeCbs.onDismissForced(p.tweetId);
                     }
@@ -1787,24 +1891,23 @@
             container.appendChild(listWrap);
         }
 
+        const activeForcedIds = new Set(activeForcedPosts.map(p => p.tweetId));
         const existingMap = new Map();
         listWrap.querySelectorAll('article.x-friend-tweet-card').forEach(c => {
             const tid = c.getAttribute('data-tweet-id');
-            if (tid) existingMap.set(tid, c);
+            if (!tid || !activeForcedIds.has(tid)) {
+                if (c.parentNode) c.parentNode.removeChild(c);
+                return;
+            }
+            existingMap.set(tid, c);
         });
 
         let hasNewCards = false;
-        activeForcedPosts.forEach(postItem => {
-            if (existingMap.has(postItem.tweetId)) {
-                const existingCard = existingMap.get(postItem.tweetId);
-                existingCard._xPostItem = postItem;
-                return;
-            }
-            const card = createFriendTweetCard(postItem, {
+        activeForcedPosts.forEach((postItem, idx) => {
+            const homeCardCallbacks = {
                 ...callbacks,
                 isHomeInjection: true,
                 onDismissForced: (tid, cardEl) => {
-                    scrolledPastRemovedIds.add(tid);
                     if (cardEl && cardEl.parentNode) {
                         cardEl.parentNode.removeChild(cardEl);
                     }
@@ -1820,8 +1923,20 @@
                         callbacks.onDismissForced(tid);
                     }
                 }
-            });
-            listWrap.appendChild(card);
+            };
+
+            if (existingMap.has(postItem.tweetId)) {
+                const existingCard = existingMap.get(postItem.tweetId);
+                syncCardStateInDOM(existingCard, postItem, homeCardCallbacks);
+                return;
+            }
+            const card = createFriendTweetCard(postItem, homeCardCallbacks);
+            const refNode = listWrap.children[idx] || null;
+            if (refNode) {
+                listWrap.insertBefore(card, refNode);
+            } else {
+                listWrap.appendChild(card);
+            }
             hasNewCards = true;
         });
 
@@ -1919,19 +2034,21 @@
                 tabListElem.addEventListener('click', (e) => {
                     const clickedTab = e.target && e.target.closest ? e.target.closest('[role="tab"]') : null;
                     if (clickedTab && !clickedTab.classList.contains('x-friends-timeline-tab')) {
+                        const myTab = tabListElem.querySelector('.x-friends-timeline-tab');
+                        const activeCbs = (myTab && myTab._xFriendsCallbacks) || callbacks;
                         if (isFriendsTabActive) {
                             isFriendsTabActive = false;
-                            const myTab = tabListElem.querySelector('.x-friends-timeline-tab');
                             if (myTab) {
                                 myTab.classList.remove('is-active');
                                 myTab.setAttribute('aria-selected', 'false');
                             }
                             tabListElem.classList.remove('x-friends-tab-selected');
                             evaluateVideoAutoplay();
-                            const activeCbs = (myTab && myTab._xFriendsCallbacks) || callbacks;
                             if (activeCbs && typeof activeCbs.onSelectFriendsTab === 'function') {
                                 activeCbs.onSelectFriendsTab(false);
                             }
+                        } else if (activeCbs && typeof activeCbs.onSelectNativeTab === 'function') {
+                            activeCbs.onSelectNativeTab();
                         }
                     }
                 }, true);
@@ -1983,7 +2100,7 @@
         // Update badge count (unseen forced posts count)
         const badgeSpan = tabLink.querySelector('.x-friends-tab-badge');
         const unseenForcedCount = Array.isArray(timelineData.unseenForcedPosts)
-            ? timelineData.unseenForcedPosts.filter(p => p && !p.isSeenByMe && !scrolledPastRemovedIds.has(p.tweetId)).length
+            ? timelineData.unseenForcedPosts.filter(p => p && !p.isSeenByMe && !p.isDismissed).length
             : 0;
         if (badgeSpan) {
             if (unseenForcedCount > 0) {
@@ -2168,7 +2285,7 @@
         });
 
         const pageSlice = matchingPosts.slice(0, currentVisibleLimit);
-        const visiblePosts = pageSlice.filter(p => !scrolledPastRemovedIds.has(p.tweetId));
+        const visiblePosts = pageSlice.filter(p => p.isForced || !scrolledPastRemovedIds.has(p.tweetId));
         visiblePosts.forEach(p => {
             if (p && p.tweetId) {
                 sessionVisibleTweetIds.add(p.tweetId);
@@ -2181,10 +2298,16 @@
             root._xNeedsListReset = false;
         }
 
+        const allPostIds = new Set(allPosts.map(p => p && p.tweetId).filter(Boolean));
         const existingCardMap = new Map();
         listContainer.querySelectorAll('article.x-friend-tweet-card').forEach(c => {
             const tid = c.getAttribute('data-tweet-id');
-            if (tid) existingCardMap.set(tid, c);
+            if (!tid) return;
+            if (!allPostIds.has(tid)) {
+                if (c.parentNode) c.parentNode.removeChild(c);
+                return;
+            }
+            existingCardMap.set(tid, c);
         });
 
         if (visiblePosts.length === 0 && existingCardMap.size === 0) {
@@ -2207,15 +2330,30 @@
             }
 
             let hasNewCards = false;
-            visiblePosts.forEach(postItem => {
+            visiblePosts.forEach((postItem, idx) => {
                 if (existingCardMap.has(postItem.tweetId)) {
                     const existingCard = existingCardMap.get(postItem.tweetId);
-                    existingCard._xPostItem = postItem;
-                    existingCard._xCallbacks = callbacks;
+                    const wasForcedCard = existingCard.classList.contains('is-forced-card');
+                    syncCardStateInDOM(existingCard, postItem, callbacks);
+                    if (!wasForcedCard && postItem.isForced && existingCard.parentNode === listContainer) {
+                        const refNode = listContainer.children[idx] || null;
+                        if (refNode && refNode !== existingCard) {
+                            listContainer.insertBefore(existingCard, refNode);
+                        }
+                    }
                     return;
                 }
                 const card = createFriendTweetCard(postItem, callbacks);
-                listContainer.appendChild(card);
+                if (postItem.isForced) {
+                    const refNode = listContainer.children[idx] || null;
+                    if (refNode) {
+                        listContainer.insertBefore(card, refNode);
+                    } else {
+                        listContainer.appendChild(card);
+                    }
+                } else {
+                    listContainer.appendChild(card);
+                }
                 hasNewCards = true;
             });
 

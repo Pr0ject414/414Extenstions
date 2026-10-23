@@ -459,13 +459,12 @@
 
                 if (Array.isArray(cachedTimelineData.timelinePosts)) {
                     cachedTimelineData.timelinePosts = cachedTimelineData.timelinePosts
-                        .filter(p => !unavailableIds.has(p.tweetId))
-                        .map(p => hydrated[p.tweetId] ? { ...p, meta: hydrated[p.tweetId] } : p);
+                        .filter(p => p.isForced || !unavailableIds.has(p.tweetId))
+                        .map(p => (hydrated[p.tweetId] && !hydrated[p.tweetId].isUnavailable) ? { ...p, meta: hydrated[p.tweetId] } : p);
                 }
                 if (Array.isArray(cachedTimelineData.unseenForcedPosts)) {
                     cachedTimelineData.unseenForcedPosts = cachedTimelineData.unseenForcedPosts
-                        .filter(p => !unavailableIds.has(p.tweetId))
-                        .map(p => hydrated[p.tweetId] ? { ...p, meta: hydrated[p.tweetId] } : p);
+                        .map(p => (hydrated[p.tweetId] && !hydrated[p.tweetId].isUnavailable) ? { ...p, meta: hydrated[p.tweetId] } : p);
                 }
 
                 if (window.XLocationUI && typeof window.XLocationUI.updateHydratedCardsInDOM === 'function') {
@@ -578,6 +577,12 @@
             },
             onSelectFriendsTab: () => {
                 syncFriendsTimelineUI(true);
+            },
+            onSelectNativeTab: () => {
+                syncFriendsTimelineUI(true);
+                setTimeout(() => {
+                    syncFriendsTimelineUI(true);
+                }, 150);
             }
         };
 
@@ -595,6 +600,10 @@
                 && window.XLocationUI.isFriendsTimelineTabSelected();
 
             const timelineRoot = document.getElementById('x-friends-timeline-root');
+
+            if (nativeFeed && typeof window.XLocationUI.renderForcedPostsInHomeFeed === 'function') {
+                window.XLocationUI.renderForcedPostsInHomeFeed(nativeFeed, data.unseenForcedPosts || [], callbacks);
+            }
 
             if (isFriendsSelected && host) {
                 if (nativeFeed) {
@@ -626,9 +635,6 @@
                         requestAnimationFrame(() => {
                             window.dispatchEvent(new Event('resize'));
                         });
-                    }
-                    if (typeof window.XLocationUI.renderForcedPostsInHomeFeed === 'function') {
-                        window.XLocationUI.renderForcedPostsInHomeFeed(nativeFeed, data.unseenForcedPosts || [], callbacks);
                     }
                 }
             }
@@ -1195,9 +1201,19 @@
             scanDOM();
             return;
         }
-        let hasRelevantAddition = false;
+        let hasRelevantMutation = false;
         for (let i = 0; i < mutations.length; i++) {
             const m = mutations[i];
+            if (m.removedNodes && m.removedNodes.length > 0) {
+                for (let j = 0; j < m.removedNodes.length; j++) {
+                    const rn = m.removedNodes[j];
+                    if (rn && (rn.id === 'x-forced-home-feed' || (rn.querySelector && rn.querySelector('#x-forced-home-feed')))) {
+                        hasRelevantMutation = true;
+                        break;
+                    }
+                }
+                if (hasRelevantMutation) break;
+            }
             if (!m.addedNodes || m.addedNodes.length === 0) continue;
             const target = m.target;
             if (
@@ -1207,13 +1223,38 @@
             ) {
                 continue;
             }
-            hasRelevantAddition = true;
+            hasRelevantMutation = true;
             break;
         }
-        if (hasRelevantAddition) {
+        if (hasRelevantMutation) {
             scanDOM();
         }
     });
+
+    // Periodic live timeline refresh so forced posts and friend sync updates appear automatically without manual refresh
+    const liveSyncInterval = setInterval(() => {
+        if (!isFriendsSyncActive || !isContextValid()) return;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        syncFriendsTimelineUI(false);
+    }, 8000);
+    if (typeof liveSyncInterval?.unref === 'function') {
+        liveSyncInterval.unref();
+    }
+
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && isFriendsSyncActive && isContextValid()) {
+                syncFriendsTimelineUI(true);
+            }
+        });
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('focus', () => {
+            if (isFriendsSyncActive && isContextValid()) {
+                syncFriendsTimelineUI(true);
+            }
+        });
+    }
 
     function initObserver() {
         if (!isContextValid()) return;

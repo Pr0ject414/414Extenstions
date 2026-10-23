@@ -275,6 +275,15 @@ export function handleMessage(request, sender, sendResponse) {
         friendsSync.init().then(() => {
             const data = friendsSync.getFriendsTimelineData();
             sendResponse({ success: true, ...data });
+
+            const now = Date.now();
+            if (
+                friendsSync.state?.identity &&
+                !friendsSync.isSyncing &&
+                (!friendsSync.lastSyncTime || (now - friendsSync.lastSyncTime) >= 7000)
+            ) {
+                friendsSync.syncWithRelays().catch(() => {});
+            }
         }).catch(err => {
             sendResponse({ success: false, error: err.message });
         });

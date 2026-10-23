@@ -1503,4 +1503,128 @@ describe('xLocationUI.js', () => {
 
         jest.useRealTimers();
     });
+
+    test('forced posts should appear in both Friends and For You/Following timelines, mark as seen without disappearing on scroll, and update live without manual refresh', () => {
+        const host = document.createElement('div');
+        const nativeFeed = document.createElement('section');
+        nativeFeed.setAttribute('role', 'region');
+        const nativeArticle = document.createElement('article');
+        nativeArticle.textContent = 'Native For You post';
+        nativeFeed.appendChild(nativeArticle);
+        host.appendChild(nativeFeed);
+        document.body.appendChild(host);
+
+        const regularPost = {
+            tweetId: '2113700000000000101',
+            isForced: false,
+            forcedBy: [],
+            seenBy: ['Alice'],
+            forcedByMe: false,
+            isSeenByMe: false,
+            meta: {
+                id: '2113700000000000101',
+                screenName: 'regular_author',
+                authorName: 'Regular Author',
+                text: 'Regular seen post',
+                isHydrated: true,
+                hydrationVersion: 4
+            }
+        };
+
+        // 1. Initial render with only a regular seen post
+        const root = window.XLocationUI.renderFriendsTimeline(host, {
+            timelinePosts: [regularPost],
+            unseenForcedPosts: [],
+            connectedFriends: [{ email: 'alice@example.com', displayName: 'Alice', label: 'Alice' }]
+        }, {});
+
+        const allFilterBtn = root.querySelector('[data-filter="all"]');
+        if (allFilterBtn && !allFilterBtn.classList.contains('is-active')) {
+            allFilterBtn.click();
+        }
+
+        expect(root.querySelectorAll('article.x-friend-tweet-card').length).toBe(1);
+
+        // 2. Friend force-pushes a new post AND forces the existing regularPost — live update WITHOUT clicking Sync Relays
+        const newForcedPost = {
+            tweetId: '2113700000000000202',
+            isForced: true,
+            forcedBy: ['Alice'],
+            seenBy: ['Alice'],
+            forcedByMe: false,
+            isSeenByMe: false,
+            isDismissed: false,
+            meta: {
+                id: '2113700000000000202',
+                screenName: 'forced_author',
+                authorName: 'Forced Author',
+                text: 'Brand new forced post!',
+                isHydrated: true,
+                hydrationVersion: 4
+            }
+        };
+        const upgradedRegularPost = {
+            ...regularPost,
+            isForced: true,
+            forcedBy: ['Alice'],
+            isDismissed: false
+        };
+
+        window.XLocationUI.renderFriendsTimeline(host, {
+            timelinePosts: [newForcedPost, upgradedRegularPost],
+            unseenForcedPosts: [newForcedPost, upgradedRegularPost],
+            connectedFriends: [{ email: 'alice@example.com', displayName: 'Alice', label: 'Alice' }]
+        }, {});
+        const homeForcedContainer = window.XLocationUI.renderForcedPostsInHomeFeed(
+            nativeFeed,
+            [newForcedPost, upgradedRegularPost],
+            {}
+        );
+
+        // Verify both Friends timeline and For You/Following (#x-forced-home-feed) have the forced posts at the top
+        const friendsCards = root.querySelectorAll('article.x-friend-tweet-card');
+        expect(friendsCards.length).toBe(2);
+        expect(friendsCards[0].getAttribute('data-tweet-id')).toBe('2113700000000000202');
+        expect(friendsCards[0].classList.contains('is-forced-card')).toBe(true);
+        expect(friendsCards[1].getAttribute('data-tweet-id')).toBe('2113700000000000101');
+        expect(friendsCards[1].classList.contains('is-forced-card')).toBe(true);
+        expect(friendsCards[1].querySelector('.x-card-badge-forced').textContent).toContain('Forced by Alice');
+
+        expect(homeForcedContainer).not.toBeNull();
+        const homeCards = homeForcedContainer.querySelectorAll('article.x-friend-tweet-card');
+        expect(homeCards.length).toBe(2);
+
+        // 3. Mark the forced post as seen -> should display "✓ Seen by you" in both timelines and NEVER be removed on scroll or re-render
+        newForcedPost.isSeenByMe = true;
+        window.XLocationUI.markCardSeenInDOM('2113700000000000202');
+
+        const seenFriendsCard = root.querySelector('article.x-friend-tweet-card[data-tweet-id="2113700000000000202"]');
+        const seenHomeCard = homeForcedContainer.querySelector('article.x-friend-tweet-card[data-tweet-id="2113700000000000202"]');
+        expect(seenFriendsCard.classList.contains('is-seen-by-me')).toBe(true);
+        expect(seenFriendsCard.querySelector('[data-testid="x-card-my-seen"]').style.display).toBe('');
+        expect(seenHomeCard.classList.contains('is-seen-by-me')).toBe(true);
+        expect(seenHomeCard.querySelector('[data-testid="x-card-my-seen"]').style.display).toBe('');
+
+        // Simulate scrolling past both cards (rect.bottom < 0)
+        seenFriendsCard.getBoundingClientRect = () => ({ top: -300, bottom: -50, left: 0, right: 600, width: 600, height: 250 });
+        seenHomeCard.getBoundingClientRect = () => ({ top: -300, bottom: -50, left: 0, right: 600, width: 600, height: 250 });
+
+        expect(window.XLocationUI.removeSeenCardsScrolledPast()).toBe(0);
+        expect(root.querySelector('article.x-friend-tweet-card[data-tweet-id="2113700000000000202"]')).not.toBeNull();
+        expect(homeForcedContainer.querySelector('article.x-friend-tweet-card[data-tweet-id="2113700000000000202"]')).not.toBeNull();
+
+        // Subsequent live timeline updates also keep the seen forced post in both timelines
+        window.XLocationUI.renderFriendsTimeline(host, {
+            timelinePosts: [newForcedPost, upgradedRegularPost],
+            unseenForcedPosts: [newForcedPost, upgradedRegularPost],
+            connectedFriends: [{ email: 'alice@example.com', displayName: 'Alice', label: 'Alice' }]
+        }, {});
+        window.XLocationUI.renderForcedPostsInHomeFeed(
+            nativeFeed,
+            [newForcedPost, upgradedRegularPost],
+            {}
+        );
+        expect(root.querySelector('article.x-friend-tweet-card[data-tweet-id="2113700000000000202"]')).not.toBeNull();
+        expect(homeForcedContainer.querySelector('article.x-friend-tweet-card[data-tweet-id="2113700000000000202"]')).not.toBeNull();
+    });
 });
