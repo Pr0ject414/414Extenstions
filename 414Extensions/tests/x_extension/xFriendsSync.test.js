@@ -413,4 +413,174 @@ describe('XFriendsSyncManager', () => {
         const timeline = manager.getFriendsTimelineData();
         expect(timeline.timelinePosts.map(p => p.tweetId)).toEqual(['2113362791734341682']);
     });
+
+    test('should self-sync identity keys, friends, seen posts, forced posts, and filter preferences between Desktop and Mobile Pixel', async () => {
+        const desktopManager = new XFriendsSyncManager({
+            relays: ['wss://mock.relay'],
+            webSocketFactory: () => relayHub.createSocket()
+        });
+        const friendBob = new XFriendsSyncManager({
+            relays: ['wss://mock.relay'],
+            webSocketFactory: () => relayHub.createSocket()
+        });
+
+        // 1. Desktop user configures blocklists/preferences and sets identity
+        await global.chrome.storage.local.set({
+            blockedCountries: ['India', 'Russia'],
+            blockedDeviceRegions: ['Turkey Android App'],
+            blockedNameFlags: ['🇺🇦', '🇮🇱'],
+            isXLocationEnabled: true,
+            isXHideAdsEnabled: true,
+            isXAlwaysMuteEnabled: false,
+            xVolumeLevel: 42
+        });
+
+        await desktopManager.setIdentity('kyle@pixel.dev', 'Kyle');
+        await desktopManager.markTweetsSeen(['1850000000000000701']);
+        await desktopManager.forceTweetToFriends('1850000000000000702', {
+            screenName: 'kyle',
+            authorName: 'Kyle',
+            text: 'Forced from Desktop'
+        });
+        await desktopManager.addFriend('bob@example.com', 'Bob');
+
+        const desktopKeys = { ...desktopManager.state.identity };
+
+        // 2. Friend Bob accepts Kyle and forces a post to Kyle
+        storageMap.clear();
+        await friendBob.setIdentity('bob@example.com', 'Bob');
+        await friendBob.acceptFriend('kyle@pixel.dev');
+        await friendBob.forceTweetToFriends('1850000000000000888', {
+            screenName: 'bob',
+            authorName: 'Bob',
+            text: 'Check this out on your Pixel!'
+        });
+
+        // 3. Mobile Pixel starts with empty storage and signs in with the same email 'kyle@pixel.dev'
+        storageMap.clear();
+        const notifications = [];
+        const mobileManager = new XFriendsSyncManager({
+            relays: ['wss://mock.relay'],
+            webSocketFactory: () => relayHub.createSocket(),
+            onNotification: (notif) => notifications.push(notif)
+        });
+
+        const mobilePublicState = await mobileManager.setIdentity('kyle@pixel.dev');
+
+        // Mobile should have automatically adopted Desktop's canonical Nostr keypair and seenFeedKeyHex
+        expect(mobileManager.state.identity.privKeyHex).toBe(desktopKeys.privKeyHex);
+        expect(mobileManager.state.identity.pubkeyHex).toBe(desktopKeys.pubkeyHex);
+        expect(mobileManager.state.identity.seenFeedKeyHex).toBe(desktopKeys.seenFeedKeyHex);
+        expect(mobileManager.state.identity.displayName).toBe('Kyle');
+
+        // Mobile should have inherited Desktop's seen posts, forced posts, and connected friend Bob
+        expect(mobileManager.mySeenSet.has('1850000000000000701')).toBe(true);
+        expect(mobileManager.mySeenSet.has('1850000000000000702')).toBe(true);
+        expect(mobileManager.state.myForcedMap['1850000000000000702']).toBeDefined();
+        expect(mobilePublicState.friends).toEqual([
+            expect.objectContaining({
+                email: 'bob@example.com',
+                status: 'connected'
+            })
+        ]);
+
+        // Mobile should also have synced Desktop's blocklists and toggles into its local storage
+        const mobilePrefs = await global.chrome.storage.local.get([
+            'blockedCountries',
+            'blockedDeviceRegions',
+            'blockedNameFlags',
+            'isXHideAdsEnabled',
+            'xVolumeLevel'
+        ]);
+        expect(mobilePrefs.blockedCountries).toEqual(['India', 'Russia']);
+        expect(mobilePrefs.blockedDeviceRegions).toEqual(['Turkey Android App']);
+        expect(mobilePrefs.blockedNameFlags).toEqual(['🇺🇦', '🇮🇱']);
+        expect(mobilePrefs.isXHideAdsEnabled).toBe(true);
+        expect(mobilePrefs.xVolumeLevel).toBe(42);
+
+        // Mobile should have detected Bob's newly forced post and fired onNotification
+        expect(notifications.length).toBeGreaterThanOrEqual(1);
+        expect(notifications[0].newForcedPosts).toEqual([
+            expect.objectContaining({
+                tweetId: '1850000000000000888',
+                forcedBy: ['Bob (bob@example.com)']
+            })
+        ]);
+
+        // 4. Removing a friend on Mobile rotates seenFeedKeyHex and bumps feedKeyUpdatedAt;
+        // syncing on Desktop should adopt the rotated seenFeedKeyHex and remove Bob
+        const oldFeedKey = mobileManager.state.identity.seenFeedKeyHex;
+        await mobileManager.removeFriend('bob@example.com');
+        const rotatedFeedKey = mobileManager.state.identity.seenFeedKeyHex;
+        expect(rotatedFeedKey).not.toBe(oldFeedKey);
+
+        await desktopManager.syncWithRelays();
+        expect(desktopManager.state.identity.seenFeedKeyHex).toBe(rotatedFeedKey);
+        expect(desktopManager.state.friends['bob@example.com']).toBeUndefined();
+    });
+
+    test('should enforce 1,000 seen cap, 14-day forced TTL, 250 local meta cap, and separate own forced posts (isSentOnly) from friend forced posts', async () => {
+        const manager = new XFriendsSyncManager({ relays: [] });
+        await manager.init();
+
+        const now = Date.now();
+        // 1. Insert 1,250 seen IDs -> should cap at 1,000 newest
+        const manySeenIds = Array.from({ length: 1250 }, (_, i) => String(1850000000000100000n + BigInt(i)));
+        for (const id of manySeenIds) {
+            manager.mySeenSet.add(id);
+        }
+
+        // 2. Insert an expired forced post (20 days old) and a fresh own forced post
+        const expiredForcedId = '1850000000000900001';
+        const freshOwnForcedId = '1850000000000900002';
+        manager.state.myForcedMap[expiredForcedId] = {
+            id: expiredForcedId,
+            forcedAt: now - (20 * 24 * 60 * 60 * 1000)
+        };
+        manager.state.myForcedMap[freshOwnForcedId] = {
+            id: freshOwnForcedId,
+            forcedAt: now - 5000
+        };
+
+        // 3. Insert a friend-forced post
+        manager.state.friends['alice@example.com'] = {
+            email: 'alice@example.com',
+            displayName: 'Alice',
+            status: 'connected'
+        };
+        manager.state.friendForcedMap['alice@example.com'] = [
+            { id: '1850000000000900003', forcedAt: now - 1000 }
+        ];
+
+        // 4. Insert 310 postMetaMap items -> should cap at 250
+        for (let i = 0; i < 310; i++) {
+            const tid = String(1850000000000200000n + BigInt(i));
+            manager.state.postMetaMap[tid] = {
+                id: tid,
+                screenName: 'user',
+                text: `Post ${i}`,
+                updatedAt: now - (310 - i) * 1000
+            };
+        }
+
+        manager.pruneMySeenIds();
+        manager.rebuildIndex();
+
+        expect(manager.state.mySeenIds.length).toBe(1000);
+        expect(manager.mySeenSet.size).toBe(1000);
+        expect(manager.state.myForcedMap[expiredForcedId]).toBeUndefined();
+        expect(manager.state.myForcedMap[freshOwnForcedId]).toBeDefined();
+        expect(Object.keys(manager.state.postMetaMap).length).toBeLessThanOrEqual(250);
+
+        const timeline = manager.getFriendsTimelineData();
+        const friendForcedItem = timeline.timelinePosts.find(p => p.tweetId === '1850000000000900003');
+        const ownForcedItem = timeline.timelinePosts.find(p => p.tweetId === freshOwnForcedId);
+
+        expect(friendForcedItem.isForced).toBe(true);
+        expect(friendForcedItem.isSentOnly).toBe(false);
+        expect(ownForcedItem.isForced).toBe(false);
+        expect(ownForcedItem.forcedByMe).toBe(true);
+        expect(ownForcedItem.isSentOnly).toBe(true);
+    });
 });
+

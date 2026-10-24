@@ -6,6 +6,8 @@
     const DWELL_TIME_MS = 1200;
     const VISIBILITY_THRESHOLD = 0.6;
     const SEEN_FLUSH_MS = 2000;
+    const MAX_LOCAL_MARKED_SEEN = 1000;
+    const MAX_PENDING_SEEN_META = 25;
 
     const processedElements = new WeakSet();
     const observedTweets = new WeakSet();
@@ -13,6 +15,19 @@
     const locallyMarkedSeen = new Set();
     const pendingSeenQueue = new Set();
     const pendingSeenMetaMap = {}; // tweetId -> TweetMeta
+
+    function addLocallyMarkedSeen(tweetId) {
+        if (!tweetId) return;
+        if (locallyMarkedSeen.has(tweetId)) {
+            locallyMarkedSeen.delete(tweetId);
+        }
+        locallyMarkedSeen.add(tweetId);
+        while (locallyMarkedSeen.size > MAX_LOCAL_MARKED_SEEN) {
+            const oldest = locallyMarkedSeen.values().next().value;
+            if (oldest === undefined) break;
+            locallyMarkedSeen.delete(oldest);
+        }
+    }
 
     let observer = null;
     let tweetIntersectionObserver = null;
@@ -336,7 +351,7 @@
             ? article
             : (document.querySelector(`article[data-tweet-id="${tweetId}"], article[data-x-tweet-id="${tweetId}"]`) || article);
 
-        if (liveArticle) {
+        if (liveArticle && Object.keys(pendingSeenMetaMap).length < MAX_PENDING_SEEN_META) {
             const meta = (liveArticle._xPostItem && liveArticle._xPostItem.meta && liveArticle._xPostItem.meta.screenName)
                 ? liveArticle._xPostItem.meta
                 : extractTweetMetadataFromArticle(liveArticle, tweetId);
@@ -367,7 +382,7 @@
 
         if (locallyMarkedSeen.has(tweetId)) return;
 
-        locallyMarkedSeen.add(tweetId);
+        addLocallyMarkedSeen(tweetId);
         pendingSeenQueue.add(tweetId);
 
         if (!flushSeenTimeout) {
@@ -1131,6 +1146,92 @@
         } catch (err) {}
     }
 
+    let lastReportedDomNotifCount = -1;
+    let lastReportedDomDmCount = -1;
+    let lastReportedDomSnippet = '';
+
+    function extractUnreadBadgeCount(linkEl) {
+        if (!linkEl) return 0;
+        const aria = (linkEl.getAttribute && linkEl.getAttribute('aria-label')) || '';
+        const ariaMatch = aria.match(/(\d+)\s+unread/i);
+        if (ariaMatch && ariaMatch[1]) {
+            return parseInt(ariaMatch[1], 10) || 0;
+        }
+        if (linkEl.querySelectorAll) {
+            const subAria = linkEl.querySelector('[aria-label*="unread"]');
+            if (subAria) {
+                const subText = subAria.getAttribute('aria-label') || '';
+                const subMatch = subText.match(/(\d+)\s+unread/i);
+                if (subMatch && subMatch[1]) {
+                    return parseInt(subMatch[1], 10) || 0;
+                }
+                const numTxt = (subAria.textContent || '').trim().replace(/\+$/, '');
+                if (/^\d+$/.test(numTxt)) {
+                    return parseInt(numTxt, 10) || 0;
+                }
+                return 1;
+            }
+            const spans = linkEl.querySelectorAll('span');
+            for (const sp of spans) {
+                const txt = (sp.textContent || '').trim().replace(/\+$/, '');
+                if (/^\d+$/.test(txt)) {
+                    return parseInt(txt, 10) || 0;
+                }
+            }
+        }
+        return 0;
+    }
+
+    function scanMobileDomNotifications() {
+        if (!isContextValid()) return;
+        try {
+            const notifLink = document.querySelector('[data-testid="AppTabBar_Notifications_Link"], a[href="/notifications"]');
+            const dmLink = document.querySelector('[data-testid="AppTabBar_DirectMessage_Link"], a[href="/messages"], a[href="/i/chat"]');
+
+            let notifCount = extractUnreadBadgeCount(notifLink);
+            const dmCount = extractUnreadBadgeCount(dmLink);
+
+            if (notifCount === 0 && typeof document.title === 'string') {
+                const titleMatch = document.title.match(/^\((\d+)\)/);
+                if (titleMatch && titleMatch[1]) {
+                    const totalTitleUnread = parseInt(titleMatch[1], 10) || 0;
+                    if (totalTitleUnread > dmCount) {
+                        notifCount = totalTitleUnread - dmCount;
+                    }
+                }
+            }
+
+            let latestSnippet = '';
+            const path = (window.location && window.location.pathname) || '';
+            if (path.startsWith('/notifications')) {
+                const firstNotif = document.querySelector('article[data-testid="notification"], [data-testid="cellInnerDiv"] article');
+                if (firstNotif) {
+                    latestSnippet = (firstNotif.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+                }
+            }
+
+            if (
+                notifCount !== lastReportedDomNotifCount ||
+                dmCount !== lastReportedDomDmCount ||
+                (notifCount > 0 && latestSnippet && latestSnippet !== lastReportedDomSnippet)
+            ) {
+                lastReportedDomNotifCount = notifCount;
+                lastReportedDomDmCount = dmCount;
+                if (latestSnippet) lastReportedDomSnippet = latestSnippet;
+
+                chrome.runtime.sendMessage({
+                    action: 'X_SYNC_REGULAR_NOTIFICATIONS',
+                    payload: {
+                        unreadNotificationsCount: notifCount,
+                        unreadDmCount: dmCount,
+                        latestNotificationText: latestSnippet,
+                        source: 'dom_badge'
+                    }
+                }, () => {});
+            }
+        } catch (err) {}
+    }
+
     function scanDOM() {
         if (!isContextValid()) {
             if (observer) observer.disconnect();
@@ -1155,6 +1256,16 @@
                     'blockedNameFlags'
                 ], (settings) => {
                     if (safeHasError() || !settings) return;
+
+                    if ((window.__X414_MOBILE__ || window.ReactNativeWebView) &&
+                        window.XLocationUI &&
+                        typeof window.XLocationUI.ensureMobileSettingsTrigger === 'function') {
+                        window.XLocationUI.ensureMobileSettingsTrigger({
+                            pendingIncomingCount: window.__X414_PENDING_INVITES__ || 0
+                        });
+                        scanMobileDomNotifications();
+                    }
+
                     if (settings.isGlobalMasterSwitchEnabled === false || settings.isXModuleEnabled === false) {
                         isFriendsSyncActive = false;
                         document.querySelectorAll('article[data-testid="tweet"]').forEach(article => {
@@ -1231,7 +1342,7 @@
     // Track explicit user interactions (click, like, expand, video play) as immediate "seen"
     function handleUserInteraction(e) {
         if (!isFriendsSyncActive || !isContextValid() || !e.target || !e.target.closest) return;
-        if (e.target.closest('.x-force-friend-btn, .vsc-download-btn')) return;
+        if (e.target.closest('.x-force-friend-btn, .vsc-download-btn, .x-location-info-btn, .x-friend-seen-badge, #x-414-nav-trigger, #x-414-floating-pill')) return;
         const article = e.target.closest('article[data-testid="tweet"]');
         if (!article || article._xAdCollapsed || checkIsAdTweet(article)) return;
         const tweetId = article.dataset?.xTweetId || extractTweetIdFromArticle(article);
@@ -1313,7 +1424,7 @@
             if (
                 target &&
                 target.closest &&
-                target.closest('.x-friends-tab-badge, .x-friends-filter-pill, .x-forced-home-title, .x-friends-load-more-btn')
+                target.closest('.x-friends-tab-badge, .x-friends-filter-pill, .x-forced-home-title, .x-friends-load-more-btn, #x-414-nav-trigger, #x-414-floating-pill')
             ) {
                 continue;
             }
@@ -1350,17 +1461,30 @@
         });
     }
 
+    let bodyObserved = false;
+    function attachBodyObserver() {
+        if (bodyObserved || !isContextValid() || !document.body) return false;
+        bodyObserved = true;
+        observer.observe(document.body, { childList: true, subtree: true });
+        scanDOM();
+        return true;
+    }
+
     function initObserver() {
         if (!isContextValid()) return;
-        if (document.body) {
-            observer.observe(document.body, { childList: true, subtree: true });
-            scanDOM();
-        } else {
-            document.addEventListener('DOMContentLoaded', () => {
-                if (!isContextValid()) return;
-                observer.observe(document.body, { childList: true, subtree: true });
-                scanDOM();
+        if (attachBodyObserver()) return;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            attachBodyObserver();
+        });
+
+        if (document.documentElement) {
+            const bodyWaitObs = new MutationObserver(() => {
+                if (attachBodyObserver()) {
+                    bodyWaitObs.disconnect();
+                }
             });
+            bodyWaitObs.observe(document.documentElement, { childList: true });
         }
     }
 

@@ -6,6 +6,7 @@ import {
     verifyEvent,
     deriveInboxInfo,
     derivePairwiseInfo,
+    deriveSelfSyncInfo,
     encryptJson,
     decryptJson
 } from '../../x_extension/xNostrCrypto.js';
@@ -68,5 +69,17 @@ describe('xNostrCrypto', () => {
         const inbox1 = await deriveInboxInfo('Bob@Example.com');
         const inbox2 = await deriveInboxInfo('  bob@example.com ');
         expect(inbox1).toEqual(inbox2);
+    });
+
+    test('should deterministically derive self-sync tag and AES-256 key from normalized email and passphrase', async () => {
+        const desktopSelf = await deriveSelfSyncInfo('  Kyle@Example.com ');
+        const mobileSelf = await deriveSelfSyncInfo('kyle@example.com');
+        const withPassphrase = await deriveSelfSyncInfo('kyle@example.com', 'secret-pin');
+
+        expect(desktopSelf.selfTag).toMatch(/^414x-self-[0-9a-f]{32}$/);
+        expect(desktopSelf.selfKeyHex).toMatch(/^[0-9a-f]{64}$/);
+        expect(desktopSelf).toEqual(mobileSelf);
+        expect(withPassphrase.selfKeyHex).not.toBe(desktopSelf.selfKeyHex);
+        expect(withPassphrase.selfTag).not.toBe(desktopSelf.selfTag);
     });
 });

@@ -3,7 +3,7 @@ import * as AppState from '../shared_modules/appState.js';
 import { XLocationApiClient } from './xLocationApi.js';
 import { locationCache } from './xLocationCache.js';
 import { XCloudCacheClient } from './xCloudCache.js';
-import { friendsSync } from './xFriendsSync.js';
+import { friendsSync, SELF_SYNC_PREF_KEYS } from './xFriendsSync.js';
 import { FRIEND_SYNC_CONFIG } from './xLocationConstants.js';
 
 const CONTEXT_MENU_ID = "x_download_video";
@@ -17,6 +17,16 @@ function setupFriendsSyncAlarm() {
             periodInMinutes: FRIEND_SYNC_CONFIG.SYNC_INTERVAL_MINUTES
         });
     }
+}
+
+if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged && typeof chrome.storage.onChanged.addListener === 'function') {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'local' || !changes || friendsSync.isApplyingRemotePrefs) return;
+        const hasPrefChange = SELF_SYNC_PREF_KEYS.some(key => Object.prototype.hasOwnProperty.call(changes, key));
+        if (hasPrefChange) {
+            friendsSync.scheduleSnapshotFlush();
+        }
+    });
 }
 
 // --- Lifecycle Functions ---
@@ -172,8 +182,8 @@ export function handleMessage(request, sender, sendResponse) {
     }
 
     if (request.action === "X_FRIENDS_SET_IDENTITY") {
-        const { email, displayName } = request.payload || {};
-        friendsSync.setIdentity(email, displayName).then(state => {
+        const { email, displayName, passphrase } = request.payload || {};
+        friendsSync.setIdentity(email, displayName, passphrase).then(state => {
             sendResponse({ success: true, state });
         }).catch(err => {
             sendResponse({ success: false, error: err.message });

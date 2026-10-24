@@ -114,12 +114,34 @@
     // Hovercard Dossier Overlay Manager
     let hovercardRoot = null;
     let hovercardTimeout = null;
+    let activeHovercardTarget = null;
+    let outsideClickBound = false;
+
+    function bindOutsideHovercardDismiss() {
+        if (outsideClickBound || typeof document === 'undefined') return;
+        outsideClickBound = true;
+        document.addEventListener('click', (e) => {
+            if (!hovercardRoot || !hovercardRoot.classList.contains('visible')) return;
+            const target = e.target;
+            if (target && target.closest && (
+                target.closest('#x-location-hovercard-root') ||
+                target.closest('.x-location-info-btn') ||
+                target.closest('.x-friend-seen-badge')
+            )) {
+                return;
+            }
+            hcHideImmediate();
+        }, true);
+    }
 
     function getOrCreateHovercard() {
-        if (hovercardRoot) return hovercardRoot;
+        if (hovercardRoot && document.body && document.body.contains(hovercardRoot)) {
+            return hovercardRoot;
+        }
         hovercardRoot = document.createElement('div');
         hovercardRoot.id = 'x-location-hovercard-root';
         document.body.appendChild(hovercardRoot);
+        bindOutsideHovercardDismiss();
 
         hovercardRoot.addEventListener('mouseenter', () => {
             if (hovercardTimeout) clearTimeout(hovercardTimeout);
@@ -134,6 +156,7 @@
     function showHovercard(targetElem, data) {
         if (hovercardTimeout) clearTimeout(hovercardTimeout);
         const hc = getOrCreateHovercard();
+        activeHovercardTarget = targetElem;
 
         const flag = getFlagHtml(data.location);
         const name = data.meta?.name || data.screenName;
@@ -168,6 +191,12 @@
                 <span class="x-hovercard-label">User ID:</span>
                 <span class="x-hovercard-val">${restId}</span>
             </div>
+            ${Array.isArray(data.forcedBy) && data.forcedBy.length > 0 ? `
+            <div class="x-hovercard-row">
+                <span class="x-hovercard-icon">⚡</span>
+                <span class="x-hovercard-label">Forced by:</span>
+                <span class="x-hovercard-val">${data.forcedBy.join(', ')}</span>
+            </div>` : ''}
             ${Array.isArray(data.seenBy) && data.seenBy.length > 0 ? `
             <div class="x-hovercard-row">
                 <span class="x-hovercard-icon">✅</span>
@@ -178,7 +207,14 @@
 
         const rect = targetElem.getBoundingClientRect();
         const top = rect.bottom + window.scrollY + 6;
-        const left = Math.max(10, rect.left + window.scrollX - 40);
+        const viewportWidth = Math.max(
+            typeof window !== 'undefined' ? (window.innerWidth || 0) : 0,
+            typeof document !== 'undefined' && document.documentElement ? (document.documentElement.clientWidth || 0) : 0
+        ) || 412;
+        const cardWidth = Math.min(270, Math.max(200, viewportWidth - 20));
+        const maxLeft = Math.max(10, viewportWidth - cardWidth - 10);
+        const rawLeft = rect.left + window.scrollX - 40;
+        const left = Math.min(Math.max(10, rawLeft), maxLeft);
 
         hc.style.top = `${top}px`;
         hc.style.left = `${left}px`;
@@ -193,9 +229,22 @@
     }
 
     function hcHideImmediate() {
+        activeHovercardTarget = null;
         if (hovercardRoot) {
             hovercardRoot.classList.remove('visible');
         }
+    }
+
+    function buildEnrichedHovercardData(badge, fallbackData) {
+        const base = (badge && badge._xLocationData) ? badge._xLocationData : (fallbackData || {});
+        const seenElem = badge ? badge.querySelector('.x-friend-seen-badge') : null;
+        const seenByAttr = seenElem ? (seenElem.getAttribute('data-seen-by') || '') : '';
+        const forcedByAttr = seenElem ? (seenElem.getAttribute('data-forced-by') || '') : '';
+        return {
+            ...base,
+            seenBy: seenByAttr ? seenByAttr.split(', ').filter(Boolean) : (base.seenBy || []),
+            forcedBy: forcedByAttr ? forcedByAttr.split(', ').filter(Boolean) : (base.forcedBy || [])
+        };
     }
 
     function findInsertionPoint(container, screenName) {
@@ -247,6 +296,7 @@
         if (!containerElem || containerElem.querySelector('.x-location-flag')) return;
 
         const badge = getOrCreateInlineBadge(containerElem, data.screenName);
+        badge._xLocationData = data;
         const existingSeenBadge = badge.querySelector('.x-friend-seen-badge');
 
         const insertPart = (node) => {
@@ -280,14 +330,18 @@
         infoBtn.appendChild(createInfoSVG());
 
         infoBtn.addEventListener('mouseenter', () => {
-            const seenElem = badge.querySelector('.x-friend-seen-badge');
-            const seenByAttr = seenElem ? seenElem.getAttribute('data-seen-by') : '';
-            const enrichedData = seenByAttr
-                ? { ...data, seenBy: seenByAttr.split(', ').filter(Boolean) }
-                : data;
-            showHovercard(infoBtn, enrichedData);
+            showHovercard(infoBtn, buildEnrichedHovercardData(badge, data));
         });
         infoBtn.addEventListener('mouseleave', () => hideHovercard());
+        infoBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (hovercardRoot && hovercardRoot.classList.contains('visible') && activeHovercardTarget === infoBtn) {
+                hcHideImmediate();
+                return;
+            }
+            showHovercard(infoBtn, buildEnrichedHovercardData(badge, data));
+        });
 
         insertPart(infoBtn);
     }
@@ -304,6 +358,19 @@
             seenSpan = document.createElement('span');
             seenSpan.className = 'x-friend-seen-badge';
             seenSpan.appendChild(createSeenCheckSVG());
+            seenSpan.addEventListener('mouseenter', () => {
+                showHovercard(seenSpan, buildEnrichedHovercardData(badge, { screenName }));
+            });
+            seenSpan.addEventListener('mouseleave', () => hideHovercard());
+            seenSpan.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (hovercardRoot && hovercardRoot.classList.contains('visible') && activeHovercardTarget === seenSpan) {
+                    hcHideImmediate();
+                    return;
+                }
+                showHovercard(seenSpan, buildEnrichedHovercardData(badge, { screenName }));
+            });
             badge.appendChild(seenSpan);
         }
 
@@ -317,6 +384,7 @@
             seenSpan.setAttribute('data-forced-by', forcedStr);
         } else {
             seenSpan.classList.remove('is-forced-by-friend');
+            seenSpan.removeAttribute('data-forced-by');
             seenSpan.title = `Seen by: ${listStr}`;
         }
         seenSpan.setAttribute('data-seen-by', listStr);
@@ -1021,7 +1089,7 @@
         card.setAttribute('data-tweet-id', tweetId);
         card.setAttribute('data-x-tweet-id', tweetId);
 
-        if (forcedBy.length > 0 || forcedByMe) {
+        if (forcedBy.length > 0) {
             card.classList.add('is-forced-card');
         }
         if (isSeenByMe) {
@@ -1596,7 +1664,7 @@
         if (!unseenPill) return;
         const data = root._xTimelineData;
         if (data && Array.isArray(data.timelinePosts)) {
-            const unseenCount = data.timelinePosts.filter(p => !p.isSeenByMe).length;
+            const unseenCount = data.timelinePosts.filter(p => !p.isSentOnly && !p.isSeenByMe).length;
             unseenPill.textContent = `Unseen (${unseenCount})`;
         }
     }
@@ -1624,8 +1692,9 @@
         if (!cardEl) return false;
         if (cardEl.classList && cardEl.classList.contains('is-forced-card')) return true;
         if (cardEl.closest && cardEl.closest('#x-forced-home-feed')) return true;
+        if (currentTimelineFilter === 'sent') return true;
         const item = cardEl._xPostItem;
-        if (item && (item.isForced || item.forcedByMe || (Array.isArray(item.forcedBy) && item.forcedBy.length > 0))) {
+        if (item && (item.isForced || (Array.isArray(item.forcedBy) && item.forcedBy.length > 0))) {
             return true;
         }
         return false;
@@ -1643,7 +1712,7 @@
         const forcedBy = Array.isArray(postItem.forcedBy) ? postItem.forcedBy : [];
         const forcedByMe = Boolean(postItem.forcedByMe);
         const seenBy = Array.isArray(postItem.seenBy) ? postItem.seenBy : [];
-        const isForced = Boolean(postItem.isForced || forcedBy.length > 0 || forcedByMe);
+        const isForced = Boolean(postItem.isForced || forcedBy.length > 0);
 
         card.classList.toggle('is-forced-card', isForced);
         card.classList.toggle('is-seen-by-me', wasSeen);
@@ -2137,8 +2206,10 @@
         const allPosts = Array.isArray(timelineData.timelinePosts) ? timelineData.timelinePosts : [];
         const connectedFriends = Array.isArray(timelineData.connectedFriends) ? timelineData.connectedFriends : [];
 
-        const forcedCount = allPosts.filter(p => p.isForced).length;
-        const unseenCount = allPosts.filter(p => !p.isSeenByMe).length;
+        const incomingPosts = allPosts.filter(p => !p.isSentOnly);
+        const forcedCount = incomingPosts.filter(p => p.isForced).length;
+        const unseenCount = incomingPosts.filter(p => !p.isSeenByMe).length;
+        const sentCount = allPosts.filter(p => p.forcedByMe).length;
 
         // 1. Ensure persistent toolbar & list containers exist (never wipe root.innerHTML on updates)
         let toolbar = root.querySelector('.x-friends-timeline-toolbar');
@@ -2156,7 +2227,7 @@
             const filtersGroup = document.createElement('div');
             filtersGroup.className = 'x-friends-filter-pills';
 
-            const filterIds = ['all', 'forced', 'unseen'];
+            const filterIds = ['all', 'forced', 'unseen', 'sent'];
             filterIds.forEach(fid => {
                 const pill = document.createElement('button');
                 pill.type = 'button';
@@ -2210,9 +2281,10 @@
 
         // Update filter pills in-place without recreating DOM nodes
         const filterLabels = {
-            all: `All (${allPosts.length})`,
+            all: `All (${incomingPosts.length})`,
             forced: `⚡ Forced (${forcedCount})`,
-            unseen: `Unseen (${unseenCount})`
+            unseen: `Unseen (${unseenCount})`,
+            sent: `📤 Sent (${sentCount})`
         };
         toolbar.querySelectorAll('.x-friends-filter-pill').forEach(pill => {
             const fid = pill.getAttribute('data-filter');
@@ -2221,6 +2293,9 @@
                     pill.textContent = filterLabels[fid];
                 }
                 pill.classList.toggle('is-active', currentTimelineFilter === fid);
+                if (fid === 'sent') {
+                    pill.style.display = (sentCount > 0 || currentTimelineFilter === 'sent') ? '' : 'none';
+                }
             }
         });
 
@@ -2274,6 +2349,10 @@
         // so removing a scrolled-past card at the top never shifts the pagination window mid-scroll.
         const matchingPosts = allPosts.filter(p => {
             if (!p || !p.tweetId) return false;
+            if (currentTimelineFilter === 'sent') {
+                return Boolean(p.forcedByMe);
+            }
+            if (p.isSentOnly) return false;
             if (currentTimelineFilter === 'forced' && !p.isForced) return false;
             if (currentTimelineFilter === 'unseen' && p.isSeenByMe && !sessionVisibleTweetIds.has(p.tweetId)) return false;
             if (currentFriendFilter) {
@@ -2696,12 +2775,128 @@
         return true;
     }
 
+    function dispatchOpenNativeSettings() {
+        try {
+            if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                chrome.runtime.sendMessage({ action: 'X_OPEN_NATIVE_SETTINGS' });
+            } else if (typeof window !== 'undefined' && window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'X_RUNTIME_MESSAGE',
+                    payload: { action: 'X_OPEN_NATIVE_SETTINGS' }
+                }));
+            }
+        } catch (err) {
+            // Ignore bridge errors
+        }
+    }
+
+    function isNavBarVisible(el) {
+        if (!el || el.hidden) return false;
+        if (el.style && (el.style.display === 'none' || el.style.visibility === 'hidden' || el.style.opacity === '0')) {
+            return false;
+        }
+        if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+            try {
+                const cs = window.getComputedStyle(el);
+                if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0')) {
+                    return false;
+                }
+            } catch (e) {}
+        }
+        if (typeof el.getBoundingClientRect === 'function' && typeof window !== 'undefined' && window.innerHeight > 0) {
+            try {
+                const rect = el.getBoundingClientRect();
+                if ((rect.width > 0 || rect.height > 0) && (rect.top >= window.innerHeight || rect.bottom <= 0)) {
+                    return false;
+                }
+            } catch (e) {}
+        }
+        return true;
+    }
+
+    function findComposePostButton() {
+        if (typeof document === 'undefined') return null;
+        const candidates = document.querySelectorAll(
+            'a[href="/compose/post"], a[href="/compose/tweet"], [data-testid="FloatingActionButtons_Tweet_Button"], [data-testid="SideNav_NewTweet_Button"]'
+        );
+        for (let i = 0; i < candidates.length; i++) {
+            const el = candidates[i];
+            if (isNavBarVisible(el)) {
+                return el;
+            }
+        }
+        return null;
+    }
+
+    function ensureMobileSettingsTrigger(options = {}) {
+        if (typeof document === 'undefined' || !document.body) return null;
+        const pendingCount = Number(options.pendingIncomingCount || 0);
+        const onOpen = typeof options.onOpen === 'function' ? options.onOpen : dispatchOpenNativeSettings;
+
+        // Remove any legacy in-nav trigger so the bottom navigation bar stays on a single row
+        const legacyNavTrigger = document.getElementById('x-414-nav-trigger');
+        if (legacyNavTrigger && legacyNavTrigger.parentNode) {
+            legacyNavTrigger.parentNode.removeChild(legacyNavTrigger);
+        }
+
+        // Render floating 414 pill directly above the New Tweet (compose) button
+        let pill = document.getElementById('x-414-floating-pill');
+        if (!pill) {
+            pill = document.createElement('button');
+            pill.id = 'x-414-floating-pill';
+            pill.type = 'button';
+            pill.className = 'x-414-floating-pill';
+            pill.setAttribute('aria-label', 'Open X414 Settings');
+            pill.title = 'X414 Settings & Friends Sync';
+            pill.innerHTML = `
+                <span class="x-414-floating-label">414</span>
+                <span class="x-414-nav-unread-badge" style="display:none;">0</span>
+            `;
+            pill.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpen();
+            });
+            document.body.appendChild(pill);
+        }
+        pill.style.display = 'inline-flex';
+
+        // Align directly above X's floating New Tweet button when visible
+        const composeBtn = findComposePostButton();
+        if (composeBtn && typeof composeBtn.getBoundingClientRect === 'function' && typeof window !== 'undefined' && window.innerHeight > 0) {
+            try {
+                const rect = composeBtn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0 && rect.top > 0 && rect.top < window.innerHeight) {
+                    const bottomPx = Math.max(124, Math.round(window.innerHeight - rect.top + 12));
+                    const pillWidth = 48;
+                    const rightEdge = Math.max(12, Math.round((window.innerWidth || 360) - rect.right));
+                    const centeredRightPx = Math.max(12, Math.round(rightEdge + (rect.width - pillWidth) / 2));
+                    pill.style.bottom = `${bottomPx}px`;
+                    pill.style.right = `${centeredRightPx}px`;
+                }
+            } catch (e) {}
+        }
+
+        const pillBadge = pill.querySelector('.x-414-nav-unread-badge');
+        if (pillBadge) {
+            if (pendingCount > 0) {
+                pillBadge.textContent = String(pendingCount);
+                pillBadge.style.display = 'inline-flex';
+            } else {
+                pillBadge.textContent = '0';
+                pillBadge.style.display = 'none';
+            }
+        }
+        return pill;
+    }
+
     window.XLocationUI = {
         renderInlineBadge,
         renderFriendSeenBadge,
         renderForceTweetButton,
         renderForcedPostsInHomeFeed,
         ensureFriendsTimelineTab,
+        ensureMobileSettingsTrigger,
         renderFriendsTimeline,
         createFriendTweetCard,
         updateHydratedCardsInDOM,
@@ -2721,3 +2916,4 @@
         restoreAdTweet
     };
 })();
+

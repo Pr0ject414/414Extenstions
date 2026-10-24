@@ -1755,4 +1755,130 @@ describe('xLocationUI.js', () => {
 
         jest.useRealTimers();
     });
+
+    test('should toggle hovercard dossier on touch tap/click of info (i) and friend seen (✓) badges with narrow viewport clamping', () => {
+        Object.defineProperty(window, 'innerWidth', { value: 360, configurable: true, writable: true });
+
+        const article = document.createElement('article');
+        article.setAttribute('data-testid', 'tweet');
+        const parentClickSpy = jest.fn();
+        article.addEventListener('click', parentClickSpy);
+
+        const header = document.createElement('div');
+        header.setAttribute('data-testid', 'User-Name');
+        const handleLink = document.createElement('a');
+        handleLink.href = '/pixeluser';
+        handleLink.textContent = '@pixeluser';
+        header.appendChild(handleLink);
+        article.appendChild(header);
+        document.body.appendChild(article);
+
+        window.XLocationUI.renderInlineBadge(header, {
+            screenName: 'pixeluser',
+            location: 'United States',
+            device: 'Pixel Android App',
+            meta: {
+                name: 'Pixel Tester',
+                restId: '123456',
+                createdAt: '2022-01-15T00:00:00Z'
+            }
+        });
+
+        window.XLocationUI.renderFriendSeenBadge(
+            header,
+            'pixeluser',
+            ['Alice (alice@example.com)'],
+            ['Bob (bob@example.com)']
+        );
+
+        const infoBtn = header.querySelector('.x-location-info-btn');
+        const seenBadge = header.querySelector('.x-friend-seen-badge');
+        expect(infoBtn).not.toBeNull();
+        expect(seenBadge).not.toBeNull();
+
+        // Simulate button near right edge of 360px Pixel screen
+        infoBtn.getBoundingClientRect = () => ({
+            top: 80,
+            bottom: 98,
+            left: 340,
+            right: 356,
+            width: 16,
+            height: 18
+        });
+
+        // 1. Tap info button -> opens hovercard clamped inside 360px viewport and stops propagation to article
+        infoBtn.click();
+        const hc = document.getElementById('x-location-hovercard-root');
+        expect(hc).not.toBeNull();
+        expect(hc.classList.contains('visible')).toBe(true);
+        expect(parentClickSpy).not.toHaveBeenCalled();
+
+        const leftPx = parseFloat(hc.style.left);
+        expect(leftPx).toBeGreaterThanOrEqual(10);
+        expect(leftPx).toBeLessThanOrEqual(80); // 360 - 270 - 10 = 80
+        expect(hc.innerHTML).toContain('Forced by:');
+        expect(hc.innerHTML).toContain('Bob (bob@example.com)');
+        expect(hc.innerHTML).toContain('Seen by:');
+        expect(hc.innerHTML).toContain('Alice (alice@example.com)');
+
+        // 2. Tap info button again -> toggles hovercard closed
+        infoBtn.click();
+        expect(hc.classList.contains('visible')).toBe(false);
+
+        // 3. Tap friend seen badge -> opens hovercard without triggering parent article navigation
+        seenBadge.click();
+        expect(hc.classList.contains('visible')).toBe(true);
+        expect(parentClickSpy).not.toHaveBeenCalled();
+
+        // 4. Tap outside on document.body -> dismisses hovercard
+        document.body.click();
+        expect(hc.classList.contains('visible')).toBe(false);
+    });
+
+    test('ensureMobileSettingsTrigger should render floating 414 button above the New Tweet button (not inside BottomBar) and dispatch X_OPEN_NATIVE_SETTINGS', () => {
+        const sendMessageMock = jest.fn();
+        global.chrome = {
+            runtime: {
+                sendMessage: sendMessageMock
+            }
+        };
+
+        const bottomNav = document.createElement('nav');
+        bottomNav.setAttribute('role', 'navigation');
+        bottomNav.setAttribute('data-testid', 'BottomBar');
+        document.body.appendChild(bottomNav);
+
+        const composeBtn = document.createElement('a');
+        composeBtn.setAttribute('href', '/compose/post');
+        composeBtn.getBoundingClientRect = () => ({
+            top: 660,
+            bottom: 716,
+            left: 284,
+            right: 340,
+            width: 56,
+            height: 56
+        });
+        Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true, writable: true });
+        Object.defineProperty(window, 'innerWidth', { value: 360, configurable: true, writable: true });
+        document.body.appendChild(composeBtn);
+
+        const trigger = window.XLocationUI.ensureMobileSettingsTrigger({
+            pendingIncomingCount: 3
+        });
+
+        expect(trigger).not.toBeNull();
+        expect(trigger.id).toBe('x-414-floating-pill');
+        expect(bottomNav.contains(trigger)).toBe(false);
+        expect(trigger.style.bottom).toBe('152px'); // 800 - 660 + 12 = 152px (12px above New Tweet button)
+        expect(trigger.style.right).toBe('24px');   // centered over 56px compose button at right: 20px
+
+        const badge = trigger.querySelector('.x-414-nav-unread-badge');
+        expect(badge).not.toBeNull();
+        expect(badge.textContent).toBe('3');
+        expect(badge.style.display).toBe('inline-flex');
+
+        trigger.click();
+        expect(sendMessageMock).toHaveBeenCalledWith({ action: 'X_OPEN_NATIVE_SETTINGS' });
+    });
 });
+

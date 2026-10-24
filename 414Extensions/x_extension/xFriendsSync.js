@@ -10,6 +10,7 @@ import {
     normalizeIdentifier,
     deriveInboxInfo,
     derivePairwiseInfo,
+    deriveSelfSyncInfo,
     encryptJson,
     decryptJson
 } from './xNostrCrypto.js';
@@ -17,11 +18,23 @@ import {
 const TWITTER_EPOCH_MS = 1288834974657n;
 const MIN_SNOWFLAKE_ID = 300000000000000n;
 
+export const SELF_SYNC_PREF_KEYS = [
+    'blockedCountries',
+    'blockedDeviceRegions',
+    'blockedNameFlags',
+    'isXLocationEnabled',
+    'isXHideAdsEnabled',
+    'isXAlwaysMuteEnabled',
+    'isXFriendsSyncEnabled',
+    'xVolumeLevel'
+];
+
 export class XFriendsSyncManager {
     constructor(options = {}) {
         this.relays = options.relays || FRIEND_SYNC_CONFIG.RELAYS;
         this.webSocketFactory = options.webSocketFactory || ((url) => new WebSocket(url));
         this.fetchFn = options.fetchFn || ((...args) => globalThis.fetch(...args));
+        this.onNotification = options.onNotification || null;
         this.isLoaded = false;
         this.isSyncing = false;
         this.pendingSyncRequested = false;
@@ -29,20 +42,30 @@ export class XFriendsSyncManager {
         this.lastPublishedCreatedAtSec = 0;
         this.flushTimeout = null;
         this.inflightHydrations = new Map();
+        this.lastSyncNotifications = { newInvites: [], newForcedPosts: [] };
 
         this.state = {
-            identity: null, // { email, displayName, privKeyHex, pubkeyHex, seenFeedKeyHex }
+            identity: null, // { email, displayName, passphrase, privKeyHex, pubkeyHex, seenFeedKeyHex, identityCreatedAt }
             friends: {},    // { [email]: { email, displayName, status, pubkeyHex, seenFeedKeyHex, addedAt, lastSyncedAt, seenCount } }
+            removedFriends: {}, // { [email]: removedAtMs }
             mySeenIds: [],  // string[]
             friendSeenMap: {}, // { [email]: string[] }
             postMetaMap: {},   // { [tweetId]: TweetMeta }
             myForcedMap: {},   // { [tweetId]: { id, forcedAt } }
+            unforcedMap: {},   // { [tweetId]: unforcedAtMs }
             friendForcedMap: {}, // { [email]: Array<{ id, forcedAt }> }
-            dismissedForcedIds: [] // string[]
+            dismissedForcedIds: [], // string[]
+            notifiedForcedIds: [],  // string[]
+            notifiedInviteEmails: [], // string[]
+            preferencesUpdatedAt: 0,
+            lastKnownPrefsJson: '',
+            selfSyncLastSyncedAt: null
         };
 
         this.mySeenSet = new Set();
         this.dismissedForcedSet = new Set();
+        this.notifiedForcedSet = new Set();
+        this.notifiedInviteSet = new Set();
         this.tweetToFriendsMap = new Map(); // tweetId -> string[] of friend labels
         this.tweetToForcedByMap = new Map(); // tweetId -> Array<{ label, email, forcedAt }>
         this.wsPool = new Map();            // relayUrl -> pooled connection entry
@@ -57,13 +80,20 @@ export class XFriendsSyncManager {
                 const loaded = stored[X_FRIENDS_STATE_KEY];
                 this.state.identity = loaded.identity || null;
                 this.state.friends = loaded.friends || {};
+                this.state.removedFriends = (loaded.removedFriends && typeof loaded.removedFriends === 'object') ? loaded.removedFriends : {};
                 this.state.mySeenIds = Array.isArray(loaded.mySeenIds) ? loaded.mySeenIds : [];
                 this.state.friendSeenMap = loaded.friendSeenMap || {};
                 this.state.postMetaMap = (loaded.postMetaMap && typeof loaded.postMetaMap === 'object') ? loaded.postMetaMap : {};
                 this.state.myForcedMap = (loaded.myForcedMap && typeof loaded.myForcedMap === 'object') ? loaded.myForcedMap : {};
+                this.state.unforcedMap = (loaded.unforcedMap && typeof loaded.unforcedMap === 'object') ? loaded.unforcedMap : {};
                 this.state.friendForcedMap = (loaded.friendForcedMap && typeof loaded.friendForcedMap === 'object') ? loaded.friendForcedMap : {};
                 this.state.dismissedForcedIds = Array.isArray(loaded.dismissedForcedIds) ? loaded.dismissedForcedIds : [];
+                this.state.notifiedForcedIds = Array.isArray(loaded.notifiedForcedIds) ? loaded.notifiedForcedIds : [];
+                this.state.notifiedInviteEmails = Array.isArray(loaded.notifiedInviteEmails) ? loaded.notifiedInviteEmails : [];
                 this.state.hasUnpublishedSeen = Boolean(loaded.hasUnpublishedSeen);
+                this.state.preferencesUpdatedAt = Number(loaded.preferencesUpdatedAt) || 0;
+                this.state.lastKnownPrefsJson = typeof loaded.lastKnownPrefsJson === 'string' ? loaded.lastKnownPrefsJson : '';
+                this.state.selfSyncLastSyncedAt = loaded.selfSyncLastSyncedAt || null;
             }
         } catch (err) {
             console.warn('X Friends Sync: Failed to load state from storage', err);
@@ -78,6 +108,8 @@ export class XFriendsSyncManager {
         try {
             this.state.mySeenIds = Array.from(this.mySeenSet);
             this.state.dismissedForcedIds = Array.from(this.dismissedForcedSet);
+            this.state.notifiedForcedIds = Array.from(this.notifiedForcedSet);
+            this.state.notifiedInviteEmails = Array.from(this.notifiedInviteSet);
             await chrome.storage.local.set({
                 [X_FRIENDS_STATE_KEY]: this.state
             });
@@ -616,23 +648,64 @@ export class XFriendsSyncManager {
     }
 
     pruneMySeenIds() {
-        const valid = this.state.mySeenIds.filter(id => this.isValidRecentTweetId(id));
-        const capped = valid.slice(-FRIEND_SYNC_CONFIG.MAX_SEEN_IDS);
+        const now = Date.now();
+        const maxAgeMs = FRIEND_SYNC_CONFIG.MAX_AGE_MS || (14 * 24 * 60 * 60 * 1000);
+        const maxSeenCap = FRIEND_SYNC_CONFIG.MAX_SEEN_IDS || 1000;
+        const maxForcedCap = FRIEND_SYNC_CONFIG.MAX_FORCED_IDS || 100;
+        const maxTombstoneCap = FRIEND_SYNC_CONFIG.MAX_TOMBSTONE_ENTRIES || 200;
+
+        // 1. Cap mySeenIds (1,000 rolling window)
+        const combinedSeen = new Set([
+            ...(Array.isArray(this.state.mySeenIds) ? this.state.mySeenIds : []),
+            ...(this.mySeenSet instanceof Set ? Array.from(this.mySeenSet) : [])
+        ]);
+        const valid = Array.from(combinedSeen).filter(id => this.isValidRecentTweetId(id));
+        const capped = valid.slice(-maxSeenCap);
         this.state.mySeenIds = capped;
         this.mySeenSet = new Set(capped);
 
-        const validDismissed = (this.state.dismissedForcedIds || [])
+        // 2. Cap dismissedForcedIds, notifiedForcedIds & notifiedInviteEmails
+        const combinedDismissed = new Set([
+            ...(Array.isArray(this.state.dismissedForcedIds) ? this.state.dismissedForcedIds : []),
+            ...(this.dismissedForcedSet instanceof Set ? Array.from(this.dismissedForcedSet) : [])
+        ]);
+        const validDismissed = Array.from(combinedDismissed)
             .filter(id => this.isValidRecentTweetId(id))
-            .slice(-FRIEND_SYNC_CONFIG.MAX_FORCED_IDS * 2);
+            .slice(-maxTombstoneCap);
         this.state.dismissedForcedIds = validDismissed;
         this.dismissedForcedSet = new Set(validDismissed);
 
-        // Cap myForcedMap
+        const combinedNotifiedForced = new Set([
+            ...(Array.isArray(this.state.notifiedForcedIds) ? this.state.notifiedForcedIds : []),
+            ...(this.notifiedForcedSet instanceof Set ? Array.from(this.notifiedForcedSet) : [])
+        ]);
+        const validNotifiedForced = Array.from(combinedNotifiedForced)
+            .filter(id => this.isValidRecentTweetId(id))
+            .slice(-maxTombstoneCap);
+        this.state.notifiedForcedIds = validNotifiedForced;
+        this.notifiedForcedSet = new Set(validNotifiedForced);
+
+        const combinedNotifiedInvites = new Set([
+            ...(Array.isArray(this.state.notifiedInviteEmails) ? this.state.notifiedInviteEmails : []),
+            ...(this.notifiedInviteSet instanceof Set ? Array.from(this.notifiedInviteSet) : [])
+        ]);
+        const validNotifiedInvites = Array.from(combinedNotifiedInvites)
+            .filter(e => typeof e === 'string' && e.trim().length > 0)
+            .slice(-maxTombstoneCap);
+        this.state.notifiedInviteEmails = validNotifiedInvites;
+        this.notifiedInviteSet = new Set(validNotifiedInvites);
+
+        // 3. Prune & cap myForcedMap (14-day TTL + 100 cap)
         if (this.state.myForcedMap && typeof this.state.myForcedMap === 'object') {
             const forcedEntries = Object.values(this.state.myForcedMap)
-                .filter(item => item && this.isValidRecentTweetId(item.id))
+                .filter(item => {
+                    if (!item || !this.isValidRecentTweetId(item.id)) return false;
+                    const fAt = Number(item.forcedAt) || 0;
+                    if (fAt > 0 && fAt <= now && (now - fAt) > maxAgeMs) return false;
+                    return true;
+                })
                 .sort((a, b) => (a.forcedAt || 0) - (b.forcedAt || 0))
-                .slice(-(FRIEND_SYNC_CONFIG.MAX_FORCED_IDS || 100));
+                .slice(-maxForcedCap);
             this.state.myForcedMap = {};
             for (const entry of forcedEntries) {
                 this.state.myForcedMap[entry.id] = entry;
@@ -641,23 +714,94 @@ export class XFriendsSyncManager {
             this.state.myForcedMap = {};
         }
 
-        // Cap postMetaMap locally while preserving forced posts and hydrated friend posts
-        const maxLocalMeta = Math.max((FRIEND_SYNC_CONFIG.MAX_POST_META_ENTRIES || 200) * 6, 1200);
-        const metaKeys = Object.keys(this.state.postMetaMap || {});
-        if (metaKeys.length > maxLocalMeta) {
-            const sortedMeta = Object.values(this.state.postMetaMap)
-                .filter(m => m && this.isValidRecentTweetId(m.id))
-                .sort((a, b) => {
-                    const aForced = Boolean(this.state.myForcedMap[a.id]);
-                    const bForced = Boolean(this.state.myForcedMap[b.id]);
+        // 4. Prune & cap friendSeenMap and friendForcedMap per friend
+        if (this.state.friendSeenMap && typeof this.state.friendSeenMap === 'object') {
+            for (const [fEmail, list] of Object.entries(this.state.friendSeenMap)) {
+                if (Array.isArray(list)) {
+                    this.state.friendSeenMap[fEmail] = list
+                        .filter(id => this.isValidRecentTweetId(id))
+                        .slice(-maxSeenCap);
+                }
+            }
+        }
+        const activeFriendForcedIds = new Set();
+        if (this.state.friendForcedMap && typeof this.state.friendForcedMap === 'object') {
+            for (const [fEmail, list] of Object.entries(this.state.friendForcedMap)) {
+                if (Array.isArray(list)) {
+                    const filteredForced = list
+                        .filter(item => {
+                            const fid = typeof item === 'string' ? item : item?.id;
+                            if (!this.isValidRecentTweetId(fid)) return false;
+                            const fAt = typeof item === 'object' ? (Number(item?.forcedAt) || 0) : 0;
+                            if (fAt > 0 && fAt <= now && (now - fAt) > maxAgeMs) return false;
+                            return true;
+                        })
+                        .slice(-maxForcedCap);
+                    this.state.friendForcedMap[fEmail] = filteredForced;
+                    for (const item of filteredForced) {
+                        const fid = typeof item === 'string' ? item : item?.id;
+                        if (fid) activeFriendForcedIds.add(fid);
+                    }
+                }
+            }
+        }
+
+        // 5. Prune & cap unforcedMap and removedFriends tombstones (14-day TTL + 200 cap)
+        if (this.state.unforcedMap && typeof this.state.unforcedMap === 'object') {
+            const unforcedEntries = Object.entries(this.state.unforcedMap)
+                .filter(([tid, ts]) => {
+                    if (!this.isValidRecentTweetId(tid)) return false;
+                    const t = Number(ts) || 0;
+                    return !(t > 0 && t <= now && (now - t) > maxAgeMs);
+                })
+                .sort((a, b) => (Number(a[1]) || 0) - (Number(b[1]) || 0))
+                .slice(-maxTombstoneCap);
+            this.state.unforcedMap = Object.fromEntries(unforcedEntries);
+        } else {
+            this.state.unforcedMap = {};
+        }
+
+        if (this.state.removedFriends && typeof this.state.removedFriends === 'object') {
+            const removedEntries = Object.entries(this.state.removedFriends)
+                .filter(([email, ts]) => {
+                    if (!email) return false;
+                    const t = Number(ts) || 0;
+                    return !(t > 0 && t <= now && (now - t) > maxAgeMs);
+                })
+                .sort((a, b) => (Number(a[1]) || 0) - (Number(b[1]) || 0))
+                .slice(-maxTombstoneCap);
+            this.state.removedFriends = Object.fromEntries(removedEntries);
+        } else {
+            this.state.removedFriends = {};
+        }
+
+        // 6. Prune & cap postMetaMap locally (250 LRU cap + 14-day TTL) while preserving forced posts
+        const maxLocalMeta = FRIEND_SYNC_CONFIG.MAX_LOCAL_POST_META || 250;
+        if (this.state.postMetaMap && typeof this.state.postMetaMap === 'object') {
+            const allMeta = Object.values(this.state.postMetaMap).filter(m => {
+                if (!m || !this.isValidRecentTweetId(m.id)) return false;
+                const isPinnedForced = Boolean(this.state.myForcedMap[m.id] || activeFriendForcedIds.has(m.id));
+                if (isPinnedForced) return true;
+                const uAt = Number(m.updatedAt) || 0;
+                if (uAt > 0 && uAt <= now && (now - uAt) > maxAgeMs) return false;
+                return true;
+            });
+
+            if (allMeta.length > maxLocalMeta) {
+                allMeta.sort((a, b) => {
+                    const aForced = Boolean(this.state.myForcedMap[a.id] || activeFriendForcedIds.has(a.id));
+                    const bForced = Boolean(this.state.myForcedMap[b.id] || activeFriendForcedIds.has(b.id));
                     if (aForced !== bForced) return aForced ? 1 : -1;
                     return (a.updatedAt || 0) - (b.updatedAt || 0);
-                })
-                .slice(-maxLocalMeta);
+                });
+            }
+            const keptMeta = allMeta.slice(-maxLocalMeta);
             this.state.postMetaMap = {};
-            for (const m of sortedMeta) {
+            for (const m of keptMeta) {
                 this.state.postMetaMap[m.id] = m;
             }
+        } else {
+            this.state.postMetaMap = {};
         }
     }
 
@@ -718,6 +862,7 @@ export class XFriendsSyncManager {
             lastSyncedAt: f.lastSyncedAt || null,
             seenCount: (this.state.friendSeenMap[f.email] || []).length
         }));
+        const pendingIncomingCount = friendsArray.filter(f => f.status === 'pending_incoming').length;
 
         return {
             identity: this.state.identity ? {
@@ -726,13 +871,15 @@ export class XFriendsSyncManager {
                 pubkeyHex: this.state.identity.pubkeyHex
             } : null,
             friends: friendsArray,
+            pendingIncomingCount,
             mySeenCount: this.mySeenSet.size,
             lastSyncTime: this.lastSyncTime,
+            selfSyncLastSyncedAt: this.state.selfSyncLastSyncedAt || null,
             isSyncing: this.isSyncing
         };
     }
 
-    async setIdentity(email, displayName = '') {
+    async setIdentity(email, displayName = '', passphrase = '') {
         await this.init();
         const normEmail = normalizeIdentifier(email);
         if (!normEmail || normEmail.length < 3) {
@@ -744,22 +891,34 @@ export class XFriendsSyncManager {
 
         if (existing && existing.email === normEmail) {
             existing.displayName = cleanName;
+            if (passphrase !== undefined) existing.passphrase = passphrase;
         } else {
             const privKeyHex = existing?.privKeyHex || generateSecretKeyHex();
             const pubkeyHex = getPublicKeyHex(privKeyHex);
             const seenFeedKeyHex = existing?.seenFeedKeyHex || generateRandomBytesHex(32);
+            const nowMs = Date.now();
 
             this.state.identity = {
                 email: normEmail,
                 displayName: cleanName,
                 privKeyHex,
                 pubkeyHex,
-                seenFeedKeyHex
+                seenFeedKeyHex,
+                identityCreatedAt: existing?.identityCreatedAt || nowMs,
+                feedKeyUpdatedAt: existing?.feedKeyUpdatedAt || nowMs,
+                passphrase: passphrase || ''
             };
         }
 
+        // Pull any existing self-sync snapshot from relays for this email so a second device
+        // or reinstalled client automatically adopts the canonical keypair, friends, seen/forced posts, and preferences.
+        await this.pullSelfSyncFromRelays(normEmail, passphrase || '', {
+            adoptIdentityKeys: true,
+            explicitDisplayName: Boolean((displayName || '').trim()) ? cleanName : ''
+        }).catch(() => {});
+
         await this.saveState();
-        // Publish seen snapshot and re-announce handshakes for any existing friends
+        // Publish seen snapshot, self-sync snapshot, and re-announce handshakes for any existing friends
         await this.publishAllHandshakes().catch(() => {});
         await this.publishMySeenSnapshot().catch(() => {});
         await this.syncWithRelays().catch(() => {});
@@ -786,19 +945,24 @@ export class XFriendsSyncManager {
             return this.acceptFriend(normFriend);
         }
 
+        if (this.state.removedFriends && this.state.removedFriends[normFriend]) {
+            delete this.state.removedFriends[normFriend];
+        }
+
         this.state.friends[normFriend] = {
             email: normFriend,
             displayName: (friendDisplayName || '').trim() || existing?.displayName || normFriend,
             status: existing?.status === 'connected' ? 'connected' : 'pending_outgoing',
             pubkeyHex: existing?.pubkeyHex || null,
             seenFeedKeyHex: existing?.seenFeedKeyHex || null,
-            addedAt: existing?.addedAt || Date.now(),
+            addedAt: Date.now(),
             lastSyncedAt: existing?.lastSyncedAt || null,
             seenCount: (this.state.friendSeenMap[normFriend] || []).length
         };
 
         await this.saveState();
         await this.publishHandshakeForFriend(normFriend).catch(() => {});
+        await this.publishSelfSyncSnapshot().catch(() => {});
         await this.syncWithRelays().catch(() => {});
         return this.getPublicState();
     }
@@ -829,6 +993,9 @@ export class XFriendsSyncManager {
         const normFriend = normalizeIdentifier(friendEmail);
         const wasConnected = this.state.friends[normFriend]?.status === 'connected';
 
+        if (!this.state.removedFriends) this.state.removedFriends = {};
+        this.state.removedFriends[normFriend] = Date.now();
+
         delete this.state.friends[normFriend];
         delete this.state.friendSeenMap[normFriend];
         delete this.state.friendForcedMap[normFriend];
@@ -837,11 +1004,13 @@ export class XFriendsSyncManager {
         if (wasConnected && this.state.identity) {
             // Rotate feed key so removed friend can no longer decrypt future snapshots
             this.state.identity.seenFeedKeyHex = generateRandomBytesHex(32);
+            this.state.identity.feedKeyUpdatedAt = Date.now();
             await this.saveState();
             await this.publishAllHandshakes().catch(() => {});
             await this.publishMySeenSnapshot().catch(() => {});
         } else {
             await this.saveState();
+            await this.publishSelfSyncSnapshot().catch(() => {});
         }
 
         return this.getPublicState();
@@ -894,6 +1063,9 @@ export class XFriendsSyncManager {
 
         const now = Date.now();
         this.mySeenSet.add(id);
+        if (this.state.unforcedMap && this.state.unforcedMap[id]) {
+            delete this.state.unforcedMap[id];
+        }
         this.state.myForcedMap[id] = {
             id,
             forcedAt: now
@@ -932,6 +1104,8 @@ export class XFriendsSyncManager {
 
         if (this.state.myForcedMap && this.state.myForcedMap[id]) {
             delete this.state.myForcedMap[id];
+            if (!this.state.unforcedMap) this.state.unforcedMap = {};
+            this.state.unforcedMap[id] = Date.now();
             this.state.hasUnpublishedSeen = true;
             await this.saveState();
             this.broadcastSeenUpdateToTabs();
@@ -957,13 +1131,9 @@ export class XFriendsSyncManager {
         if (!this.isValidRecentTweetId(id)) return { dismissed: false };
 
         this.dismissedForcedSet.add(id);
-        const wasSeen = this.mySeenSet.has(id);
         this.mySeenSet.add(id);
-
-        if (!wasSeen) {
-            this.state.hasUnpublishedSeen = true;
-            this.scheduleSnapshotFlush();
-        }
+        this.state.hasUnpublishedSeen = true;
+        this.scheduleSnapshotFlush();
         await this.saveState();
         this.broadcastSeenUpdateToTabs();
 
@@ -1033,13 +1203,16 @@ export class XFriendsSyncManager {
             const forcedBy = forcedEntries.map(e => e.label);
             const myForcedObj = this.state.myForcedMap ? this.state.myForcedMap[tweetId] : null;
             const forcedByMe = Boolean(myForcedObj);
-            const isForced = forcedBy.length > 0 || forcedByMe;
-            if (meta && meta.isUnavailable && !isForced) {
+            // Only treat a post as incoming-forced if at least one friend forced it to you
+            const isForced = forcedBy.length > 0;
+            // Posts forced ONLY by you (not seen or forced by any friend) are kept for the "Sent" filter tab only
+            const isSentOnly = forcedByMe && forcedBy.length === 0 && seenBy.length === 0;
+            if (meta && meta.isUnavailable && !isForced && !forcedByMe) {
                 continue;
             }
             const myForcedAt = myForcedObj?.forcedAt || 0;
             const friendForcedAt = forcedEntries.reduce((max, e) => Math.max(max, e.forcedAt || 0), 0);
-            const latestForcedAt = Math.max(myForcedAt, friendForcedAt);
+            const latestForcedAt = friendForcedAt || myForcedAt;
             const isSeenByMe = this.mySeenSet.has(tweetId);
             const isDismissed = this.dismissedForcedSet.has(tweetId);
             const snowflakeTimeMs = this.getSnowflakeTimestampMs(tweetId);
@@ -1051,6 +1224,8 @@ export class XFriendsSyncManager {
                 forcedBy,
                 forcedByMe,
                 isForced,
+                isSentOnly,
+                myForcedAt,
                 latestForcedAt,
                 isSeenByMe,
                 isDismissed,
@@ -1066,17 +1241,31 @@ export class XFriendsSyncManager {
             }
         }
 
-        // Sort timeline posts: forced posts first (newest forcedAt), then seen posts (newest snowflake / updatedAt)
+        // Sort timeline posts: friends' forced posts first (newest forcedAt), then seen posts (newest snowflake / updatedAt)
         timelinePosts.sort((a, b) => {
             if (a.isForced !== b.isForced) return a.isForced ? -1 : 1;
             if (a.isForced && b.isForced && a.latestForcedAt !== b.latestForcedAt) {
                 return b.latestForcedAt - a.latestForcedAt;
             }
+            if (a.isSentOnly !== b.isSentOnly) return a.isSentOnly ? 1 : -1;
             if (a.snowflakeTimeMs !== b.snowflakeTimeMs) {
                 return b.snowflakeTimeMs - a.snowflakeTimeMs;
             }
             return b.sortTimestamp - a.sortTimestamp;
         });
+
+        const maxTimelineItems = FRIEND_SYNC_CONFIG.MAX_TIMELINE_ITEMS || 300;
+        let cappedTimelinePosts = timelinePosts;
+        if (timelinePosts.length > maxTimelineItems) {
+            const pinnedOrSent = timelinePosts.filter(p => p.isForced || p.forcedByMe);
+            const regularSeen = timelinePosts.filter(p => !p.isForced && !p.forcedByMe);
+            const remainingBudget = Math.max(0, maxTimelineItems - pinnedOrSent.length);
+            cappedTimelinePosts = [
+                ...pinnedOrSent.filter(p => !p.isSentOnly),
+                ...regularSeen.slice(0, remainingBudget),
+                ...pinnedOrSent.filter(p => p.isSentOnly)
+            ];
+        }
 
         unseenForcedPosts.sort((a, b) => (b.latestForcedAt || b.sortTimestamp) - (a.latestForcedAt || a.sortTimestamp));
 
@@ -1089,7 +1278,7 @@ export class XFriendsSyncManager {
             }));
 
         return {
-            timelinePosts,
+            timelinePosts: cappedTimelinePosts,
             unseenForcedPosts,
             connectedFriends
         };
@@ -1191,21 +1380,23 @@ export class XFriendsSyncManager {
             .filter(item => item && this.isValidRecentTweetId(item.id))
             .slice(-(FRIEND_SYNC_CONFIG.MAX_FORCED_IDS || 100));
 
-        // Include compact post metadata for all forced posts + most recent seen posts
+        // Include compact post metadata for all forced posts + most recent seen posts (up to MAX_POST_META_ENTRIES)
         const posts = {};
-        const maxMetaEntries = FRIEND_SYNC_CONFIG.MAX_POST_META_ENTRIES || 200;
+        const maxSeenMetaEntries = FRIEND_SYNC_CONFIG.MAX_POST_META_ENTRIES || 25;
         for (const forcedItem of forcedList) {
             const meta = this.state.postMetaMap[forcedItem.id];
             if (meta && !meta.isUnavailable) {
                 posts[forcedItem.id] = meta;
             }
         }
-        const recentSeenForMeta = seenIds.slice(-maxMetaEntries).reverse();
+        const recentSeenForMeta = seenIds.slice(-maxSeenMetaEntries).reverse();
+        let addedSeenMetaCount = 0;
         for (const tid of recentSeenForMeta) {
-            if (Object.keys(posts).length >= maxMetaEntries) break;
+            if (addedSeenMetaCount >= maxSeenMetaEntries) break;
             const meta = this.state.postMetaMap[tid];
             if (!posts[tid] && meta && !meta.isUnavailable) {
                 posts[tid] = meta;
+                addedSeenMetaCount++;
             }
         }
 
@@ -1233,14 +1424,366 @@ export class XFriendsSyncManager {
         }, id.privKeyHex);
     }
 
-    async publishMySeenSnapshot() {
-        const event = await this.buildSeenSnapshotEvent();
+    async readLocalPreferencesForSelfSync() {
+        const prefs = {};
+        try {
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                const stored = await chrome.storage.local.get(SELF_SYNC_PREF_KEYS);
+                for (const key of SELF_SYNC_PREF_KEYS) {
+                    if (stored && stored[key] !== undefined) {
+                        prefs[key] = stored[key];
+                    }
+                }
+            }
+        } catch (err) {
+            // Ignore storage read errors
+        }
+
+        const prefsKeys = Object.keys(prefs).sort();
+        if (prefsKeys.length > 0) {
+            const normalizedObj = {};
+            for (const k of prefsKeys) normalizedObj[k] = prefs[k];
+            const prefsJson = JSON.stringify(normalizedObj);
+            if (prefsJson !== (this.state.lastKnownPrefsJson || '')) {
+                this.state.lastKnownPrefsJson = prefsJson;
+                this.state.preferencesUpdatedAt = Date.now();
+            }
+        }
+
+        return {
+            preferences: prefs,
+            preferencesUpdatedAt: this.state.preferencesUpdatedAt || 0
+        };
+    }
+
+    async applyRemotePreferencesFromSelfSync(remotePrefs, remoteUpdatedAt = 0) {
+        if (!remotePrefs || typeof remotePrefs !== 'object') return false;
+        const localUpdatedAt = this.state.preferencesUpdatedAt || 0;
+        if (remoteUpdatedAt <= localUpdatedAt) return false;
+
+        const toSet = {};
+        const sortedKeys = [];
+        for (const key of SELF_SYNC_PREF_KEYS) {
+            if (remotePrefs[key] !== undefined) {
+                toSet[key] = remotePrefs[key];
+                sortedKeys.push(key);
+            }
+        }
+        if (sortedKeys.length === 0) return false;
+
+        this.isApplyingRemotePrefs = true;
+        try {
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                await chrome.storage.local.set(toSet);
+                const fullStored = await chrome.storage.local.get(SELF_SYNC_PREF_KEYS);
+                const allKeys = SELF_SYNC_PREF_KEYS.filter(k => fullStored && fullStored[k] !== undefined).sort();
+                const normalizedObj = {};
+                for (const k of allKeys) normalizedObj[k] = fullStored[k];
+                this.state.lastKnownPrefsJson = JSON.stringify(normalizedObj);
+            } else {
+                sortedKeys.sort();
+                const normalizedObj = {};
+                for (const k of sortedKeys) normalizedObj[k] = toSet[k];
+                this.state.lastKnownPrefsJson = JSON.stringify(normalizedObj);
+            }
+            this.state.preferencesUpdatedAt = remoteUpdatedAt;
+        } catch (err) {
+            console.warn('X Friends Sync: Failed to apply remote preferences', err);
+        } finally {
+            this.isApplyingRemotePrefs = false;
+        }
+        return true;
+    }
+
+    async buildSelfSyncEvent() {
+        const id = this.state.identity;
+        if (!id) return null;
+
+        this.pruneMySeenIds();
+        const { selfTag, selfKeyHex } = await deriveSelfSyncInfo(id.email, id.passphrase || '');
+        const { preferences, preferencesUpdatedAt } = await this.readLocalPreferencesForSelfSync();
+
+        const payload = {
+            type: '414x_self_sync_v1',
+            v: 1,
+            updatedAt: Date.now(),
+            identity: {
+                email: id.email,
+                displayName: id.displayName,
+                privKeyHex: id.privKeyHex,
+                pubkeyHex: id.pubkeyHex,
+                seenFeedKeyHex: id.seenFeedKeyHex,
+                identityCreatedAt: id.identityCreatedAt || 0,
+                feedKeyUpdatedAt: id.feedKeyUpdatedAt || 0
+            },
+            friends: this.state.friends || {},
+            removedFriends: this.state.removedFriends || {},
+            mySeenIds: Array.from(this.mySeenSet).slice(-FRIEND_SYNC_CONFIG.MAX_SEEN_IDS),
+            myForcedMap: this.state.myForcedMap || {},
+            unforcedMap: this.state.unforcedMap || {},
+            dismissedForcedIds: Array.from(this.dismissedForcedSet).slice(-(FRIEND_SYNC_CONFIG.MAX_DISMISSED_IDS || 500)),
+            preferences,
+            preferencesUpdatedAt
+        };
+
+        const encryptedContent = await encryptJson(payload, selfKeyHex);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const createdAt = Math.max(nowSec, (this.lastPublishedCreatedAtSec || 0) + 1);
+        this.lastPublishedCreatedAtSec = createdAt;
+
+        return signEvent({
+            kind: FRIEND_SYNC_CONFIG.NOSTR_KIND_APP_DATA,
+            created_at: createdAt,
+            tags: [
+                ['d', '414x-self-v1'],
+                ['t', selfTag]
+            ],
+            content: encryptedContent
+        }, id.privKeyHex);
+    }
+
+    async publishSelfSyncSnapshot() {
+        const event = await this.buildSelfSyncEvent();
         if (!event) return false;
         await this.publishEventsToRelays([event]);
-        if (this.state.hasUnpublishedSeen) {
-            this.state.hasUnpublishedSeen = false;
+        this.state.selfSyncLastSyncedAt = Date.now();
+        await this.saveState();
+        return true;
+    }
+
+    async mergeSelfSyncPayload(remote, options = {}) {
+        if (!remote || remote.type !== '414x_self_sync_v1') return { changed: false, sawAdditionalItems: false };
+
+        let changed = false;
+        let sawAdditionalItems = false;
+        const now = Date.now();
+
+        // 1. Identity key adoption (multi-device / reinstall recovery & feed-key rotation sync)
+        if (remote.identity && this.state.identity) {
+            const rId = remote.identity;
+            if (rId.privKeyHex && rId.pubkeyHex && rId.seenFeedKeyHex) {
+                const sameKeypair = this.state.identity.privKeyHex === rId.privKeyHex;
+                const remoteFeedUpdatedAt = Number(rId.feedKeyUpdatedAt || remote.updatedAt || 0);
+                const localFeedUpdatedAt = Number(this.state.identity.feedKeyUpdatedAt || 0);
+
+                if (options.adoptIdentityKeys) {
+                    if (
+                        this.state.identity.privKeyHex !== rId.privKeyHex ||
+                        this.state.identity.pubkeyHex !== rId.pubkeyHex ||
+                        this.state.identity.seenFeedKeyHex !== rId.seenFeedKeyHex
+                    ) {
+                        this.state.identity.privKeyHex = rId.privKeyHex;
+                        this.state.identity.pubkeyHex = rId.pubkeyHex;
+                        this.state.identity.seenFeedKeyHex = rId.seenFeedKeyHex;
+                        if (rId.identityCreatedAt) this.state.identity.identityCreatedAt = rId.identityCreatedAt;
+                        if (remoteFeedUpdatedAt) this.state.identity.feedKeyUpdatedAt = remoteFeedUpdatedAt;
+                        changed = true;
+                    }
+                    if (!options.explicitDisplayName && rId.displayName && this.state.identity.displayName !== rId.displayName) {
+                        this.state.identity.displayName = rId.displayName;
+                        changed = true;
+                    }
+                } else if (sameKeypair && this.state.identity.seenFeedKeyHex !== rId.seenFeedKeyHex && remoteFeedUpdatedAt > localFeedUpdatedAt) {
+                    // Another device with our same Nostr keypair rotated seenFeedKeyHex (e.g. after removing a friend)
+                    this.state.identity.seenFeedKeyHex = rId.seenFeedKeyHex;
+                    this.state.identity.feedKeyUpdatedAt = remoteFeedUpdatedAt;
+                    changed = true;
+                }
+            }
+        }
+
+        // 2. Merge removedFriends tombstones
+        if (!this.state.removedFriends) this.state.removedFriends = {};
+        if (remote.removedFriends && typeof remote.removedFriends === 'object') {
+            for (const [rawEmail, removedAt] of Object.entries(remote.removedFriends)) {
+                const fEmail = normalizeIdentifier(rawEmail);
+                const rTime = Number(removedAt) || 0;
+                if (fEmail && rTime > (this.state.removedFriends[fEmail] || 0)) {
+                    this.state.removedFriends[fEmail] = rTime;
+                    changed = true;
+                }
+            }
+        }
+
+        // Remove any local friend whose addedAt predates a removal tombstone
+        for (const [fEmail, localFriend] of Object.entries(this.state.friends)) {
+            const removedAt = this.state.removedFriends[fEmail] || 0;
+            if (removedAt > (localFriend.addedAt || 0)) {
+                delete this.state.friends[fEmail];
+                delete this.state.friendSeenMap[fEmail];
+                delete this.state.friendForcedMap[fEmail];
+                changed = true;
+            }
+        }
+
+        // 3. Merge friends map
+        if (remote.friends && typeof remote.friends === 'object') {
+            for (const [rawEmail, rFriend] of Object.entries(remote.friends)) {
+                const fEmail = normalizeIdentifier(rawEmail);
+                if (!fEmail || !rFriend || typeof rFriend !== 'object') continue;
+                if (this.state.identity && fEmail === this.state.identity.email) continue;
+
+                const removedAt = this.state.removedFriends[fEmail] || 0;
+                if ((rFriend.addedAt || 0) < removedAt) continue;
+
+                const existing = this.state.friends[fEmail];
+                if (!existing) {
+                    this.state.friends[fEmail] = {
+                        email: fEmail,
+                        displayName: rFriend.displayName || fEmail,
+                        status: rFriend.status || 'pending_outgoing',
+                        pubkeyHex: rFriend.pubkeyHex || null,
+                        seenFeedKeyHex: rFriend.seenFeedKeyHex || null,
+                        handshakeTimestamp: rFriend.handshakeTimestamp || 0,
+                        addedAt: rFriend.addedAt || now,
+                        lastSyncedAt: rFriend.lastSyncedAt || null,
+                        seenCount: (this.state.friendSeenMap[fEmail] || []).length
+                    };
+                    changed = true;
+                } else {
+                    if (rFriend.status === 'connected' && existing.status !== 'connected') {
+                        existing.status = 'connected';
+                        changed = true;
+                    }
+                    const rHsTime = rFriend.handshakeTimestamp || 0;
+                    const lHsTime = existing.handshakeTimestamp || 0;
+                    if (rFriend.pubkeyHex && rFriend.seenFeedKeyHex && (!existing.pubkeyHex || !existing.seenFeedKeyHex || rHsTime >= lHsTime)) {
+                        if (existing.pubkeyHex !== rFriend.pubkeyHex || existing.seenFeedKeyHex !== rFriend.seenFeedKeyHex) {
+                            existing.pubkeyHex = rFriend.pubkeyHex;
+                            existing.seenFeedKeyHex = rFriend.seenFeedKeyHex;
+                            existing.handshakeTimestamp = rHsTime;
+                            changed = true;
+                        }
+                    }
+                    if (rFriend.displayName && existing.displayName === existing.email && rFriend.displayName !== existing.email) {
+                        existing.displayName = rFriend.displayName;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // 4. Merge mySeenIds
+        if (Array.isArray(remote.mySeenIds)) {
+            for (const rawId of remote.mySeenIds) {
+                const tid = String(rawId || '').trim();
+                if (this.isValidRecentTweetId(tid, now) && !this.mySeenSet.has(tid)) {
+                    this.mySeenSet.add(tid);
+                    changed = true;
+                    sawAdditionalItems = true;
+                }
+            }
+        }
+
+        // 5. Merge unforcedMap & myForcedMap
+        if (!this.state.unforcedMap) this.state.unforcedMap = {};
+        if (remote.unforcedMap && typeof remote.unforcedMap === 'object') {
+            for (const [rawId, unforcedAt] of Object.entries(remote.unforcedMap)) {
+                const tid = String(rawId || '').trim();
+                const uTime = Number(unforcedAt) || 0;
+                if (tid && uTime > (this.state.unforcedMap[tid] || 0)) {
+                    this.state.unforcedMap[tid] = uTime;
+                    changed = true;
+                }
+            }
+        }
+
+        if (!this.state.myForcedMap) this.state.myForcedMap = {};
+        for (const [tid, fObj] of Object.entries(this.state.myForcedMap)) {
+            const uTime = this.state.unforcedMap[tid] || 0;
+            if (uTime >= (fObj?.forcedAt || 0)) {
+                delete this.state.myForcedMap[tid];
+                changed = true;
+                sawAdditionalItems = true;
+            }
+        }
+
+        if (remote.myForcedMap && typeof remote.myForcedMap === 'object') {
+            for (const [rawId, fObj] of Object.entries(remote.myForcedMap)) {
+                const tid = String(rawId || fObj?.id || '').trim();
+                const forcedAt = Number(fObj?.forcedAt) || remote.updatedAt || now;
+                const uTime = this.state.unforcedMap[tid] || 0;
+                if (this.isValidRecentTweetId(tid, now) && forcedAt > uTime) {
+                    const existingForced = this.state.myForcedMap[tid];
+                    if (!existingForced || forcedAt > (existingForced.forcedAt || 0)) {
+                        this.state.myForcedMap[tid] = { id: tid, forcedAt };
+                        this.mySeenSet.add(tid);
+                        changed = true;
+                        sawAdditionalItems = true;
+                    }
+                }
+            }
+        }
+
+        // 6. Merge dismissedForcedIds
+        if (Array.isArray(remote.dismissedForcedIds)) {
+            for (const rawId of remote.dismissedForcedIds) {
+                const tid = String(rawId || '').trim();
+                if (this.isValidRecentTweetId(tid, now) && !this.dismissedForcedSet.has(tid)) {
+                    this.dismissedForcedSet.add(tid);
+                    this.mySeenSet.add(tid);
+                    changed = true;
+                }
+            }
+        }
+
+        // 7. Merge preferences (blocklists & toggles)
+        if (remote.preferences && typeof remote.preferences === 'object') {
+            const prefsChanged = await this.applyRemotePreferencesFromSelfSync(
+                remote.preferences,
+                remote.preferencesUpdatedAt || remote.updatedAt || 0
+            );
+            if (prefsChanged) changed = true;
+        }
+
+        this.state.selfSyncLastSyncedAt = Math.max(this.state.selfSyncLastSyncedAt || 0, remote.updatedAt || now);
+        this.pruneMySeenIds();
+        return { changed, sawAdditionalItems };
+    }
+
+    async pullSelfSyncFromRelays(email, passphrase = '', options = {}) {
+        const normEmail = normalizeIdentifier(email);
+        if (!normEmail) return false;
+
+        const { selfTag, selfKeyHex } = await deriveSelfSyncInfo(normEmail, passphrase);
+        const events = await this.queryRelays([
+            {
+                kinds: [FRIEND_SYNC_CONFIG.NOSTR_KIND_APP_DATA],
+                '#t': [selfTag],
+                '#d': ['414x-self-v1']
+            }
+        ]);
+        if (!Array.isArray(events) || events.length === 0) return false;
+
+        // Sort oldest to newest so newest wins on conflicts while unioning sets
+        const sorted = [...events].sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+        let anyMerged = false;
+        for (const ev of sorted) {
+            const payload = await decryptJson(ev.content, selfKeyHex);
+            if (payload && payload.type === '414x_self_sync_v1') {
+                await this.mergeSelfSyncPayload(payload, options);
+                anyMerged = true;
+            }
+        }
+        if (anyMerged) {
+            this.rebuildIndex();
             await this.saveState();
         }
+        return anyMerged;
+    }
+
+    async publishMySeenSnapshot() {
+        const seenEvent = await this.buildSeenSnapshotEvent();
+        const selfEvent = await this.buildSelfSyncEvent();
+        const eventsToPublish = [seenEvent, selfEvent].filter(Boolean);
+        if (eventsToPublish.length === 0) return false;
+
+        await this.publishEventsToRelays(eventsToPublish);
+        this.state.selfSyncLastSyncedAt = Date.now();
+        if (this.state.hasUnpublishedSeen) {
+            this.state.hasUnpublishedSeen = false;
+        }
+        await this.saveState();
         return true;
     }
 
@@ -1256,6 +1799,22 @@ export class XFriendsSyncManager {
         this.isSyncing = true;
         this.pendingSyncRequested = false;
         try {
+            // Snapshot pre-sync invites & forced posts for notification diffing
+            this.rebuildIndex();
+            const prevInviteEmails = new Set(
+                Object.values(this.state.friends)
+                    .filter(f => f.status === 'pending_incoming')
+                    .map(f => f.email)
+            );
+            const prevForcedIds = new Set(this.tweetToForcedByMap.keys());
+
+            // Check if local preferences changed since last self-sync
+            const prevPrefsUpdatedAt = this.state.preferencesUpdatedAt || 0;
+            await this.readLocalPreferencesForSelfSync();
+            if ((this.state.preferencesUpdatedAt || 0) > prevPrefsUpdatedAt) {
+                this.state.hasUnpublishedSeen = true;
+            }
+
             if (this.flushTimeout) {
                 clearTimeout(this.flushTimeout);
                 this.flushTimeout = null;
@@ -1266,7 +1825,8 @@ export class XFriendsSyncManager {
             }
 
             const { inboxTag, inboxKeyHex } = await deriveInboxInfo(id.email);
-            const tTagsToQuery = [inboxTag];
+            const { selfTag, selfKeyHex } = await deriveSelfSyncInfo(id.email, id.passphrase || '');
+            const tTagsToQuery = [inboxTag, selfTag];
             const pairwiseMap = new Map(); // incomingTag -> { friendEmail, pairKeyHex }
 
             for (const friendEmail of Object.keys(this.state.friends)) {
@@ -1278,7 +1838,7 @@ export class XFriendsSyncManager {
                 });
             }
 
-            // Step 1: Query Inbox & Incoming Pairwise Handshakes
+            // Step 1: Query Self-Sync, Inbox & Incoming Pairwise Handshakes
             const discoveryFilters = [
                 {
                     kinds: [FRIEND_SYNC_CONFIG.NOSTR_KIND_APP_DATA],
@@ -1288,6 +1848,43 @@ export class XFriendsSyncManager {
 
             const discoveryEvents = await this.queryRelays(discoveryFilters);
             let stateChanged = false;
+            let needRepublishSeenFromSelfSync = false;
+
+            // Process self-sync events first (oldest to newest) so newly synced friends are included in pairwise checks
+            const selfSyncEvents = discoveryEvents
+                .filter(ev => {
+                    const tVals = (ev.tags || []).filter(t => t[0] === 't').map(t => t[1]);
+                    const dVal = (ev.tags || []).find(t => t[0] === 'd')?.[1] || '';
+                    return tVals.includes(selfTag) || dVal === '414x-self-v1';
+                })
+                .sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+
+            for (const ev of selfSyncEvents) {
+                const selfPayload = await decryptJson(ev.content, selfKeyHex);
+                if (selfPayload && selfPayload.type === '414x_self_sync_v1') {
+                    const mergeRes = await this.mergeSelfSyncPayload(selfPayload, {
+                        adoptIdentityKeys: false
+                    });
+                    if (mergeRes.changed) {
+                        stateChanged = true;
+                    }
+                    if (mergeRes.sawAdditionalItems) {
+                        needRepublishSeenFromSelfSync = true;
+                    }
+                }
+            }
+
+            // Ensure pairwiseMap includes any friends added via self-sync
+            for (const friendEmail of Object.keys(this.state.friends)) {
+                const pairInfo = await derivePairwiseInfo(id.email, friendEmail);
+                if (!pairwiseMap.has(pairInfo.incomingTag)) {
+                    pairwiseMap.set(pairInfo.incomingTag, {
+                        friendEmail,
+                        pairKeyHex: pairInfo.pairKeyHex
+                    });
+                }
+            }
+
             // Track all valid (pubkeyHex -> seenFeedKeyHex) per friend so multi-device / reinstalled keys all sync
             const friendFeedsMap = new Map(); // friendEmail -> Map<pubkeyHex, { seenFeedKeyHex, timestamp }>
 
@@ -1313,28 +1910,32 @@ export class XFriendsSyncManager {
                     if (invite && invite.type === '414x_invite_v1' && invite.fromEmail) {
                         const fromEmail = normalizeIdentifier(invite.fromEmail);
                         if (fromEmail && fromEmail !== id.email) {
-                            const existing = this.state.friends[fromEmail];
-                            if (!existing) {
-                                this.state.friends[fromEmail] = {
-                                    email: fromEmail,
-                                    displayName: invite.fromName || fromEmail,
-                                    status: 'pending_incoming',
-                                    pubkeyHex: invite.pubkeyHex || ev.pubkey,
-                                    seenFeedKeyHex: null,
-                                    addedAt: invite.timestamp || Date.now(),
-                                    lastSyncedAt: null,
-                                    seenCount: 0
-                                };
-                                stateChanged = true;
-                                // Also compute pairwise info so we can check if they already sent handshake
-                                const pairInfo = await derivePairwiseInfo(id.email, fromEmail);
-                                pairwiseMap.set(pairInfo.incomingTag, {
-                                    friendEmail: fromEmail,
-                                    pairKeyHex: pairInfo.pairKeyHex
-                                });
-                            } else if (existing.displayName === existing.email && invite.fromName) {
-                                existing.displayName = invite.fromName;
-                                stateChanged = true;
+                            const removedAt = (this.state.removedFriends && this.state.removedFriends[fromEmail]) || 0;
+                            const inviteTime = invite.timestamp || evTimeMs || Date.now();
+                            if (inviteTime >= removedAt) {
+                                const existing = this.state.friends[fromEmail];
+                                if (!existing) {
+                                    this.state.friends[fromEmail] = {
+                                        email: fromEmail,
+                                        displayName: invite.fromName || fromEmail,
+                                        status: 'pending_incoming',
+                                        pubkeyHex: invite.pubkeyHex || ev.pubkey,
+                                        seenFeedKeyHex: null,
+                                        addedAt: inviteTime,
+                                        lastSyncedAt: null,
+                                        seenCount: 0
+                                    };
+                                    stateChanged = true;
+                                    // Also compute pairwise info so we can check if they already sent handshake
+                                    const pairInfo = await derivePairwiseInfo(id.email, fromEmail);
+                                    pairwiseMap.set(pairInfo.incomingTag, {
+                                        friendEmail: fromEmail,
+                                        pairKeyHex: pairInfo.pairKeyHex
+                                    });
+                                } else if (existing.displayName === existing.email && invite.fromName) {
+                                    existing.displayName = invite.fromName;
+                                    stateChanged = true;
+                                }
                             }
                         }
                     }
@@ -1381,6 +1982,10 @@ export class XFriendsSyncManager {
                         }
                     }
                 }
+            }
+
+            if (needRepublishSeenFromSelfSync || !this.state.selfSyncLastSyncedAt) {
+                await this.publishMySeenSnapshot().catch(() => {});
             }
 
             // Step 2: Query Seen-Tweet Snapshots for all Connected Friends
@@ -1490,6 +2095,59 @@ export class XFriendsSyncManager {
                 this.rebuildIndex();
                 await this.saveState();
                 this.broadcastSeenUpdateToTabs();
+            }
+
+            // Compute newly discovered invites and forced posts for notifications
+            let notifiedSetChanged = false;
+            const newInvites = [];
+            for (const f of Object.values(this.state.friends)) {
+                if (f.status === 'pending_incoming' && (!prevInviteEmails.has(f.email) || !this.notifiedInviteSet.has(f.email))) {
+                    this.notifiedInviteSet.add(f.email);
+                    notifiedSetChanged = true;
+                    newInvites.push({
+                        email: f.email,
+                        displayName: f.displayName || f.email,
+                        addedAt: f.addedAt || Date.now()
+                    });
+                }
+            }
+
+            const candidateForcedPosts = [];
+            for (const [tweetId, entries] of this.tweetToForcedByMap.entries()) {
+                if (!this.dismissedForcedSet.has(tweetId) && (!prevForcedIds.has(tweetId) || !this.notifiedForcedSet.has(tweetId))) {
+                    this.notifiedForcedSet.add(tweetId);
+                    notifiedSetChanged = true;
+                    const latestForcedAt = entries.reduce((max, e) => Math.max(max, e.forcedAt || 0), 0);
+                    candidateForcedPosts.push({
+                        tweetId,
+                        latestForcedAt,
+                        forcedBy: entries.map(e => e.label),
+                        meta: this.state.postMetaMap[tweetId] || null
+                    });
+                }
+            }
+
+            // Sort newest forced first and cap per-sync notification burst to top 5
+            candidateForcedPosts.sort((a, b) => (b.latestForcedAt || 0) - (a.latestForcedAt || 0));
+            const newForcedPosts = candidateForcedPosts.slice(0, 5);
+
+            if (notifiedSetChanged) {
+                this.pruneMySeenIds();
+                await this.saveState();
+            }
+
+            this.lastSyncNotifications = {
+                newInvites,
+                newForcedPosts,
+                timestamp: Date.now()
+            };
+
+            if ((newInvites.length > 0 || newForcedPosts.length > 0) && typeof this.onNotification === 'function') {
+                try {
+                    await this.onNotification(this.lastSyncNotifications);
+                } catch (notifErr) {
+                    console.warn('X Friends Sync: Notification callback error', notifErr);
+                }
             }
         } catch (err) {
             console.warn('X Friends Sync: Relay sync error', err);

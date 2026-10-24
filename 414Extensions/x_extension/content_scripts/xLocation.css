@@ -1223,5 +1223,132 @@ article[data-testid="tweet"] .x-tweet-filtered-placeholder {
     background: rgba(29, 155, 240, 0.22);
 }
 
+/* Mobile 414 Navigation Bar Trigger & Floating Pill Fallback */
+.x-414-nav-trigger {
+    position: relative;
+    appearance: none;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 6px 10px;
+    color: #e7e9ea;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+}
 
+.x-414-nav-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    background: rgba(29, 155, 240, 0.16);
+    border: 1.5px solid rgba(29, 155, 240, 0.55);
+    color: #1d9bf0;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+}
 
+.x-414-nav-unread-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 9999px;
+    background: #f59e0b;
+    color: #000000;
+    font-size: 10px;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.x-414-floating-pill {
+    position: fixed;
+    right: 20px;
+    bottom: 138px;
+    z-index: 999990;
+    appearance: none;
+    min-width: 48px;
+    height: 36px;
+    background: rgba(15, 20, 25, 0.94);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1.5px solid rgba(29, 155, 240, 0.7);
+    border-radius: 9999px;
+    padding: 0 12px;
+    color: #1d9bf0;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.x-414-floating-pill .x-414-nav-unread-badge {
+    top: -5px;
+    right: -5px;
+}
+
+/* Mobile Viewport Responsive Overrides (Pixel 360px - 412px) */
+@media (max-width: 600px) {
+    #x-location-hovercard-root {
+        min-width: 220px;
+        max-width: calc(100vw - 20px);
+        padding: 12px;
+    }
+
+    .x-location-info-btn,
+    .x-friend-seen-badge {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .x-friends-filter-bar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding: 10px 12px;
+    }
+
+    .x-friends-filter-bar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .x-friends-filter-pill {
+        flex-shrink: 0;
+        padding: 6px 12px;
+    }
+
+    .x-friend-tweet-card {
+        padding: 10px 12px;
+    }
+
+    .x-friend-card-footer {
+        max-width: 100%;
+    }
+
+    #x-friends-toast {
+        bottom: 74px;
+        max-width: calc(100vw - 32px);
+        text-align: center;
+    }
+}

@@ -940,12 +940,13 @@
     }
     startMenuObserver();
 
-    // --- GraphQL Header Interceptor for X Location ---
+    // --- GraphQL Header Interceptor & X Notification Badge Monitor ---
     let headersCaptured = false;
+    let latestAuthHeaders = null;
     const API_PATTERN = /x\.com\/i\/api\/graphql/;
+    const BADGE_COUNT_PATTERN = /\/badge_count\/badge_count\.json/i;
 
     function extractAndPostHeaders(headers) {
-        if (headersCaptured) return;
         let auth = null, csrf = null;
         const headerObj = {};
 
@@ -964,23 +965,53 @@
         }
 
         if (auth && csrf) {
-            headersCaptured = true;
+            latestAuthHeaders = { authorization: auth, 'x-csrf-token': csrf };
+            if (!headersCaptured) {
+                headersCaptured = true;
+                window.postMessage({
+                    type: 'X_CAPTURE_HEADERS',
+                    payload: { headers: headerObj }
+                }, '*');
+            }
+        }
+    }
+
+    function handleBadgeCountPayload(data) {
+        if (!data || typeof data !== 'object') return;
+        const ntabUnread = typeof data.ntab_unread_count === 'number' ? data.ntab_unread_count : null;
+        const dmUnread = typeof data.dm_unread_count === 'number' ? data.dm_unread_count : null;
+        if (ntabUnread !== null || dmUnread !== null) {
             window.postMessage({
-                type: 'X_CAPTURE_HEADERS',
-                payload: { headers: headerObj }
+                type: 'X_BADGE_COUNT_EVENT',
+                payload: {
+                    ntabUnread: ntabUnread !== null ? ntabUnread : 0,
+                    dmUnread: dmUnread !== null ? dmUnread : 0,
+                    totalUnread: typeof data.total_unread_count === 'number' ? data.total_unread_count : 0
+                }
             }, '*');
         }
     }
 
     const origFetch = window.fetch;
     window.fetch = function(input, init) {
+        let url = '';
         try {
-            const url = typeof input === 'string' ? input : input?.url;
+            url = typeof input === 'string' ? input : (input?.url || '');
             if (url && API_PATTERN.test(url) && init?.headers) {
                 extractAndPostHeaders(init.headers);
             }
         } catch (e) {}
-        return origFetch.apply(this, arguments);
+        const fetchPromise = origFetch.apply(this, arguments);
+        try {
+            if (url && BADGE_COUNT_PATTERN.test(url) && fetchPromise && typeof fetchPromise.then === 'function') {
+                fetchPromise.then(res => {
+                    if (res && res.ok && typeof res.clone === 'function') {
+                        res.clone().json().then(handleBadgeCountPayload).catch(() => {});
+                    }
+                }).catch(() => {});
+            }
+        } catch (e) {}
+        return fetchPromise;
     };
 
     const origXHROpen = XMLHttpRequest.prototype.open;
@@ -1007,9 +1038,77 @@
             if (this._xUrl && API_PATTERN.test(this._xUrl) && this._xHeaders) {
                 extractAndPostHeaders(this._xHeaders);
             }
+            if (this._xUrl && BADGE_COUNT_PATTERN.test(this._xUrl) && typeof this.addEventListener === 'function') {
+                this.addEventListener('load', function() {
+                    try {
+                        if (this.status >= 200 && this.status < 300 && this.responseText) {
+                            handleBadgeCountPayload(JSON.parse(this.responseText));
+                        }
+                    } catch (e) {}
+                });
+            }
         } catch (e) {}
         return origXHRSend.apply(this, arguments);
     };
+
+    // Bridge Web Notification API inside Mobile WebView so X notifications forward to Android Notification Center
+    try {
+        if (window.__X414_MOBILE__ || window.ReactNativeWebView) {
+            class X414BridgedNotification {
+                static get permission() {
+                    return 'granted';
+                }
+                static requestPermission(cb) {
+                    if (typeof cb === 'function') {
+                        try { cb('granted'); } catch (e) {}
+                    }
+                    return Promise.resolve('granted');
+                }
+                constructor(title, options = {}) {
+                    this.title = String(title || 'X Notification');
+                    this.body = String(options?.body || '');
+                    this.tag = String(options?.tag || '');
+                    this.data = options?.data || null;
+                    this.onclick = null;
+                    this.onclose = null;
+                    window.postMessage({
+                        type: 'X_WEB_NOTIFICATION_EVENT',
+                        payload: {
+                            title: this.title,
+                            body: this.body,
+                            tag: this.tag,
+                            url: (options?.data && options.data.url) || 'https://x.com/notifications'
+                        }
+                    }, '*');
+                }
+                close() {
+                    if (typeof this.onclose === 'function') {
+                        try { this.onclose(); } catch (e) {}
+                    }
+                }
+            }
+            window.Notification = X414BridgedNotification;
+
+            if (typeof ServiceWorkerRegistration !== 'undefined' && ServiceWorkerRegistration.prototype) {
+                const origShowNotif = ServiceWorkerRegistration.prototype.showNotification;
+                ServiceWorkerRegistration.prototype.showNotification = function(title, options = {}) {
+                    window.postMessage({
+                        type: 'X_WEB_NOTIFICATION_EVENT',
+                        payload: {
+                            title: String(title || 'X Notification'),
+                            body: String(options?.body || ''),
+                            tag: String(options?.tag || ''),
+                            url: (options?.data && options.data.url) || 'https://x.com/notifications'
+                        }
+                    }, '*');
+                    if (typeof origShowNotif === 'function') {
+                        return origShowNotif.apply(this, arguments).catch(() => {});
+                    }
+                    return Promise.resolve();
+                };
+            }
+        }
+    } catch (e) {}
 
     // --- In-Place Tweet Interactions (Like, Repost, Bookmark) via X Internal API / Webpack ---
     const X_WEB_BEARER = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -1211,11 +1310,55 @@
         }
     }
 
+    async function pollXBadgeCount() {
+        try {
+            const csrfMatch = (document.cookie || '').match(/(?:^|;\s*)ct0=([^;]+)/);
+            const csrfToken = (csrfMatch && csrfMatch[1] ? decodeURIComponent(csrfMatch[1]) : '') || (latestAuthHeaders && latestAuthHeaders['x-csrf-token']) || '';
+            if (!csrfToken) return false;
+
+            const headers = {
+                'authorization': (latestAuthHeaders && latestAuthHeaders.authorization) || X_WEB_BEARER,
+                'x-csrf-token': csrfToken,
+                'x-twitter-active-user': 'yes',
+                'x-twitter-auth-type': 'OAuth2Session',
+                'x-twitter-client-language': 'en'
+            };
+
+            const res = await origFetch('https://x.com/i/api/2/badge_count/badge_count.json?supports_ntab_urt=1', {
+                method: 'GET',
+                credentials: 'include',
+                headers
+            });
+            if (res && res.ok) {
+                const data = await res.json();
+                handleBadgeCountPayload(data);
+                return true;
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    if (typeof window !== 'undefined' && (window.__X414_MOBILE__ || window.ReactNativeWebView)) {
+        window.__X414_POLL_X_NOTIFICATIONS__ = pollXBadgeCount;
+        setTimeout(() => {
+            pollXBadgeCount();
+        }, 4000);
+        const badgePollInterval = setInterval(() => {
+            pollXBadgeCount();
+        }, 25000);
+        if (typeof badgePollInterval?.unref === 'function') {
+            badgePollInterval.unref();
+        }
+    }
+
     window.addEventListener('message', (event) => {
         if (event.source !== window || !event.data) return;
         if (event.data.type === 'X_PERFORM_TWEET_ACTION' && event.data.payload) {
             const { actionType, tweetId } = event.data.payload;
             executeMainWorldTweetAction(actionType, tweetId);
+        }
+        if (event.data.type === 'X_POLL_BADGE_COUNT') {
+            pollXBadgeCount();
         }
     });
 
@@ -1225,6 +1368,7 @@
             shadowMutedState,
             injectDownloadButtons,
             executeMainWorldTweetAction,
+            pollXBadgeCount,
             get isModuleEnabled() { return isModuleEnabled; },
             get alwaysMuteEnabled() { return alwaysMuteEnabled; },
             get currentVolume() { return currentVolume; }

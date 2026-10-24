@@ -40,10 +40,14 @@ export const FRIEND_SYNC_CONFIG = {
     VISIBILITY_THRESHOLD: 0.6,
     BATCH_FLUSH_DELAY_MS: 15000, // Debounce before publishing updated seen snapshot
     SYNC_INTERVAL_MINUTES: 2,    // Background alarm interval for pulling friends' updates
-    MAX_SEEN_IDS: 3000,
-    MAX_FORCED_IDS: 100,
-    MAX_POST_META_ENTRIES: 200,
-    MAX_AGE_MS: 14 * 24 * 60 * 60 * 1000, // 14 days
+    MAX_SEEN_IDS: 1000,          // Rolling cap of 1,000 seen tweet IDs per user
+    MAX_FORCED_IDS: 100,         // Rolling cap of 100 forced tweet IDs per user
+    MAX_POST_META_ENTRIES: 25,   // Compact Nostr payload: forced posts + top 25 recent seen posts (<35KB)
+    MAX_LOCAL_POST_META: 250,    // Local storage LRU cap of 250 post metadata entries
+    MAX_TIMELINE_ITEMS: 300,     // Max merged timeline items returned over IPC per query
+    MAX_TOMBSTONE_ENTRIES: 200,  // Cap on unforcedMap, removedFriends, dismissedForcedIds, notifiedForcedIds
+    MAX_AGE_MS: 14 * 24 * 60 * 60 * 1000, // 14-day TTL for forced posts, metadata & tombstones
+    MAX_SEEN_AGE_MS: 7 * 24 * 60 * 60 * 1000, // 7-day TTL for seen post tracking
     RELAY_TIMEOUT_MS: 5000
 };
 

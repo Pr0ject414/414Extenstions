@@ -316,6 +316,18 @@ export async function derivePairwiseInfo(emailA, emailB) {
     };
 }
 
+export async function deriveSelfSyncInfo(email, passphrase = '') {
+    const norm = normalizeIdentifier(email);
+    const cleanPass = typeof passphrase === 'string' ? passphrase.trim() : '';
+    const seed = cleanPass ? `${norm}|${cleanPass}` : norm;
+    const selfTagHash = await deriveTagHash('414x-self-tag-v1', seed);
+    const keyBytes = await sha256Bytes(utf8ToBytes(`414x-self-key-v1:${seed}`));
+    return {
+        selfTag: `414x-self-${selfTagHash}`,
+        selfKeyHex: bytesToHex(keyBytes)
+    };
+}
+
 async function importAesKey(keyHex) {
     const rawKey = hexToBytes(keyHex);
     return globalThis.crypto.subtle.importKey(

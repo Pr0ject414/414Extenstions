@@ -64,8 +64,8 @@
                         try {
                             chrome.storage.local.set({ [X_VOLUME_LEVEL_KEY]: newVolume });
                         } catch (error) {
-                    // Ignore "Context invalidated" errors which happen if the extension
-                    // was reloaded while this page is still open.
+                            // Ignore "Context invalidated" errors which happen if the extension
+                            // was reloaded while this page is still open.
                             if (!error.message.includes("Extension context invalidated")) {
                                 console.error("[X Settings] Storage set error:", error);
                             }
@@ -86,6 +86,27 @@
             chrome.runtime.sendMessage({
                 action: 'X_CAPTURE_HEADERS',
                 payload: event.data.payload
+            });
+        }
+
+        if (event.data && event.data.type === 'X_BADGE_COUNT_EVENT' && event.data.payload) {
+            chrome.runtime.sendMessage({
+                action: 'X_SYNC_REGULAR_NOTIFICATIONS',
+                payload: {
+                    unreadNotificationsCount: event.data.payload.ntabUnread,
+                    unreadDmCount: event.data.payload.dmUnread,
+                    source: 'badge_api'
+                }
+            });
+        }
+
+        if (event.data && event.data.type === 'X_WEB_NOTIFICATION_EVENT' && event.data.payload) {
+            chrome.runtime.sendMessage({
+                action: 'X_SYNC_REGULAR_NOTIFICATIONS',
+                payload: {
+                    webPushNotification: event.data.payload,
+                    source: 'web_push'
+                }
             });
         }
     });
