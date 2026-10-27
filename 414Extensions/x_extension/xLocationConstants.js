@@ -31,7 +31,6 @@ export const CLOUD_CACHE_CONFIG = {
 export const FRIEND_SYNC_CONFIG = {
     RELAYS: [
         'wss://nos.lol',
-        'wss://offchain.pub',
         'wss://relay.primal.net',
         'wss://nostr.mom'
     ],
@@ -40,6 +39,7 @@ export const FRIEND_SYNC_CONFIG = {
     VISIBILITY_THRESHOLD: 0.6,
     BATCH_FLUSH_DELAY_MS: 15000, // Debounce before publishing updated seen snapshot
     SYNC_INTERVAL_MINUTES: 2,    // Background alarm interval for pulling friends' updates
+    MIN_AUTO_SYNC_INTERVAL_MS: 30000, // Minimum interval between timeline-triggered relay syncs
     MAX_SEEN_IDS: 1000,          // Rolling cap of 1,000 seen tweet IDs per user
     MAX_FORCED_IDS: 100,         // Rolling cap of 100 forced tweet IDs per user
     MAX_POST_META_ENTRIES: 25,   // Compact Nostr payload: forced posts + top 25 recent seen posts (<35KB)
@@ -48,7 +48,10 @@ export const FRIEND_SYNC_CONFIG = {
     MAX_TOMBSTONE_ENTRIES: 200,  // Cap on unforcedMap, removedFriends, dismissedForcedIds, notifiedForcedIds
     MAX_AGE_MS: 14 * 24 * 60 * 60 * 1000, // 14-day TTL for forced posts, metadata & tombstones
     MAX_SEEN_AGE_MS: 7 * 24 * 60 * 60 * 1000, // 7-day TTL for seen post tracking
-    RELAY_TIMEOUT_MS: 5000
+    RELAY_TIMEOUT_MS: 5000,
+    RELAY_IDLE_TIMEOUT_MS: 60000, // Keep pooled WebSockets open for 60s to avoid socket exhaustion
+    RELAY_BASE_COOLDOWN_MS: 60000,
+    RELAY_MAX_COOLDOWN_MS: 30 * 60 * 1000
 };
 
 export const SELECTORS = {

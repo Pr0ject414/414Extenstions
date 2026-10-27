@@ -1880,5 +1880,290 @@ describe('xLocationUI.js', () => {
         trigger.click();
         expect(sendMessageMock).toHaveBeenCalledWith({ action: 'X_OPEN_NATIVE_SETTINGS' });
     });
+
+    test('newly forced posts should be inserted below currently visible tweets without bumping any visible or session tweets off the page', () => {
+        Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true, writable: true });
+
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+
+        // 1. Render a full 20-tweet page in the Friends Timeline
+        const initialPosts = Array.from({ length: 20 }, (_, idx) => ({
+            tweetId: String(2200000000000000100n + BigInt(idx)),
+            isForced: false,
+            forcedBy: [],
+            seenBy: ['Alice'],
+            forcedByMe: false,
+            isSeenByMe: false,
+            meta: {
+                id: String(2200000000000000100n + BigInt(idx)),
+                screenName: `user_${idx}`,
+                authorName: `User ${idx}`,
+                text: `Regular post ${idx}`,
+                isHydrated: true,
+                hydrationVersion: 4
+            }
+        }));
+
+        const root = window.XLocationUI.renderFriendsTimeline(host, {
+            timelinePosts: initialPosts,
+            unseenForcedPosts: [],
+            connectedFriends: [{ email: 'alice@example.com', displayName: 'Alice', label: 'Alice' }]
+        }, {});
+
+        const allFilterBtn = root.querySelector('[data-filter="all"]');
+        if (allFilterBtn && !allFilterBtn.classList.contains('is-active')) {
+            allFilterBtn.click();
+        }
+
+        const initialCards = Array.from(root.querySelectorAll('article.x-friend-tweet-card'));
+        expect(initialCards.length).toBe(20);
+
+        // Simulate cards 0, 1, 2 being visible in the 800px viewport, and cards 3..19 below the fold
+        initialCards.forEach((card, idx) => {
+            if (idx === 0) {
+                card.getBoundingClientRect = () => ({ top: 40, bottom: 280, left: 0, right: 600, width: 600, height: 240 });
+            } else if (idx === 1) {
+                card.getBoundingClientRect = () => ({ top: 280, bottom: 520, left: 0, right: 600, width: 600, height: 240 });
+            } else if (idx === 2) {
+                card.getBoundingClientRect = () => ({ top: 520, bottom: 760, left: 0, right: 600, width: 600, height: 240 });
+            } else {
+                const top = 820 + (idx - 3) * 240;
+                card.getBoundingClientRect = () => ({ top, bottom: top + 240, left: 0, right: 600, width: 600, height: 240 });
+            }
+        });
+
+        // 2. A friend forces a brand-new post while the user is viewing cards 0..2
+        const newlyForcedPost = {
+            tweetId: '2200000000000000999',
+            isForced: true,
+            forcedBy: ['Alice'],
+            seenBy: ['Alice'],
+            forcedByMe: false,
+            isSeenByMe: false,
+            isDismissed: false,
+            meta: {
+                id: '2200000000000000999',
+                screenName: 'breaking_friend',
+                authorName: 'Breaking Friend',
+                text: 'Forced post inserted below visible tweets!',
+                isHydrated: true,
+                hydrationVersion: 4
+            }
+        };
+
+        window.XLocationUI.renderFriendsTimeline(host, {
+            timelinePosts: [newlyForcedPost, ...initialPosts],
+            unseenForcedPosts: [newlyForcedPost],
+            connectedFriends: [{ email: 'alice@example.com', displayName: 'Alice', label: 'Alice' }]
+        }, {});
+
+        const updatedCards = Array.from(root.querySelectorAll('article.x-friend-tweet-card'));
+        // None of the 20 existing tweets are bumped off the page (total is now 21)
+        expect(updatedCards.length).toBe(21);
+        expect(updatedCards[updatedCards.length - 1].getAttribute('data-tweet-id')).toBe(initialPosts[19].tweetId);
+
+        // Visible cards 0, 1, 2 remain untouched at indices 0, 1, 2, and the forced post sits at index 3 (right below visible card 2)
+        expect(updatedCards[0].getAttribute('data-tweet-id')).toBe(initialPosts[0].tweetId);
+        expect(updatedCards[1].getAttribute('data-tweet-id')).toBe(initialPosts[1].tweetId);
+        expect(updatedCards[2].getAttribute('data-tweet-id')).toBe(initialPosts[2].tweetId);
+        expect(updatedCards[3].getAttribute('data-tweet-id')).toBe('2200000000000000999');
+        expect(updatedCards[3].classList.contains('is-forced-card')).toBe(true);
+        expect(updatedCards[4].getAttribute('data-tweet-id')).toBe(initialPosts[3].tweetId);
+
+        // 3. Also verify Native Home Feed (#x-forced-home-feed) inserts below visible native tweets
+        const nativeFeed = document.createElement('section');
+        const nativeVisible1 = document.createElement('article');
+        nativeVisible1.setAttribute('data-testid', 'tweet');
+        nativeVisible1.getBoundingClientRect = () => ({ top: 50, bottom: 350, left: 0, right: 600, width: 600, height: 300 });
+        const nativeVisible2 = document.createElement('article');
+        nativeVisible2.setAttribute('data-testid', 'tweet');
+        nativeVisible2.getBoundingClientRect = () => ({ top: 350, bottom: 650, left: 0, right: 600, width: 600, height: 300 });
+        const nativeBelowFold = document.createElement('article');
+        nativeBelowFold.setAttribute('data-testid', 'tweet');
+        nativeBelowFold.getBoundingClientRect = () => ({ top: 850, bottom: 1150, left: 0, right: 600, width: 600, height: 300 });
+
+        nativeFeed.appendChild(nativeVisible1);
+        nativeFeed.appendChild(nativeVisible2);
+        nativeFeed.appendChild(nativeBelowFold);
+        document.body.appendChild(nativeFeed);
+
+        const forcedBanner = window.XLocationUI.renderForcedPostsInHomeFeed(nativeFeed, [newlyForcedPost], {});
+        expect(forcedBanner).not.toBeNull();
+        const feedChildren = Array.from(nativeFeed.children);
+        expect(feedChildren[0]).toBe(nativeVisible1);
+        expect(feedChildren[1]).toBe(nativeVisible2);
+        expect(feedChildren[2]).toBe(forcedBanner);
+        expect(feedChildren[3]).toBe(nativeBelowFold);
+
+        // 4. Verify real X virtualized Home Timeline DOM (with 47,773px [aria-label="Timeline: Your Home Timeline"] & [data-testid="cellInnerDiv"])
+        // mounts #x-forced-home-feed inside the last visible cellInnerDiv rather than after the 47,773px wrapper
+        if (forcedBanner.parentNode) forcedBanner.parentNode.removeChild(forcedBanner);
+        const virtualSection = document.createElement('section');
+        virtualSection.setAttribute('role', 'region');
+        const heading = document.createElement('h1');
+        heading.textContent = 'Your Home Timeline';
+        const timelineOuter = document.createElement('div');
+        timelineOuter.setAttribute('aria-label', 'Timeline: Your Home Timeline');
+        timelineOuter.getBoundingClientRect = () => ({ top: 200, bottom: 47973, left: 0, right: 600, width: 600, height: 47773 });
+        const spacerDiv = document.createElement('div');
+        spacerDiv.style.position = 'relative';
+        spacerDiv.style.minHeight = '47773.3px';
+
+        const cell1 = document.createElement('div');
+        cell1.setAttribute('data-testid', 'cellInnerDiv');
+        cell1.getBoundingClientRect = () => ({ top: 200, bottom: 550, left: 0, right: 600, width: 600, height: 350 });
+        const cell1Tweet = document.createElement('article');
+        cell1Tweet.setAttribute('data-testid', 'tweet');
+        cell1.appendChild(cell1Tweet);
+
+        const cellDivider = document.createElement('div');
+        cellDivider.setAttribute('data-testid', 'cellInnerDiv');
+        cellDivider.getBoundingClientRect = () => ({ top: 550, bottom: 551, left: 0, right: 600, width: 600, height: 1 });
+
+        const cell2 = document.createElement('div');
+        cell2.setAttribute('data-testid', 'cellInnerDiv');
+        cell2.getBoundingClientRect = () => ({ top: 551, bottom: 780, left: 0, right: 600, width: 600, height: 229 });
+        const cell2Tweet = document.createElement('article');
+        cell2Tweet.setAttribute('data-testid', 'tweet');
+        cell2.appendChild(cell2Tweet);
+
+        const cellBelowFold = document.createElement('div');
+        cellBelowFold.setAttribute('data-testid', 'cellInnerDiv');
+        cellBelowFold.getBoundingClientRect = () => ({ top: 920, bottom: 1350, left: 0, right: 600, width: 600, height: 430 });
+        const cellBelowTweet = document.createElement('article');
+        cellBelowTweet.setAttribute('data-testid', 'tweet');
+        cellBelowFold.appendChild(cellBelowTweet);
+
+        spacerDiv.appendChild(cell1);
+        spacerDiv.appendChild(cellDivider);
+        spacerDiv.appendChild(cell2);
+        spacerDiv.appendChild(cellBelowFold);
+        timelineOuter.appendChild(spacerDiv);
+        virtualSection.appendChild(heading);
+        virtualSection.appendChild(timelineOuter);
+        document.body.appendChild(virtualSection);
+
+        const virtualBanner = window.XLocationUI.renderForcedPostsInHomeFeed(virtualSection, [newlyForcedPost], {});
+        expect(virtualBanner).not.toBeNull();
+        expect(virtualBanner.parentNode).toBe(cell2);
+        expect(virtualSection.lastElementChild).toBe(timelineOuter);
+    });
+
+    test('dismissing forced tweets in xObserver should optimistically update cachedTimelineData without re-injecting #x-forced-home-feed or triggering handleUserInteraction', () => {
+        jest.useFakeTimers();
+        delete window.XObserverInjected;
+
+        const forcedItem = {
+            tweetId: '2200000000000000888',
+            isForced: true,
+            forcedBy: ['Alice'],
+            seenBy: ['Alice'],
+            forcedByMe: false,
+            isSeenByMe: false,
+            isDismissed: false,
+            meta: {
+                id: '2200000000000000888',
+                screenName: 'forced_news',
+                authorName: 'Forced News',
+                text: 'Dismiss me cleanly without refresh bounce',
+                isHydrated: true,
+                hydrationVersion: 4
+            }
+        };
+
+        const sendMessageMock = jest.fn((msg, cb) => {
+            if (msg.action === 'X_GET_FRIENDS_TIMELINE' && cb) {
+                // Even if an in-flight timeline response returns the post before background finishes saving,
+                // dismissedForcedLocalSet must prevent it from re-appearing!
+                cb({
+                    success: true,
+                    timelinePosts: [{ ...forcedItem }],
+                    unseenForcedPosts: [{ ...forcedItem }],
+                    connectedFriends: [{ email: 'alice@example.com', displayName: 'Alice', label: 'Alice' }]
+                });
+            } else if (cb) {
+                cb({ success: true });
+            }
+        });
+
+        global.chrome = {
+            runtime: {
+                id: 'test-ext-id',
+                lastError: null,
+                onMessage: { addListener: jest.fn() },
+                sendMessage: sendMessageMock
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXHideAdsEnabled: true,
+                            isXFriendsSyncEnabled: true,
+                            blockedCountries: [],
+                            blockedDeviceRegions: [],
+                            blockedNameFlags: []
+                        });
+                    })
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+
+        const tabList = document.createElement('div');
+        tabList.setAttribute('role', 'tablist');
+        const forYouTab = document.createElement('div');
+        forYouTab.setAttribute('role', 'tab');
+        forYouTab.textContent = 'For you';
+        tabList.appendChild(forYouTab);
+        document.body.appendChild(tabList);
+
+        const primaryCol = document.createElement('div');
+        primaryCol.setAttribute('data-testid', 'primaryColumn');
+        const nativeFeed = document.createElement('section');
+        nativeFeed.setAttribute('role', 'region');
+        primaryCol.appendChild(nativeFeed);
+        document.body.appendChild(primaryCol);
+
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(250);
+
+        const bannerBefore = nativeFeed.querySelector('#x-forced-home-feed');
+        expect(bannerBefore).not.toBeNull();
+        const badgeBefore = tabList.querySelector('.x-friends-tab-badge');
+        expect(badgeBefore).not.toBeNull();
+        expect(badgeBefore.textContent).toBe('1');
+
+        sendMessageMock.mockClear();
+
+        // Click "✓ Got it" dismiss button
+        const dismissBtn = bannerBefore.querySelector('.x-forced-dismiss-btn');
+        expect(dismissBtn).not.toBeNull();
+        dismissBtn.click();
+
+        // 1. Banner is immediately removed and marked _xIntentionallyRemoved
+        expect(bannerBefore._xIntentionallyRemoved).toBe(true);
+        expect(nativeFeed.querySelector('#x-forced-home-feed')).toBeNull();
+
+        // 2. Friends tab badge is immediately updated in-place to 0 (hidden)
+        expect(badgeBefore.textContent).toBe('');
+        expect(badgeBefore.style.display).toBe('none');
+
+        // 3. Only X_DISMISS_FORCED_TWEET is sent; handleUserInteraction did NOT queue X_MARK_TWEETS_SEEN,
+        // and MutationObserver / syncFriendsTimelineUI did NOT re-inject the dismissed banner
+        jest.advanceTimersByTime(3000);
+        expect(nativeFeed.querySelector('#x-forced-home-feed')).toBeNull();
+        const actionsSent = sendMessageMock.mock.calls.map(([m]) => m.action);
+        expect(actionsSent).toContain('X_DISMISS_FORCED_TWEET');
+        expect(actionsSent).not.toContain('X_MARK_TWEETS_SEEN');
+
+        jest.useRealTimers();
+    });
 });
 

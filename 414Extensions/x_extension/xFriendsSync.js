@@ -70,6 +70,7 @@ export class XFriendsSyncManager {
         this.tweetToForcedByMap = new Map(); // tweetId -> Array<{ label, email, forcedAt }>
         this.wsPool = new Map();            // relayUrl -> pooled connection entry
         this.relayCooldownUntil = new Map(); // relayUrl -> timestamp ms
+        this.relayFailureCounts = new Map(); // relayUrl -> consecutive failure count
     }
 
     async init() {
@@ -1135,7 +1136,6 @@ export class XFriendsSyncManager {
         this.state.hasUnpublishedSeen = true;
         this.scheduleSnapshotFlush();
         await this.saveState();
-        this.broadcastSeenUpdateToTabs();
 
         return { dismissed: true, tweetId: id };
     }
@@ -2198,7 +2198,18 @@ export class XFriendsSyncManager {
             ws: null,
             listeners: new Set(),
             idleTimer: null,
-            openPromise: null
+            openPromise: null,
+            openedAt: 0,
+            receivedData: false
+        };
+
+        const recordRelayFailure = () => {
+            const failures = (this.relayFailureCounts.get(relayUrl) || 0) + 1;
+            this.relayFailureCounts.set(relayUrl, failures);
+            const baseCooldownMs = FRIEND_SYNC_CONFIG.RELAY_BASE_COOLDOWN_MS || (60 * 1000);
+            const maxCooldownMs = FRIEND_SYNC_CONFIG.RELAY_MAX_COOLDOWN_MS || (30 * 60 * 1000);
+            const backoffMs = Math.min(maxCooldownMs, baseCooldownMs * Math.pow(2, Math.min(failures - 1, 5)));
+            this.relayCooldownUntil.set(relayUrl, Date.now() + backoffMs);
         };
 
         entry.openPromise = new Promise((resolve) => {
@@ -2208,13 +2219,8 @@ export class XFriendsSyncManager {
                 settled = true;
                 clearTimeout(connectTimer);
                 this.wsPool.delete(relayUrl);
-                // Put failed relay on 3-minute cooldown to prevent repeated handshake errors
-                this.relayCooldownUntil.set(relayUrl, Date.now() + 3 * 60 * 1000);
-                try {
-                    if (entry.ws && (entry.ws.readyState === 0 || entry.ws.readyState === 1)) {
-                        entry.ws.close();
-                    }
-                } catch (e) {}
+                recordRelayFailure();
+                this.closeRelayEntry(entry);
                 resolve(null);
             };
 
@@ -2229,12 +2235,18 @@ export class XFriendsSyncManager {
                     if (settled) return;
                     settled = true;
                     clearTimeout(connectTimer);
+                    entry.openedAt = Date.now();
                     this.relayCooldownUntil.delete(relayUrl);
                     this.touchRelayEntry(entry);
                     resolve(entry);
                 };
 
                 ws.onmessage = (msg) => {
+                    if (!entry.receivedData) {
+                        entry.receivedData = true;
+                        this.relayFailureCounts.delete(relayUrl);
+                    }
+                    this.touchRelayEntry(entry);
                     for (const listener of Array.from(entry.listeners)) {
                         try {
                             listener(msg);
@@ -2246,16 +2258,21 @@ export class XFriendsSyncManager {
                     if (!settled) {
                         fail();
                     } else {
+                        recordRelayFailure();
                         this.closeRelayEntry(entry);
                     }
                 };
 
                 ws.onclose = () => {
+                    if (entry.idleTimer) {
+                        clearTimeout(entry.idleTimer);
+                        entry.idleTimer = null;
+                    }
                     this.wsPool.delete(relayUrl);
                     if (!settled) {
-                        settled = true;
-                        clearTimeout(connectTimer);
-                        resolve(null);
+                        fail();
+                    } else if (!entry.receivedData && entry.openedAt && (Date.now() - entry.openedAt) < 1500) {
+                        recordRelayFailure();
                     }
                 };
             } catch (err) {
@@ -2269,11 +2286,12 @@ export class XFriendsSyncManager {
 
     touchRelayEntry(entry) {
         if (entry.idleTimer) clearTimeout(entry.idleTimer);
+        const idleTimeoutMs = FRIEND_SYNC_CONFIG.RELAY_IDLE_TIMEOUT_MS || 60000;
         entry.idleTimer = setTimeout(() => {
             if (entry.listeners.size === 0) {
                 this.closeRelayEntry(entry);
             }
-        }, 8000);
+        }, idleTimeoutMs);
         if (typeof entry.idleTimer?.unref === 'function') entry.idleTimer.unref();
     }
 
@@ -2284,9 +2302,16 @@ export class XFriendsSyncManager {
             entry.idleTimer = null;
         }
         this.wsPool.delete(entry.relayUrl);
+        const ws = entry.ws;
+        entry.ws = null;
+        if (!ws) return;
         try {
-            if (entry.ws && (entry.ws.readyState === 0 || entry.ws.readyState === 1)) {
-                entry.ws.close();
+            ws.onopen = null;
+            ws.onmessage = null;
+            ws.onerror = null;
+            ws.onclose = null;
+            if (ws.readyState === 0 || ws.readyState === 1) {
+                ws.close();
             }
         } catch (e) {}
     }

@@ -287,10 +287,11 @@ export function handleMessage(request, sender, sendResponse) {
             sendResponse({ success: true, ...data });
 
             const now = Date.now();
+            const minAutoSyncInterval = FRIEND_SYNC_CONFIG.MIN_AUTO_SYNC_INTERVAL_MS || 30000;
             if (
                 friendsSync.state?.identity &&
                 !friendsSync.isSyncing &&
-                (!friendsSync.lastSyncTime || (now - friendsSync.lastSyncTime) >= 7000)
+                (!friendsSync.lastSyncTime || (now - friendsSync.lastSyncTime) >= minAutoSyncInterval)
             ) {
                 friendsSync.syncWithRelays().catch(() => {});
             }

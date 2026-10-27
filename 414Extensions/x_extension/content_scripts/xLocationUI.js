@@ -529,7 +529,7 @@
 
         if (article.querySelector && article.querySelector('video') && window.XEnv && typeof window.XEnv.injectDownloadButtons === 'function') {
             try {
-                window.XEnv.injectDownloadButtons();
+                window.XEnv.injectDownloadButtons(article);
             } catch (e) {}
         }
 
@@ -1157,7 +1157,10 @@
             dismissBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                callbacks.onDismissForced(tweetId, card);
+                const activeCbs = card._xCallbacks || callbacks;
+                if (activeCbs && typeof activeCbs.onDismissForced === 'function') {
+                    activeCbs.onDismissForced(tweetId, card);
+                }
             });
             badgesRow.appendChild(dismissBtn);
         }
@@ -1879,7 +1882,18 @@
         return true;
     }
 
+    let homeForcedFeedEl = null;
+    let homeFeedScrolledPast = false;
+    let homeFeedMountedScrollY = 0;
+    const homeFeedMountedForcedIds = new Set();
+
     function removeSeenCardsScrolledPast() {
+        if (homeForcedFeedEl && homeForcedFeedEl.isConnected && typeof homeForcedFeedEl.getBoundingClientRect === 'function') {
+            const hfRect = homeForcedFeedEl.getBoundingClientRect();
+            if (hfRect && hfRect.height > 0 && hfRect.bottom < 0) {
+                homeFeedScrolledPast = true;
+            }
+        }
         const seenCards = document.querySelectorAll(
             '#x-friends-timeline-root article.x-friend-tweet-card.is-seen-by-me:not(.is-forced-card)'
         );
@@ -1894,18 +1908,55 @@
         return removedCount;
     }
 
+    function getLastVisibleChild(containerEl, excludeEl = null) {
+        if (!containerEl || !containerEl.children) return null;
+        const viewportHeight = (typeof window !== 'undefined' && window.innerHeight) ||
+            (typeof document !== 'undefined' && document.documentElement && document.documentElement.clientHeight) ||
+            800;
+        let lastVisible = null;
+        for (let i = 0; i < containerEl.children.length; i++) {
+            const child = containerEl.children[i];
+            if (!child || child === excludeEl) continue;
+            if (
+                child.tagName === 'H1' ||
+                (child.getAttribute && child.getAttribute('aria-label') && child.getAttribute('aria-label').includes('Timeline'))
+            ) {
+                continue;
+            }
+            const rectTarget = (child._xFilteredPlaceholder && child._xFilteredPlaceholder.isConnected)
+                ? child._xFilteredPlaceholder
+                : child;
+            let rect = typeof rectTarget.getBoundingClientRect === 'function'
+                ? rectTarget.getBoundingClientRect()
+                : null;
+            if ((!rect || rect.height <= 0) && child.querySelector) {
+                const innerArticle = child.querySelector('article[data-testid="tweet"], article');
+                if (innerArticle && typeof innerArticle.getBoundingClientRect === 'function') {
+                    rect = innerArticle.getBoundingClientRect();
+                }
+            }
+            if (rect && rect.height > 0 && rect.bottom > 0 && rect.top < viewportHeight) {
+                lastVisible = child;
+            }
+        }
+        return lastVisible;
+    }
+
     function renderForcedPostsInHomeFeed(timelineContainer, unseenForcedPosts = [], callbacks = {}) {
         if (!timelineContainer) return null;
 
-        let container = document.getElementById('x-forced-home-feed');
+        let container = document.getElementById('x-forced-home-feed') || homeForcedFeedEl;
         const activeForcedPosts = Array.isArray(unseenForcedPosts)
             ? unseenForcedPosts.filter(p => p && !p.isDismissed)
             : [];
 
         if (activeForcedPosts.length === 0) {
             if (container && container.parentNode) {
+                container._xIntentionallyRemoved = true;
                 container.parentNode.removeChild(container);
             }
+            homeFeedScrolledPast = false;
+            homeFeedMountedForcedIds.clear();
             return null;
         }
 
@@ -1914,10 +1965,97 @@
             container.id = 'x-forced-home-feed';
             container.className = 'x-forced-home-feed';
         }
+        homeForcedFeedEl = container;
+        container._xIntentionallyRemoved = false;
 
-        if (timelineContainer.firstChild !== container) {
-            timelineContainer.insertBefore(container, timelineContainer.firstChild);
+        const timelineWrap = (timelineContainer.querySelector && timelineContainer.querySelector('[aria-label*="Timeline"]')) || timelineContainer;
+        if (container._xTimelineWrap !== timelineWrap) {
+            container._xTimelineWrap = timelineWrap;
+            homeFeedScrolledPast = false;
+            homeFeedMountedScrollY = 0;
         }
+
+        const hasNewUnmountedPost = activeForcedPosts.some(
+            p => p && p.tweetId && !homeFeedMountedForcedIds.has(String(p.tweetId))
+        );
+
+        const allCells = timelineContainer.querySelectorAll
+            ? Array.from(timelineContainer.querySelectorAll('[data-testid="cellInnerDiv"]'))
+            : [];
+        const nativeTweetCells = allCells.filter(cell => {
+            if (!cell || !cell.querySelector) return false;
+            const article = cell.querySelector('article[data-testid="tweet"]:not(.x-friend-tweet-card)');
+            return Boolean(article && !article._xAdCollapsed && !isAdTweet(article));
+        });
+
+        if (nativeTweetCells.length > 0) {
+            const isMountedInCell = Boolean(
+                container.isConnected &&
+                container.parentNode &&
+                container.parentNode.getAttribute &&
+                container.parentNode.getAttribute('data-testid') === 'cellInnerDiv' &&
+                timelineContainer.contains(container)
+            );
+
+            if (isMountedInCell) {
+                if (typeof container.getBoundingClientRect === 'function') {
+                    const cRect = container.getBoundingClientRect();
+                    if (cRect && cRect.height > 0 && cRect.bottom < 0) {
+                        homeFeedScrolledPast = true;
+                    }
+                }
+            } else {
+                const currentScrollY = (typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0;
+                if (container._xWasMountedInCell && currentScrollY > homeFeedMountedScrollY + 1200) {
+                    homeFeedScrolledPast = true;
+                }
+                if (homeFeedScrolledPast && !hasNewUnmountedPost && currentScrollY > homeFeedMountedScrollY + 600) {
+                    return null;
+                }
+
+                const viewportHeight = (typeof window !== 'undefined' && window.innerHeight) ||
+                    (typeof document !== 'undefined' && document.documentElement && document.documentElement.clientHeight) ||
+                    800;
+                let targetCell = null;
+                for (let i = 0; i < nativeTweetCells.length; i++) {
+                    const cell = nativeTweetCells[i];
+                    const rect = typeof cell.getBoundingClientRect === 'function' ? cell.getBoundingClientRect() : null;
+                    if (rect && rect.height > 0 && rect.bottom > 0 && rect.top < viewportHeight) {
+                        targetCell = cell;
+                    }
+                }
+                if (!targetCell) {
+                    targetCell = nativeTweetCells[0];
+                }
+                targetCell.appendChild(container);
+                container._xWasMountedInCell = true;
+                homeFeedScrolledPast = false;
+                homeFeedMountedScrollY = currentScrollY;
+            }
+        } else {
+            const isVirtualTimelineLoading = Boolean(
+                timelineContainer.querySelector &&
+                timelineContainer.querySelector('[aria-label*="Timeline"], [role="progressbar"]') &&
+                timelineContainer.querySelectorAll('article[data-testid="tweet"]:not(.x-friend-tweet-card)').length === 0
+            );
+            if (isVirtualTimelineLoading) {
+                return null;
+            }
+            if (container.parentNode !== timelineContainer) {
+                const lastVisibleNative = getLastVisibleChild(timelineContainer, container);
+                if (lastVisibleNative) {
+                    timelineContainer.insertBefore(container, lastVisibleNative.nextSibling);
+                } else {
+                    timelineContainer.insertBefore(container, timelineContainer.firstChild);
+                }
+            }
+        }
+
+        activeForcedPosts.forEach(p => {
+            if (p && p.tweetId) {
+                homeFeedMountedForcedIds.add(String(p.tweetId));
+            }
+        });
 
         container._xActiveForcedPosts = activeForcedPosts;
         container._xCallbacks = callbacks;
@@ -1943,14 +2081,19 @@
                 e.stopPropagation();
                 const currentPosts = container._xActiveForcedPosts || activeForcedPosts;
                 const activeCbs = container._xCallbacks || callbacks;
-                currentPosts.forEach(p => {
-                    if (typeof activeCbs.onDismissForced === 'function') {
-                        activeCbs.onDismissForced(p.tweetId);
-                    }
-                });
+                container._xIntentionallyRemoved = true;
                 if (container.parentNode) {
                     container.parentNode.removeChild(container);
                 }
+                currentPosts.forEach(p => {
+                    if (p && p.tweetId) {
+                        p.isDismissed = true;
+                        p.isSeenByMe = true;
+                        if (typeof activeCbs.onDismissForced === 'function') {
+                            activeCbs.onDismissForced(p.tweetId);
+                        }
+                    }
+                });
             });
             bannerHeader.appendChild(dismissAllBtn);
             container.appendChild(bannerHeader);
@@ -1972,15 +2115,22 @@
         });
 
         let hasNewCards = false;
+        let insertAfterVisibleForced = existingMap.size > 0 ? getLastVisibleChild(listWrap) : null;
         activeForcedPosts.forEach((postItem, idx) => {
             const homeCardCallbacks = {
                 ...callbacks,
                 isHomeInjection: true,
                 onDismissForced: (tid, cardEl) => {
+                    postItem.isDismissed = true;
+                    postItem.isSeenByMe = true;
+                    if (Array.isArray(container._xActiveForcedPosts)) {
+                        container._xActiveForcedPosts = container._xActiveForcedPosts.filter(p => p && p.tweetId !== tid);
+                    }
                     if (cardEl && cardEl.parentNode) {
                         cardEl.parentNode.removeChild(cardEl);
                     }
                     if (listWrap.children.length === 0 && container.parentNode) {
+                        container._xIntentionallyRemoved = true;
                         container.parentNode.removeChild(container);
                     } else {
                         const titleEl = container.querySelector('.x-forced-home-title');
@@ -1988,8 +2138,9 @@
                             titleEl.textContent = `⚡ Forced to Your Timeline by Friends (${listWrap.children.length})`;
                         }
                     }
-                    if (typeof callbacks.onDismissForced === 'function') {
-                        callbacks.onDismissForced(tid);
+                    const activeCbs = container._xCallbacks || callbacks;
+                    if (activeCbs && typeof activeCbs.onDismissForced === 'function') {
+                        activeCbs.onDismissForced(tid);
                     }
                 }
             };
@@ -2000,11 +2151,16 @@
                 return;
             }
             const card = createFriendTweetCard(postItem, homeCardCallbacks);
-            const refNode = listWrap.children[idx] || null;
-            if (refNode) {
-                listWrap.insertBefore(card, refNode);
+            if (insertAfterVisibleForced && insertAfterVisibleForced.parentNode === listWrap) {
+                listWrap.insertBefore(card, insertAfterVisibleForced.nextSibling);
+                insertAfterVisibleForced = card;
             } else {
-                listWrap.appendChild(card);
+                const refNode = listWrap.children[idx] || null;
+                if (refNode) {
+                    listWrap.insertBefore(card, refNode);
+                } else {
+                    listWrap.appendChild(card);
+                }
             }
             hasNewCards = true;
         });
@@ -2177,6 +2333,7 @@
                 badgeSpan.style.display = 'inline-flex';
                 badgeSpan.title = `${unseenForcedCount} forced post(s) from friends`;
             } else {
+                badgeSpan.textContent = '';
                 badgeSpan.style.display = 'none';
             }
         }
@@ -2363,7 +2520,11 @@
             return true;
         });
 
-        const pageSlice = matchingPosts.slice(0, currentVisibleLimit);
+        const baseSlice = matchingPosts.slice(0, currentVisibleLimit);
+        const extraSessionPosts = matchingPosts.slice(currentVisibleLimit).filter(
+            p => p && p.tweetId && sessionVisibleTweetIds.has(p.tweetId) && !scrolledPastRemovedIds.has(p.tweetId)
+        );
+        const pageSlice = extraSessionPosts.length > 0 ? baseSlice.concat(extraSessionPosts) : baseSlice;
         const visiblePosts = pageSlice.filter(p => p.isForced || !scrolledPastRemovedIds.has(p.tweetId));
         visiblePosts.forEach(p => {
             if (p && p.tweetId) {
@@ -2409,26 +2570,36 @@
             }
 
             let hasNewCards = false;
+            let insertAfterVisibleCard = existingCardMap.size > 0 ? getLastVisibleChild(listContainer) : null;
+            const hasVisibleViewportCards = Boolean(insertAfterVisibleCard);
+
             visiblePosts.forEach((postItem, idx) => {
                 if (existingCardMap.has(postItem.tweetId)) {
                     const existingCard = existingCardMap.get(postItem.tweetId);
                     const wasForcedCard = existingCard.classList.contains('is-forced-card');
                     syncCardStateInDOM(existingCard, postItem, callbacks);
                     if (!wasForcedCard && postItem.isForced && existingCard.parentNode === listContainer) {
-                        const refNode = listContainer.children[idx] || null;
-                        if (refNode && refNode !== existingCard) {
-                            listContainer.insertBefore(existingCard, refNode);
+                        if (!hasVisibleViewportCards) {
+                            const refNode = listContainer.children[idx] || null;
+                            if (refNode && refNode !== existingCard) {
+                                listContainer.insertBefore(existingCard, refNode);
+                            }
                         }
                     }
                     return;
                 }
                 const card = createFriendTweetCard(postItem, callbacks);
                 if (postItem.isForced) {
-                    const refNode = listContainer.children[idx] || null;
-                    if (refNode) {
-                        listContainer.insertBefore(card, refNode);
+                    if (insertAfterVisibleCard && insertAfterVisibleCard.parentNode === listContainer) {
+                        listContainer.insertBefore(card, insertAfterVisibleCard.nextSibling);
+                        insertAfterVisibleCard = card;
                     } else {
-                        listContainer.appendChild(card);
+                        const refNode = listContainer.children[idx] || null;
+                        if (refNode) {
+                            listContainer.insertBefore(card, refNode);
+                        } else {
+                            listContainer.appendChild(card);
+                        }
                     }
                 } else {
                     listContainer.appendChild(card);

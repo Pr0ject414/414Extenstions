@@ -39,3 +39,11 @@ Thumbs.db
 
 # Project Specific
 414Extensions/Jules.md
+
+# X414 Mobile App Build & Dependencies
+X414/node_modules/
+X414/.expo/
+X414/android/.gradle/
+X414/android/app/build/
+X414/android/build/
+*.apk

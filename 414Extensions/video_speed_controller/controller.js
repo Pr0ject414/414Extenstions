@@ -315,13 +315,25 @@ document.addEventListener('mousedown', (e) => {
 /**
  * Computes visibility status and visible intersection bounds for a DOM element.
  * @param {HTMLElement} el 
+ * @param {boolean} [useFastCache=false] - Whether to reuse cached clipping ancestors during high-frequency rAF loops
  * @returns {{ isVisible: boolean, visibleTop: number, visibleLeft: number, visibleBottom: number, visibleRight: number }}
  */
-function getElementVisibilityInfo(el) {
+function getElementVisibilityInfo(el, useFastCache = false) {
     const defaultInfo = { isVisible: false, visibleTop: 0, visibleLeft: 0, visibleBottom: 0, visibleRight: 0 };
     if (!el || !el.isConnected) return defaultInfo;
 
-    // 1. CSS check: checkVisibility API or fallback style checks
+    // 1. Fast geometry & viewport bounds pre-check before any expensive style/ancestor work
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return defaultInfo;
+
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+
+    if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) {
+        return defaultInfo;
+    }
+
+    // 2. CSS check: checkVisibility API or fallback style checks
     if (typeof el.checkVisibility === 'function') {
         if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
             return defaultInfo;
@@ -333,63 +345,71 @@ function getElementVisibilityInfo(el) {
         }
     }
 
-    // 2. Geometry check
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return defaultInfo;
+    let visibleTop = Math.max(rect.top, 0);
+    let visibleBottom = Math.min(rect.bottom, viewportHeight);
+    let visibleLeft = Math.max(rect.left, 0);
+    let visibleRight = Math.min(rect.right, viewportWidth);
 
-    // 3. Viewport bounds check
-    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    // 3. Ancestor scroll/overflow clipping check (scroll containers, chat windows, modals, etc.)
+    const now = Date.now();
+    let ancestorCache = useFastCache ? el._vscAncestorCache : null;
+    if (!ancestorCache || (now - ancestorCache.timestamp) > 400) {
+        const clippingAncestors = [];
+        let hiddenByAncestor = false;
+        let parent = el.parentElement || (el.parentNode && el.parentNode.host);
+        while (parent && parent !== document.body && parent !== document.documentElement) {
+            const parentStyle = window.getComputedStyle(parent);
 
-    if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) {
+            if (
+                parentStyle.display === 'none' ||
+                parentStyle.visibility === 'hidden' ||
+                parentStyle.visibility === 'collapse' ||
+                parentStyle.opacity === '0'
+            ) {
+                hiddenByAncestor = true;
+                break;
+            }
+
+            const overflowY = parentStyle.overflowY;
+            const overflowX = parentStyle.overflowX;
+            const isClipping = (
+                overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden' || overflowY === 'clip' ||
+                overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden' || overflowX === 'clip'
+            );
+
+            if (isClipping) {
+                clippingAncestors.push(parent);
+            }
+
+            parent = parent.parentElement || (parent.parentNode && parent.parentNode.host);
+        }
+        ancestorCache = {
+            timestamp: now,
+            hiddenByAncestor,
+            clippingAncestors
+        };
+        if (useFastCache) {
+            el._vscAncestorCache = ancestorCache;
+        }
+    }
+
+    if (ancestorCache.hiddenByAncestor) {
         return defaultInfo;
     }
 
-    let visibleTop = rect.top;
-    let visibleBottom = rect.bottom;
-    let visibleLeft = rect.left;
-    let visibleRight = rect.right;
+    const clippingList = ancestorCache.clippingAncestors;
+    for (let i = 0; i < clippingList.length; i++) {
+        const parent = clippingList[i];
+        if (!parent || !parent.isConnected) continue;
+        const parentRect = parent.getBoundingClientRect();
+        visibleTop = Math.max(visibleTop, parentRect.top);
+        visibleBottom = Math.min(visibleBottom, parentRect.bottom);
+        visibleLeft = Math.max(visibleLeft, parentRect.left);
+        visibleRight = Math.min(visibleRight, parentRect.right);
 
-    // Clamp initial bounds to viewport
-    visibleTop = Math.max(visibleTop, 0);
-    visibleBottom = Math.min(visibleBottom, viewportHeight);
-    visibleLeft = Math.max(visibleLeft, 0);
-    visibleRight = Math.min(visibleRight, viewportWidth);
-
-    // 4. Ancestor scroll/overflow clipping check (scroll containers, chat windows, modals, etc.)
-    let parent = el.parentElement || (el.parentNode && el.parentNode.host);
-    while (parent && parent !== document.body && parent !== document.documentElement) {
-        const parentStyle = window.getComputedStyle(parent);
-
-        if (
-            parentStyle.display === 'none' ||
-            parentStyle.visibility === 'hidden' ||
-            parentStyle.visibility === 'collapse' ||
-            parentStyle.opacity === '0'
-        ) {
+        if (visibleBottom - visibleTop < 25 || visibleRight - visibleLeft < 25) {
             return defaultInfo;
         }
-
-        const overflowY = parentStyle.overflowY;
-        const overflowX = parentStyle.overflowX;
-        const isClipping = (
-            overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden' || overflowY === 'clip' ||
-            overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden' || overflowX === 'clip'
-        );
-
-        if (isClipping) {
-            const parentRect = parent.getBoundingClientRect();
-            visibleTop = Math.max(visibleTop, parentRect.top);
-            visibleBottom = Math.min(visibleBottom, parentRect.bottom);
-            visibleLeft = Math.max(visibleLeft, parentRect.left);
-            visibleRight = Math.min(visibleRight, parentRect.right);
-
-            if (visibleBottom - visibleTop < 25 || visibleRight - visibleLeft < 25) {
-                return defaultInfo;
-            }
-        }
-
-        parent = parent.parentElement || (parent.parentNode && parent.parentNode.host);
     }
 
     if (visibleBottom - visibleTop < 25 || visibleRight - visibleLeft < 25) {
@@ -607,6 +627,17 @@ function attachController(video, initialSpeed) {
     document.body.appendChild(host);
 
     let wasFS = false;
+    let lastRectTop = NaN;
+    let lastRectLeft = NaN;
+    let lastRectWidth = NaN;
+    let lastRectHeight = NaN;
+    let lastDragX = NaN;
+    let lastDragY = NaN;
+    let lastVisibilityCheckMs = 0;
+    let lastShouldShow = false;
+    let lastHostDisplay = '';
+    let lastHostTop = '';
+    let lastHostLeft = '';
 
     // Position Sync Loop
     function syncPosition() {
@@ -648,7 +679,10 @@ function attachController(video, initialSpeed) {
         host.classList.toggle('vsc-fs-hidden', anotherVideoFS);
 
         if (anotherVideoFS) {
-            host.style.display = 'none';
+            if (lastHostDisplay !== 'none') {
+                host.style.display = 'none';
+                lastHostDisplay = 'none';
+            }
             requestAnimationFrame(syncPosition);
             return;
         }
@@ -662,7 +696,7 @@ function attachController(video, initialSpeed) {
 
         if (isAudio) {
             const anchor = videoAnchors.get(video);
-            const anchorInfo = anchor ? getElementVisibilityInfo(anchor) : null;
+            const anchorInfo = anchor ? getElementVisibilityInfo(anchor, true) : null;
             const anchorVisible = anchorInfo ? anchorInfo.isVisible : false;
             shouldShow = !video.paused || (video.paused && anchorVisible);
 
@@ -673,30 +707,72 @@ function attachController(video, initialSpeed) {
             posLeft = refLeft + dragOffset.x;
         } else if (isFS) {
             // Fullscreen or Maximized: position cleanly relative to top-left of video
-            shouldShow = isElementVisibleOnScreen(video) || (rect.width > 0 && rect.height > 0);
+            shouldShow = (rect.width > 0 && rect.height > 0) || getElementVisibilityInfo(video, true).isVisible;
             posTop = rect.top + 10 + dragOffset.y;
             posLeft = rect.left + 10 + dragOffset.x;
         } else {
-            // Normal Feed / Inline Video: Lock 1:1 relative to video coordinates (default top-left or custom dragged position)
-            const visInfo = getElementVisibilityInfo(video);
-            posTop = rect.top + 10 + dragOffset.y;
-            posLeft = rect.left + 10 + dragOffset.x;
+            // Fast off-screen rejection before any DOM/style checks
+            if (rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.top >= vh || rect.right <= 0 || rect.left >= vw) {
+                shouldShow = false;
+                lastShouldShow = false;
+            } else {
+                const now = Date.now();
+                const geometryUnchanged = (
+                    rect.top === lastRectTop &&
+                    rect.left === lastRectLeft &&
+                    rect.width === lastRectWidth &&
+                    rect.height === lastRectHeight &&
+                    dragOffset.x === lastDragX &&
+                    dragOffset.y === lastDragY
+                );
 
-            // Hide overlay when its position on the video is scrolled out of view or under sticky headers
-            const isPosVisible = (
-                visInfo.isVisible &&
-                posTop >= visInfo.visibleTop - 5 &&
-                posTop <= visInfo.visibleBottom - 15 &&
-                posLeft >= visInfo.visibleLeft - 5 &&
-                posLeft <= visInfo.visibleRight - 15
-            );
-            shouldShow = isPosVisible;
+                posTop = rect.top + 10 + dragOffset.y;
+                posLeft = rect.left + 10 + dragOffset.x;
+
+                if (!isDragging && geometryUnchanged && (now - lastVisibilityCheckMs) < 250) {
+                    shouldShow = lastShouldShow;
+                } else {
+                    lastRectTop = rect.top;
+                    lastRectLeft = rect.left;
+                    lastRectWidth = rect.width;
+                    lastRectHeight = rect.height;
+                    lastDragX = dragOffset.x;
+                    lastDragY = dragOffset.y;
+                    lastVisibilityCheckMs = now;
+
+                    // Normal Feed / Inline Video: Lock 1:1 relative to video coordinates
+                    const visInfo = getElementVisibilityInfo(video, true);
+
+                    // Hide overlay when its position on the video is scrolled out of view or under sticky headers
+                    const isPosVisible = (
+                        visInfo.isVisible &&
+                        posTop >= visInfo.visibleTop - 5 &&
+                        posTop <= visInfo.visibleBottom - 15 &&
+                        posLeft >= visInfo.visibleLeft - 5 &&
+                        posLeft <= visInfo.visibleRight - 15
+                    );
+                    shouldShow = isPosVisible;
+                    lastShouldShow = shouldShow;
+                }
+            }
         }
 
-        host.style.display = shouldShow ? 'block' : 'none';
+        const nextDisplay = shouldShow ? 'block' : 'none';
+        if (lastHostDisplay !== nextDisplay) {
+            host.style.display = nextDisplay;
+            lastHostDisplay = nextDisplay;
+        }
         if (shouldShow) {
-            host.style.top = `${posTop}px`;
-            host.style.left = `${posLeft}px`;
+            const nextTop = `${posTop}px`;
+            const nextLeft = `${posLeft}px`;
+            if (lastHostTop !== nextTop) {
+                host.style.top = nextTop;
+                lastHostTop = nextTop;
+            }
+            if (lastHostLeft !== nextLeft) {
+                host.style.left = nextLeft;
+                lastHostLeft = nextLeft;
+            }
         }
 
         requestAnimationFrame(syncPosition);

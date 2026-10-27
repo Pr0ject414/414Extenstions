@@ -755,11 +755,15 @@
         return groups.length > 0 ? groups[groups.length - 1] : null;
     }
 
-    function injectDownloadButtons() {
+    function injectDownloadButtons(rootScope) {
         ensureDownloadStyles();
 
+        const queryRoot = (rootScope && typeof rootScope.querySelectorAll === 'function')
+            ? rootScope
+            : document;
+
         // Find all video player containers and Friends timeline video elements
-        const players = document.querySelectorAll('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video');
+        const players = queryRoot.querySelectorAll('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video');
         
         players.forEach(player => {
             const article = player.closest ? player.closest('article') : null;

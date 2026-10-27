@@ -10,11 +10,14 @@
     const MAX_PENDING_SEEN_META = 25;
 
     const processedElements = new WeakSet();
+    const inflightElements = new WeakSet();
     const observedTweets = new WeakSet();
     const dwellTimers = new Map(); // tweetId -> timerId
     const locallyMarkedSeen = new Set();
+    const dismissedForcedLocalSet = new Set();
     const pendingSeenQueue = new Set();
     const pendingSeenMetaMap = {}; // tweetId -> TweetMeta
+    let cachedSettings = null;
 
     function addLocallyMarkedSeen(tweetId) {
         if (!tweetId) return;
@@ -566,14 +569,40 @@
                 });
             },
             onDismissForced: (tid) => {
-                if (!isContextValid()) return;
-                locallyMarkedSeen.add(tid);
+                if (!isContextValid() || !tid) return;
+                const normId = String(tid).trim();
+                addLocallyMarkedSeen(normId);
+                dismissedForcedLocalSet.add(normId);
+
+                if (cachedTimelineData && typeof cachedTimelineData === 'object') {
+                    if (Array.isArray(cachedTimelineData.unseenForcedPosts)) {
+                        cachedTimelineData.unseenForcedPosts = cachedTimelineData.unseenForcedPosts.filter(
+                            p => p && String(p.tweetId) !== normId
+                        );
+                    }
+                    if (Array.isArray(cachedTimelineData.timelinePosts)) {
+                        cachedTimelineData.timelinePosts.forEach(p => {
+                            if (p && String(p.tweetId) === normId) {
+                                p.isDismissed = true;
+                                p.isSeenByMe = true;
+                            }
+                        });
+                    }
+                }
+
+                if (window.XLocationUI && typeof window.XLocationUI.markCardSeenInDOM === 'function') {
+                    window.XLocationUI.markCardSeenInDOM(normId);
+                }
+                const currentTabList = findHomeTabList();
+                if (currentTabList && window.XLocationUI && typeof window.XLocationUI.ensureFriendsTimelineTab === 'function') {
+                    window.XLocationUI.ensureFriendsTimelineTab(currentTabList, cachedTimelineData, callbacks);
+                }
+
                 chrome.runtime.sendMessage({
                     action: 'X_DISMISS_FORCED_TWEET',
-                    payload: { tweetId: tid }
+                    payload: { tweetId: normId }
                 }, () => {
                     if (safeHasError()) return;
-                    syncFriendsTimelineUI(true);
                 });
             },
             onSyncNow: (doneCb) => {
@@ -607,6 +636,11 @@
         }
 
         const applyView = (data) => {
+            if (data && Array.isArray(data.unseenForcedPosts) && dismissedForcedLocalSet.size > 0) {
+                data.unseenForcedPosts = data.unseenForcedPosts.filter(
+                    p => p && !dismissedForcedLocalSet.has(String(p.tweetId))
+                );
+            }
             if (tabList && typeof window.XLocationUI.ensureFriendsTimelineTab === 'function') {
                 window.XLocationUI.ensureFriendsTimelineTab(tabList, data, callbacks);
             }
@@ -615,10 +649,6 @@
                 && window.XLocationUI.isFriendsTimelineTabSelected();
 
             const timelineRoot = document.getElementById('x-friends-timeline-root');
-
-            if (nativeFeed && typeof window.XLocationUI.renderForcedPostsInHomeFeed === 'function') {
-                window.XLocationUI.renderForcedPostsInHomeFeed(nativeFeed, data.unseenForcedPosts || [], callbacks);
-            }
 
             if (isFriendsSelected && host) {
                 if (nativeFeed) {
@@ -645,6 +675,9 @@
                     const wasHidden = nativeFeed.classList.contains('x-native-feed-hidden') || nativeFeed.style.display === 'none';
                     nativeFeed.classList.remove('x-native-feed-hidden');
                     nativeFeed.style.display = '';
+                    if (typeof window.XLocationUI.renderForcedPostsInHomeFeed === 'function') {
+                        window.XLocationUI.renderForcedPostsInHomeFeed(nativeFeed, data.unseenForcedPosts || [], callbacks);
+                    }
                     if (wasHidden && typeof window.dispatchEvent === 'function' && typeof Event !== 'undefined') {
                         window.dispatchEvent(new Event('resize'));
                         requestAnimationFrame(() => {
@@ -707,9 +740,6 @@
                         clearTimeout(existingTimer);
                         dwellTimers.delete(tweetId);
                     }
-                    if (!entry.isIntersecting && isCustomCard && article.classList.contains('is-seen-by-me')) {
-                        handleWindowScrollForSeenCards();
-                    }
                 }
             }
         }, {
@@ -719,38 +749,49 @@
 
     function checkIsAdTweet(article) {
         if (!article) return false;
+        if (typeof article._xIsAdChecked === 'boolean') {
+            return article._xIsAdChecked;
+        }
+        let isAd = false;
         if (window.XLocationUI && typeof window.XLocationUI.isAdTweet === 'function') {
-            return window.XLocationUI.isAdTweet(article);
-        }
-        if (!article.querySelectorAll) return false;
-        const caretBtns = article.querySelectorAll('[data-testid="caret"]');
-        for (const caretBtn of caretBtns) {
-            const roleLink = caretBtn.closest ? caretBtn.closest('[role="link"]') : null;
-            if (roleLink && article.contains(roleLink) && roleLink !== article) continue;
-            let curr = caretBtn.parentElement;
-            let cluster = null;
-            let depth = 0;
-            while (curr && curr !== article && depth < 6) {
-                if (curr.querySelector && curr.querySelector('[data-testid="User-Name"], [data-testid="UserName"], [data-testid="tweetText"]')) {
-                    break;
-                }
-                cluster = curr;
-                curr = curr.parentElement;
-                depth++;
-            }
-            const searchRoot = cluster || caretBtn.parentElement;
-            if (searchRoot && searchRoot.querySelectorAll) {
-                const spans = searchRoot.querySelectorAll('span');
-                for (const span of spans) {
-                    if (span.closest && span.closest('button, a, time, [data-testid="User-Name"], [data-testid="UserName"], [data-testid="tweetText"], .x-location-inline-badge')) {
-                        continue;
+            isAd = window.XLocationUI.isAdTweet(article);
+        } else if (article.querySelectorAll) {
+            const caretBtns = article.querySelectorAll('[data-testid="caret"]');
+            for (const caretBtn of caretBtns) {
+                const roleLink = caretBtn.closest ? caretBtn.closest('[role="link"]') : null;
+                if (roleLink && article.contains(roleLink) && roleLink !== article) continue;
+                let curr = caretBtn.parentElement;
+                let cluster = null;
+                let depth = 0;
+                while (curr && curr !== article && depth < 6) {
+                    if (curr.querySelector && curr.querySelector('[data-testid="User-Name"], [data-testid="UserName"], [data-testid="tweetText"]')) {
+                        break;
                     }
-                    const txt = (span.textContent || '').trim();
-                    if (txt === 'Ad' || txt === 'Promoted') return true;
+                    cluster = curr;
+                    curr = curr.parentElement;
+                    depth++;
                 }
+                const searchRoot = cluster || caretBtn.parentElement;
+                if (searchRoot && searchRoot.querySelectorAll) {
+                    const spans = searchRoot.querySelectorAll('span');
+                    for (const span of spans) {
+                        if (span.closest && span.closest('button, a, time, [data-testid="User-Name"], [data-testid="UserName"], [data-testid="tweetText"], .x-location-inline-badge')) {
+                            continue;
+                        }
+                        const txt = (span.textContent || '').trim();
+                        if (txt === 'Ad' || txt === 'Promoted') {
+                            isAd = true;
+                            break;
+                        }
+                    }
+                }
+                if (isAd) break;
             }
         }
-        return false;
+        if (isAd || (article.querySelector && article.querySelector('[data-testid="caret"], [data-testid="User-Name"], [data-testid="UserName"]'))) {
+            article._xIsAdChecked = isAd;
+        }
+        return isAd;
     }
 
     function applyAdStealthState(article, shouldHide) {
@@ -1232,6 +1273,29 @@
         } catch (err) {}
     }
 
+    const SETTINGS_STORAGE_KEYS = [
+        'isXLocationEnabled',
+        'isXHideAdsEnabled',
+        'isXFriendsSyncEnabled',
+        'isXModuleEnabled',
+        'isGlobalMasterSwitchEnabled',
+        'blockedCountries',
+        'blockedDeviceRegions',
+        'blockedNameFlags'
+    ];
+
+    function withObserverSettings(cb) {
+        if (cachedSettings) {
+            cb(cachedSettings);
+            return;
+        }
+        chrome.storage.local.get(SETTINGS_STORAGE_KEYS, (settings) => {
+            if (safeHasError() || !settings) return;
+            cachedSettings = settings;
+            cb(settings);
+        });
+    }
+
     function scanDOM() {
         if (!isContextValid()) {
             if (observer) observer.disconnect();
@@ -1245,17 +1309,8 @@
                 return;
             }
             try {
-                chrome.storage.local.get([
-                    'isXLocationEnabled',
-                    'isXHideAdsEnabled',
-                    'isXFriendsSyncEnabled',
-                    'isXModuleEnabled',
-                    'isGlobalMasterSwitchEnabled',
-                    'blockedCountries',
-                    'blockedDeviceRegions',
-                    'blockedNameFlags'
-                ], (settings) => {
-                    if (safeHasError() || !settings) return;
+                withObserverSettings((settings) => {
+                    if (!settings) return;
 
                     if ((window.__X414_MOBILE__ || window.ReactNativeWebView) &&
                         window.XLocationUI &&
@@ -1290,7 +1345,7 @@
 
                     const userNames = document.querySelectorAll('[data-testid="User-Name"], [data-testid="UserName"], [data-testid="UserCell"]');
                     userNames.forEach(elem => {
-                        if (processedElements.has(elem) || !isContextValid()) return;
+                        if (processedElements.has(elem) || inflightElements.has(elem) || !isContextValid()) return;
 
                         const enclosingArticle = elem.closest ? elem.closest('article[data-testid="tweet"]') : null;
                         if (enclosingArticle && (enclosingArticle._xAdCollapsed || (shouldHideAds && checkIsAdTweet(enclosingArticle)))) {
@@ -1305,12 +1360,14 @@
                             applyTweetFilterForElement(filterTarget, filterTarget._xPrimaryLocationData || { screenName }, settings, elem);
                         }
 
+                        inflightElements.add(elem);
                         try {
                             // Request location data from background bridge
                             chrome.runtime.sendMessage({
                                 action: 'X_FETCH_USER_INFO',
                                 payload: { screenName }
                             }, (response) => {
+                                inflightElements.delete(elem);
                                 if (safeHasError()) {
                                     return;
                                 }
@@ -1329,6 +1386,7 @@
                                 }
                             });
                         } catch (err) {
+                            inflightElements.delete(elem);
                             if (observer) observer.disconnect();
                         }
                     });
@@ -1342,7 +1400,7 @@
     // Track explicit user interactions (click, like, expand, video play) as immediate "seen"
     function handleUserInteraction(e) {
         if (!isFriendsSyncActive || !isContextValid() || !e.target || !e.target.closest) return;
-        if (e.target.closest('.x-force-friend-btn, .vsc-download-btn, .x-location-info-btn, .x-friend-seen-badge, #x-414-nav-trigger, #x-414-floating-pill')) return;
+        if (e.target.closest('.x-force-friend-btn, .x-forced-dismiss-btn, .x-forced-dismiss-all-btn, .vsc-download-btn, .x-location-info-btn, .x-friend-seen-badge, #x-414-nav-trigger, #x-414-floating-pill')) return;
         const article = e.target.closest('article[data-testid="tweet"]');
         if (!article || article._xAdCollapsed || checkIsAdTweet(article)) return;
         const tweetId = article.dataset?.xTweetId || extractTweetIdFromArticle(article);
@@ -1366,7 +1424,7 @@
             if (window.XLocationUI && typeof window.XLocationUI.removeSeenCardsScrolledPast === 'function') {
                 window.XLocationUI.removeSeenCardsScrolledPast();
             }
-        }, 150);
+        }, 300);
     }
 
     window.addEventListener('scroll', handleWindowScrollForSeenCards, { passive: true });
@@ -1388,17 +1446,34 @@
                     changes.blockedNameFlags ||
                     changes.isXLocationEnabled ||
                     changes.isXHideAdsEnabled ||
+                    changes.isXFriendsSyncEnabled ||
                     changes.isXModuleEnabled ||
                     changes.isGlobalMasterSwitchEnabled
                 )) {
+                    cachedSettings = null;
                     reevaluateAllTweets();
-                    if (changes.isXHideAdsEnabled || changes.isXModuleEnabled || changes.isGlobalMasterSwitchEnabled) {
+                    if (changes.isXHideAdsEnabled || changes.isXFriendsSyncEnabled || changes.isXModuleEnabled || changes.isGlobalMasterSwitchEnabled) {
                         scanDOM();
                     }
                 }
             });
         }
     } catch (e) {}
+
+    function isIgnoredExtensionNode(node) {
+        if (!node || node.nodeType !== 1 || !node.classList) return false;
+        return (
+            node.classList.contains('x-location-inline-badge') ||
+            node.classList.contains('x-force-friend-btn-wrap') ||
+            node.classList.contains('x-force-friend-btn') ||
+            node.classList.contains('vsc-download-btn') ||
+            node.classList.contains('x-tweet-filtered-placeholder') ||
+            node.classList.contains('x-friend-seen-badge') ||
+            node.id === 'x-location-hovercard-root' ||
+            node.id === 'x-414-floating-pill' ||
+            node.id === 'x-414-nav-trigger'
+        );
+    }
 
     // Start MutationObserver (ignore removal-only mutations and counter text updates to prevent re-scan loops)
     observer = new MutationObserver((mutations) => {
@@ -1412,7 +1487,11 @@
             if (m.removedNodes && m.removedNodes.length > 0) {
                 for (let j = 0; j < m.removedNodes.length; j++) {
                     const rn = m.removedNodes[j];
-                    if (rn && (rn.id === 'x-forced-home-feed' || (rn.querySelector && rn.querySelector('#x-forced-home-feed')))) {
+                    if (!rn || rn._xIntentionallyRemoved) continue;
+                    const forcedFeedDescendant = (rn.id === 'x-forced-home-feed')
+                        ? rn
+                        : (rn.querySelector ? rn.querySelector('#x-forced-home-feed') : null);
+                    if (forcedFeedDescendant && !forcedFeedDescendant._xIntentionallyRemoved) {
                         hasRelevantMutation = true;
                         break;
                     }
@@ -1424,10 +1503,18 @@
             if (
                 target &&
                 target.closest &&
-                target.closest('.x-friends-tab-badge, .x-friends-filter-pill, .x-forced-home-title, .x-friends-load-more-btn, #x-414-nav-trigger, #x-414-floating-pill')
+                target.closest('.x-location-inline-badge, .x-force-friend-btn-wrap, .vsc-download-btn, .x-tweet-filtered-placeholder, .x-friends-tab-badge, .x-friends-filter-pill, .x-forced-home-title, .x-friends-load-more-btn, #x-414-nav-trigger, #x-414-floating-pill')
             ) {
                 continue;
             }
+            let hasNonExtensionAddedNode = false;
+            for (let k = 0; k < m.addedNodes.length; k++) {
+                if (!isIgnoredExtensionNode(m.addedNodes[k])) {
+                    hasNonExtensionAddedNode = true;
+                    break;
+                }
+            }
+            if (!hasNonExtensionAddedNode) continue;
             hasRelevantMutation = true;
             break;
         }
@@ -1441,7 +1528,7 @@
         if (!isFriendsSyncActive || !isContextValid()) return;
         if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
         syncFriendsTimelineUI(false);
-    }, 8000);
+    }, 15000);
     if (typeof liveSyncInterval?.unref === 'function') {
         liveSyncInterval.unref();
     }

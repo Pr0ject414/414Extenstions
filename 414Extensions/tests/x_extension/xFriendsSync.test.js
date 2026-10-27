@@ -582,5 +582,62 @@ describe('XFriendsSyncManager', () => {
         expect(ownForcedItem.forcedByMe).toBe(true);
         expect(ownForcedItem.isSentOnly).toBe(true);
     });
+
+    test('should place failing relays (502 onclose or onerror) on exponential cooldown and reuse pooled sockets without socket exhaustion', async () => {
+        const connectionAttempts = {
+            'wss://dead-502.relay': 0,
+            'wss://healthy.relay': 0
+        };
+
+        const manager = new XFriendsSyncManager({
+            relays: ['wss://dead-502.relay', 'wss://healthy.relay'],
+            webSocketFactory: (url) => {
+                connectionAttempts[url] = (connectionAttempts[url] || 0) + 1;
+                if (url === 'wss://dead-502.relay') {
+                    // Simulate 502 handshake rejection where browser fires onclose before onopen
+                    const deadWs = {
+                        readyState: 0,
+                        onopen: null,
+                        onmessage: null,
+                        onerror: null,
+                        onclose: null,
+                        send: jest.fn(),
+                        close() {
+                            deadWs.readyState = 3;
+                        }
+                    };
+                    setTimeout(() => {
+                        deadWs.readyState = 3;
+                        if (deadWs.onclose) deadWs.onclose();
+                    }, 2);
+                    return deadWs;
+                }
+                return relayHub.createSocket();
+            }
+        });
+
+        await manager.setIdentity('alice@example.com', 'Alice');
+        // First sync (triggered by setIdentity) attempts both relays; dead-502 fails and enters cooldown, healthy opens and stays pooled
+        expect(connectionAttempts['wss://dead-502.relay']).toBe(1);
+        expect(connectionAttempts['wss://healthy.relay']).toBe(1);
+        expect(manager.relayFailureCounts.get('wss://dead-502.relay')).toBe(1);
+        expect(manager.relayCooldownUntil.get('wss://dead-502.relay')).toBeGreaterThan(Date.now());
+
+        // Subsequent syncs should skip dead-502 (during cooldown) AND reuse the open healthy socket
+        await manager.syncWithRelays();
+        await manager.syncWithRelays();
+        expect(connectionAttempts['wss://dead-502.relay']).toBe(1);
+        expect(connectionAttempts['wss://healthy.relay']).toBe(1);
+
+        // Clean up pooled socket and verify handlers are detached
+        const pooledEntry = manager.wsPool.get('wss://healthy.relay');
+        expect(pooledEntry).toBeDefined();
+        const rawWs = pooledEntry.ws;
+        manager.closeRelayEntry(pooledEntry);
+        expect(rawWs.onopen).toBeNull();
+        expect(rawWs.onmessage).toBeNull();
+        expect(rawWs.onerror).toBeNull();
+        expect(rawWs.onclose).toBeNull();
+    });
 });
 
