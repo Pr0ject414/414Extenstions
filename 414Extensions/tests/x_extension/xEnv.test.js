@@ -133,4 +133,31 @@ describe('xEnv.js', () => {
             '*'
         );
     });
+
+    it('should short-circuit /i/api/1.1/promoted_content/log.json in XMLHttpRequest and fetch with a 200 OK stub to prevent 429 rate-limit spam', async () => {
+        const xhr = new XMLHttpRequest();
+        const loadSpy = jest.fn();
+        const readyStateSpy = jest.fn();
+        xhr.addEventListener('readystatechange', readyStateSpy);
+        xhr.addEventListener('load', loadSpy);
+
+        xhr.open('POST', 'https://x.com/i/api/1.1/promoted_content/log.json', true);
+        xhr.send(JSON.stringify({ impression_id: 'test_ad_123' }));
+
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+        expect(readyStateSpy).toHaveBeenCalled();
+        expect(loadSpy).toHaveBeenCalled();
+        expect(xhr.readyState).toBe(4);
+        expect(xhr.status).toBe(200);
+        expect(xhr.responseText).toBe('{}');
+        expect(xhr.getResponseHeader('Content-Type')).toContain('application/json');
+
+        const fetchRes = await window.fetch('https://x.com/i/api/1.1/promoted_content/log.json', {
+            method: 'POST',
+            body: '{}'
+        });
+        expect(fetchRes.status).toBe(200);
+        expect(await fetchRes.text()).toBe('{}');
+    });
 });

@@ -318,12 +318,12 @@ document.addEventListener('mousedown', (e) => {
  * @param {boolean} [useFastCache=false] - Whether to reuse cached clipping ancestors during high-frequency rAF loops
  * @returns {{ isVisible: boolean, visibleTop: number, visibleLeft: number, visibleBottom: number, visibleRight: number }}
  */
-function getElementVisibilityInfo(el, useFastCache = false) {
+function getElementVisibilityInfo(el, useFastCache = false, precomputedRect = null) {
     const defaultInfo = { isVisible: false, visibleTop: 0, visibleLeft: 0, visibleBottom: 0, visibleRight: 0 };
     if (!el || !el.isConnected) return defaultInfo;
 
     // 1. Fast geometry & viewport bounds pre-check before any expensive style/ancestor work
-    const rect = el.getBoundingClientRect();
+    const rect = precomputedRect || el.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return defaultInfo;
 
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
@@ -353,7 +353,7 @@ function getElementVisibilityInfo(el, useFastCache = false) {
     // 3. Ancestor scroll/overflow clipping check (scroll containers, chat windows, modals, etc.)
     const now = Date.now();
     let ancestorCache = useFastCache ? el._vscAncestorCache : null;
-    if (!ancestorCache || (now - ancestorCache.timestamp) > 400) {
+    if (!ancestorCache || (now - ancestorCache.timestamp) > 1500) {
         const clippingAncestors = [];
         let hiddenByAncestor = false;
         let parent = el.parentElement || (el.parentNode && el.parentNode.host);
@@ -635,6 +635,11 @@ function attachController(video, initialSpeed) {
     let lastDragY = NaN;
     let lastVisibilityCheckMs = 0;
     let lastShouldShow = false;
+    let lastCssVisible = false;
+    let lastClipTop = 0;
+    let lastClipBottom = Infinity;
+    let lastClipLeft = 0;
+    let lastClipRight = Infinity;
     let lastHostDisplay = '';
     let lastHostTop = '';
     let lastHostLeft = '';
@@ -707,7 +712,7 @@ function attachController(video, initialSpeed) {
             posLeft = refLeft + dragOffset.x;
         } else if (isFS) {
             // Fullscreen or Maximized: position cleanly relative to top-left of video
-            shouldShow = (rect.width > 0 && rect.height > 0) || getElementVisibilityInfo(video, true).isVisible;
+            shouldShow = (rect.width > 0 && rect.height > 0) || getElementVisibilityInfo(video, true, rect).isVisible;
             posTop = rect.top + 10 + dragOffset.y;
             posLeft = rect.left + 10 + dragOffset.x;
         } else {
@@ -717,11 +722,14 @@ function attachController(video, initialSpeed) {
                 lastShouldShow = false;
             } else {
                 const now = Date.now();
-                const geometryUnchanged = (
+                const sizeUnchanged = (
+                    rect.width === lastRectWidth &&
+                    rect.height === lastRectHeight
+                );
+                const positionUnchanged = (
+                    sizeUnchanged &&
                     rect.top === lastRectTop &&
                     rect.left === lastRectLeft &&
-                    rect.width === lastRectWidth &&
-                    rect.height === lastRectHeight &&
                     dragOffset.x === lastDragX &&
                     dragOffset.y === lastDragY
                 );
@@ -729,8 +737,28 @@ function attachController(video, initialSpeed) {
                 posTop = rect.top + 10 + dragOffset.y;
                 posLeft = rect.left + 10 + dragOffset.x;
 
-                if (!isDragging && geometryUnchanged && (now - lastVisibilityCheckMs) < 250) {
+                if (!isDragging && positionUnchanged && (now - lastVisibilityCheckMs) < 250) {
                     shouldShow = lastShouldShow;
+                } else if (!isDragging && sizeUnchanged && (now - lastVisibilityCheckMs) < 250) {
+                    // During scroll, rect.top/left shift while rect.width/height remain constant.
+                    // Avoid expensive checkVisibility() & ancestor DOM reads on intermediate scroll frames.
+                    lastRectTop = rect.top;
+                    lastRectLeft = rect.left;
+                    lastDragX = dragOffset.x;
+                    lastDragY = dragOffset.y;
+                    const visTop = Math.max(rect.top, 0, lastClipTop);
+                    const visBottom = Math.min(rect.bottom, vh, lastClipBottom);
+                    const visLeft = Math.max(rect.left, 0, lastClipLeft);
+                    const visRight = Math.min(rect.right, vw, lastClipRight);
+                    const isBoxVisible = lastCssVisible && (visBottom - visTop >= 25) && (visRight - visLeft >= 25);
+                    shouldShow = (
+                        isBoxVisible &&
+                        posTop >= visTop - 5 &&
+                        posTop <= visBottom - 15 &&
+                        posLeft >= visLeft - 5 &&
+                        posLeft <= visRight - 15
+                    );
+                    lastShouldShow = shouldShow;
                 } else {
                     lastRectTop = rect.top;
                     lastRectLeft = rect.left;
@@ -741,7 +769,19 @@ function attachController(video, initialSpeed) {
                     lastVisibilityCheckMs = now;
 
                     // Normal Feed / Inline Video: Lock 1:1 relative to video coordinates
-                    const visInfo = getElementVisibilityInfo(video, true);
+                    const visInfo = getElementVisibilityInfo(video, true, rect);
+                    lastCssVisible = visInfo.isVisible;
+                    if (visInfo.isVisible) {
+                        lastClipTop = visInfo.visibleTop > rect.top ? visInfo.visibleTop : 0;
+                        lastClipBottom = visInfo.visibleBottom < rect.bottom ? visInfo.visibleBottom : vh;
+                        lastClipLeft = visInfo.visibleLeft > rect.left ? visInfo.visibleLeft : 0;
+                        lastClipRight = visInfo.visibleRight < rect.right ? visInfo.visibleRight : vw;
+                    } else {
+                        lastClipTop = 0;
+                        lastClipBottom = vh;
+                        lastClipLeft = 0;
+                        lastClipRight = vw;
+                    }
 
                     // Hide overlay when its position on the video is scrolled out of view or under sticky headers
                     const isPosVisible = (

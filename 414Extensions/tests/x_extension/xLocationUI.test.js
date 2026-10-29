@@ -1996,8 +1996,8 @@ describe('xLocationUI.js', () => {
         expect(feedChildren[2]).toBe(forcedBanner);
         expect(feedChildren[3]).toBe(nativeBelowFold);
 
-        // 4. Verify real X virtualized Home Timeline DOM (with 47,773px [aria-label="Timeline: Your Home Timeline"] & [data-testid="cellInnerDiv"])
-        // mounts #x-forced-home-feed inside the last visible cellInnerDiv rather than after the 47,773px wrapper
+        // 4. Verify real X virtualized Home Timeline DOM (with [aria-label="Timeline: Your Home Timeline"] & [data-testid="cellInnerDiv"])
+        // mounts #x-forced-home-feed inside the last visible tweet cellInnerDiv (cell2) in the viewport so it is visible while scrolling
         if (forcedBanner.parentNode) forcedBanner.parentNode.removeChild(forcedBanner);
         const virtualSection = document.createElement('section');
         virtualSection.setAttribute('role', 'region');
@@ -2047,6 +2047,8 @@ describe('xLocationUI.js', () => {
         const virtualBanner = window.XLocationUI.renderForcedPostsInHomeFeed(virtualSection, [newlyForcedPost], {});
         expect(virtualBanner).not.toBeNull();
         expect(virtualBanner.parentNode).toBe(cell2);
+        expect(cell2.lastElementChild).toBe(virtualBanner);
+        expect(cellBelowFold.contains(virtualBanner)).toBe(false);
         expect(virtualSection.lastElementChild).toBe(timelineOuter);
     });
 
@@ -2163,6 +2165,212 @@ describe('xLocationUI.js', () => {
         expect(actionsSent).toContain('X_DISMISS_FORCED_TWEET');
         expect(actionsSent).not.toContain('X_MARK_TWEETS_SEEN');
 
+        jest.useRealTimers();
+    });
+
+    test('xObserver should synchronously filter cached users without IPC, deduplicate in-flight user lookups, and defer collapsing tweets already scrolled above the viewport', () => {
+        jest.useFakeTimers();
+        delete window.XObserverInjected;
+
+        let asyncCallbacks = [];
+        const sendMessageMock = jest.fn((msg, cb) => {
+            if (msg.action === 'X_FETCH_USER_INFO') {
+                asyncCallbacks.push({ screenName: msg.payload.screenName, cb });
+            } else if (cb) {
+                cb({ success: true, seenMap: {}, forcedMap: {}, myForcedIds: [] });
+            }
+        });
+
+        global.chrome = {
+            runtime: {
+                id: 'test-ext-id',
+                lastError: null,
+                onMessage: { addListener: jest.fn() },
+                sendMessage: sendMessageMock
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXHideAdsEnabled: true,
+                            isXFriendsSyncEnabled: false,
+                            blockedCountries: ['India'],
+                            blockedDeviceRegions: [],
+                            blockedNameFlags: [],
+                            x_location_cache_v4: {
+                                cached_in_usr: {
+                                    screenName: 'cached_in_usr',
+                                    location: 'India',
+                                    device: 'Android'
+                                }
+                            }
+                        });
+                    })
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+
+        // 1. Tweet from a pre-cached blocked user (should filter in 0 IPC calls)
+        const cellCached = document.createElement('div');
+        const tweetCached = document.createElement('article');
+        tweetCached.setAttribute('data-testid', 'tweet');
+        const headerCached = document.createElement('div');
+        headerCached.setAttribute('data-testid', 'User-Name');
+        headerCached.textContent = '@cached_in_usr';
+        tweetCached.appendChild(headerCached);
+        cellCached.appendChild(tweetCached);
+        document.body.appendChild(cellCached);
+
+        // 2. Three tweets from the same uncached user (one scrolled above viewport, one in viewport, one in below-viewport overscan buffer)
+        const cellAbove = document.createElement('div');
+        const tweetAbove = document.createElement('article');
+        tweetAbove.setAttribute('data-testid', 'tweet');
+        tweetAbove.getBoundingClientRect = () => ({ top: -500, bottom: -50, left: 0, right: 600, width: 600, height: 450 });
+        const headerAbove = document.createElement('div');
+        headerAbove.setAttribute('data-testid', 'User-Name');
+        headerAbove.textContent = '@uncached_in_usr';
+        tweetAbove.appendChild(headerAbove);
+        cellAbove.appendChild(tweetAbove);
+        document.body.appendChild(cellAbove);
+
+        const cellVisible = document.createElement('div');
+        const tweetVisible = document.createElement('article');
+        tweetVisible.setAttribute('data-testid', 'tweet');
+        tweetVisible.getBoundingClientRect = () => ({ top: 100, bottom: 550, left: 0, right: 600, width: 600, height: 450 });
+        const headerVisible = document.createElement('div');
+        headerVisible.setAttribute('data-testid', 'User-Name');
+        headerVisible.textContent = '@uncached_in_usr';
+        tweetVisible.appendChild(headerVisible);
+        cellVisible.appendChild(tweetVisible);
+        document.body.appendChild(cellVisible);
+
+        const cellBelowOverscan = document.createElement('div');
+        const tweetBelowOverscan = document.createElement('article');
+        tweetBelowOverscan.setAttribute('data-testid', 'tweet');
+        tweetBelowOverscan.getBoundingClientRect = () => ({ top: 1200, bottom: 1650, left: 0, right: 600, width: 600, height: 450 });
+        const headerBelowOverscan = document.createElement('div');
+        headerBelowOverscan.setAttribute('data-testid', 'User-Name');
+        headerBelowOverscan.textContent = '@uncached_in_usr';
+        tweetBelowOverscan.appendChild(headerBelowOverscan);
+        cellBelowOverscan.appendChild(tweetBelowOverscan);
+        document.body.appendChild(cellBelowOverscan);
+
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(100);
+
+        // Pre-cached user was filtered without any X_FETCH_USER_INFO IPC call
+        expect(tweetCached.style.display).toBe('none');
+        expect(cellCached.querySelector('.x-tweet-filtered-placeholder')).not.toBeNull();
+
+        // Only 1 in-flight X_FETCH_USER_INFO request was sent for the three @uncached_in_usr tweets
+        expect(asyncCallbacks.length).toBe(1);
+        expect(asyncCallbacks[0].screenName).toBe('uncached_in_usr');
+
+        // Resolve the async lookup
+        asyncCallbacks[0].cb({
+            success: true,
+            data: {
+                screenName: 'uncached_in_usr',
+                location: 'India',
+                device: 'Web'
+            }
+        });
+
+        // Visible tweet is filtered immediately, while above-viewport and below-viewport overscan tweets defer DOM collapse
+        expect(tweetVisible.style.display).toBe('none');
+        expect(cellVisible.querySelector('.x-tweet-filtered-placeholder')).not.toBeNull();
+        expect(tweetAbove.style.display).toBe('');
+        expect(tweetAbove._xDeferredFilter).toBeDefined();
+        expect(tweetBelowOverscan.style.display).toBe('');
+        expect(tweetBelowOverscan._xDeferredFilter).toBeDefined();
+
+        jest.useRealTimers();
+    });
+
+    test('xObserver clamps runaway min-height (55475.3px) on virtual timeline spacer to mounted cellInnerDiv bounds and expands smoothly on scroll', () => {
+        jest.useFakeTimers();
+        delete window.XObserverInjected;
+
+        global.chrome = {
+            runtime: {
+                id: 'test-ext-id',
+                lastError: null,
+                onMessage: { addListener: jest.fn() },
+                sendMessage: jest.fn((msg, cb) => {
+                    if (cb) cb({ success: true, timelinePosts: [], unseenForcedPosts: [], connectedFriends: [] });
+                })
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXHideAdsEnabled: true,
+                            isXFriendsSyncEnabled: true
+                        });
+                    })
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+
+        const primaryCol = document.createElement('div');
+        primaryCol.setAttribute('data-testid', 'primaryColumn');
+        const section = document.createElement('section');
+        section.setAttribute('role', 'region');
+        const timelineWrap = document.createElement('div');
+        timelineWrap.setAttribute('aria-label', 'Timeline: Your Home Timeline');
+        const spacer = document.createElement('div');
+        spacer.style.position = 'relative';
+        spacer.style.minHeight = '55475.3px';
+
+        const offsets = [0, 484, 485.333, 1119.33, 2051.33, 2766.67, 3300.67];
+        offsets.forEach((y) => {
+            const cell = document.createElement('div');
+            cell.setAttribute('data-testid', 'cellInnerDiv');
+            cell.style.transform = `translateY(${y}px)`;
+            cell.style.position = 'absolute';
+            cell.style.width = '100%';
+            cell.getBoundingClientRect = () => ({ top: y, bottom: y + 600, left: 0, right: 600, width: 600, height: 600 });
+            const article = document.createElement('article');
+            article.setAttribute('data-testid', 'tweet');
+            cell.appendChild(article);
+            spacer.appendChild(cell);
+        });
+
+        timelineWrap.appendChild(spacer);
+        section.appendChild(timelineWrap);
+        primaryCol.appendChild(section);
+        document.body.appendChild(primaryCol);
+
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(100);
+
+        const clampedPx = parseFloat(spacer.style.minHeight);
+        expect(clampedPx).toBeLessThan(6000);
+        expect(clampedPx).toBeGreaterThanOrEqual(4500);
+
+        // Simulate user scrolling down to scrollY = 5000px: spacer minHeight expands immediately
+        const prevScrollY = window.scrollY;
+        window.scrollY = 5000;
+        window.dispatchEvent(new Event('scroll'));
+
+        const expandedPx = parseFloat(spacer.style.minHeight);
+        expect(expandedPx).toBeGreaterThan(clampedPx);
+
+        window.scrollY = prevScrollY;
         jest.useRealTimers();
     });
 });

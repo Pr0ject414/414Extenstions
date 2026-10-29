@@ -108,7 +108,14 @@
     color: #0C1A22;
 }
 
+#x-location-hovercard-root:not(.visible) {
+    display: none !important;
+    top: 0px !important;
+    left: 0px !important;
+}
+
 #x-location-hovercard-root.visible {
+    display: block;
     opacity: 1;
     visibility: visible;
     pointer-events: auto;

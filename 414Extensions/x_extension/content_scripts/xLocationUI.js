@@ -140,6 +140,9 @@
         }
         hovercardRoot = document.createElement('div');
         hovercardRoot.id = 'x-location-hovercard-root';
+        hovercardRoot.style.display = 'none';
+        hovercardRoot.style.top = '0px';
+        hovercardRoot.style.left = '0px';
         document.body.appendChild(hovercardRoot);
         bindOutsideHovercardDismiss();
 
@@ -216,6 +219,7 @@
         const rawLeft = rect.left + window.scrollX - 40;
         const left = Math.min(Math.max(10, rawLeft), maxLeft);
 
+        hc.style.display = 'block';
         hc.style.top = `${top}px`;
         hc.style.left = `${left}px`;
         hc.classList.add('visible');
@@ -232,6 +236,9 @@
         activeHovercardTarget = null;
         if (hovercardRoot) {
             hovercardRoot.classList.remove('visible');
+            hovercardRoot.style.display = 'none';
+            hovercardRoot.style.top = '0px';
+            hovercardRoot.style.left = '0px';
         }
     }
 
@@ -1971,6 +1978,7 @@
         const timelineWrap = (timelineContainer.querySelector && timelineContainer.querySelector('[aria-label*="Timeline"]')) || timelineContainer;
         if (container._xTimelineWrap !== timelineWrap) {
             container._xTimelineWrap = timelineWrap;
+            container._xWasMountedInCell = false;
             homeFeedScrolledPast = false;
             homeFeedMountedScrollY = 0;
         }
@@ -2006,10 +2014,10 @@
                 }
             } else {
                 const currentScrollY = (typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0;
-                if (container._xWasMountedInCell && currentScrollY > homeFeedMountedScrollY + 1200) {
+                if (container._xWasMountedInCell) {
                     homeFeedScrolledPast = true;
                 }
-                if (homeFeedScrolledPast && !hasNewUnmountedPost && currentScrollY > homeFeedMountedScrollY + 600) {
+                if (homeFeedScrolledPast && !hasNewUnmountedPost && currentScrollY > 80) {
                     return null;
                 }
 
@@ -2915,6 +2923,9 @@
 
     function collapseAdTweet(article) {
         if (!article) return false;
+        if (article._xAdCollapsed && article.style && article.style.height === '0px') {
+            return true;
+        }
         const mediaNodes = article.querySelectorAll ? article.querySelectorAll('video, audio') : [];
         mediaNodes.forEach(media => {
             try {
@@ -2934,6 +2945,9 @@
 
     function restoreAdTweet(article) {
         if (!article) return false;
+        if (!article._xAdCollapsed && !article._xAdCellWrapper && article._xSavedInlineStyle === undefined) {
+            return false;
+        }
         if (article._xAdCollapsed) {
             restoreStealthCollapseStyles(article);
             article._xAdCollapsed = false;

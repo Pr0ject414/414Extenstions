@@ -755,6 +755,8 @@
         return groups.length > 0 ? groups[groups.length - 1] : null;
     }
 
+    const processedDownloadPlayers = new WeakSet();
+
     function injectDownloadButtons(rootScope) {
         ensureDownloadStyles();
 
@@ -766,6 +768,10 @@
         const players = queryRoot.querySelectorAll('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video');
         
         players.forEach(player => {
+            if (processedDownloadPlayers.has(player) && player._xDownloadBtn && player._xDownloadBtn.isConnected) {
+                return;
+            }
+
             const article = player.closest ? player.closest('article') : null;
             const actionBar = findArticleActionBar(article);
 
@@ -791,9 +797,19 @@
                     actionBar.appendChild(btnWrap);
                 }
 
-                if (actionBar.querySelector('.vsc-download-btn')) return;
+                const existingInBar = actionBar.querySelector('.vsc-download-btn');
+                if (existingInBar) {
+                    player._xDownloadBtn = existingInBar;
+                    processedDownloadPlayers.add(player);
+                    return;
+                }
             } else {
-                if (player.querySelector && player.querySelector('.vsc-download-btn')) return;
+                const existingInPlayer = player.querySelector ? player.querySelector('.vsc-download-btn') : null;
+                if (existingInPlayer) {
+                    player._xDownloadBtn = existingInPlayer;
+                    processedDownloadPlayers.add(player);
+                    return;
+                }
             }
 
             const btn = document.createElement('button');
@@ -826,6 +842,9 @@
                 }
             }, true);
 
+            player._xDownloadBtn = btn;
+            processedDownloadPlayers.add(player);
+
             if (actionBar) {
                 const btnWrap = actionBar.querySelector('.x-force-friend-btn-wrap');
                 const forceBtn = btnWrap ? btnWrap.querySelector('.x-force-friend-btn') : null;
@@ -856,28 +875,48 @@
     // --- CUSTOM MENU INJECTION ---
 
     function injectIntoCustomMenu(mutations) {
-        mutations.forEach(mutation => {
-            mutation.addedNodes.forEach(node => {
-                if (node.nodeType !== 1) return;
+        for (let i = 0; i < mutations.length; i++) {
+            const addedNodes = mutations[i].addedNodes;
+            if (!addedNodes || addedNodes.length === 0) continue;
+            for (let j = 0; j < addedNodes.length; j++) {
+                const node = addedNodes[j];
+                if (!node || node.nodeType !== 1) continue;
+
+                const testId = node.getAttribute ? node.getAttribute('data-testid') : '';
+                if (testId === 'cellInnerDiv' || node.tagName === 'ARTICLE') {
+                    if (node.querySelector && node.querySelector('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video')) {
+                        injectDownloadButtons(node);
+                    }
+                    continue;
+                }
+
+                const nodeRole = node.getAttribute ? node.getAttribute('role') : '';
+                if (nodeRole !== 'menuitem' && nodeRole !== 'menu' && testId !== 'Dropdown') {
+                    if (node.closest && node.closest('article[data-testid="tweet"]')) {
+                        if (testId === 'videoPlayer' || testId === 'videoComponent') {
+                            injectDownloadButtons(node.closest('article[data-testid="tweet"]'));
+                        }
+                        continue;
+                    }
+                }
 
                 // X's menu items usually have role="menuitem"
                 const menuItems = node.querySelectorAll ? node.querySelectorAll('[role="menuitem"]') : [];
-                // Also check the node itself if it's the menu item
-                const itemsToProcess = Array.from(menuItems);
-                if (node.getAttribute && node.getAttribute('role') === 'menuitem') itemsToProcess.push(node);
+                const itemsToProcess = menuItems.length > 0 ? Array.from(menuItems) : [];
+                if (nodeRole === 'menuitem') itemsToProcess.push(node);
 
-                itemsToProcess.forEach(item => {
-                    if (item.classList.contains('vsc-menu-processed')) return;
+                for (let k = 0; k < itemsToProcess.length; k++) {
+                    const item = itemsToProcess[k];
+                    if (item.classList.contains('vsc-menu-processed')) continue;
                     item.classList.add('vsc-menu-processed');
 
                     const text = item.textContent || "";
                     if (text.includes("Copy video address")) {
-                        // Found the right menu! Inject our Download button.
                         injectDownloadItem(item);
                     }
-                });
-            });
-        });
+                }
+            }
+        }
     }
 
     function injectDownloadItem(referenceItem) {
@@ -949,6 +988,7 @@
     let latestAuthHeaders = null;
     const API_PATTERN = /x\.com\/i\/api\/graphql/;
     const BADGE_COUNT_PATTERN = /\/badge_count\/badge_count\.json/i;
+    const PROMOTED_LOG_PATTERN = /\/i\/api\/1\.1\/promoted_content\/log\.json/i;
 
     function extractAndPostHeaders(headers) {
         let auth = null, csrf = null;
@@ -1001,6 +1041,23 @@
         let url = '';
         try {
             url = typeof input === 'string' ? input : (input?.url || '');
+            if (url && PROMOTED_LOG_PATTERN.test(url)) {
+                if (typeof Response === 'function') {
+                    return Promise.resolve(new Response('{}', {
+                        status: 200,
+                        statusText: 'OK',
+                        headers: { 'content-type': 'application/json; charset=utf-8' }
+                    }));
+                }
+                return Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    json: () => Promise.resolve({}),
+                    text: () => Promise.resolve('{}'),
+                    clone: function() { return this; }
+                });
+            }
             if (url && API_PATTERN.test(url) && init?.headers) {
                 extractAndPostHeaders(init.headers);
             }
@@ -1039,6 +1096,35 @@
 
     XMLHttpRequest.prototype.send = function() {
         try {
+            if (this._xUrl && PROMOTED_LOG_PATTERN.test(String(this._xUrl))) {
+                const xhr = this;
+                const resolvedUrl = String(xhr._xUrl || 'https://x.com/i/api/1.1/promoted_content/log.json');
+                setTimeout(() => {
+                    try {
+                        Object.defineProperty(xhr, 'readyState', { value: 4, configurable: true });
+                        Object.defineProperty(xhr, 'status', { value: 200, configurable: true });
+                        Object.defineProperty(xhr, 'statusText', { value: 'OK', configurable: true });
+                        Object.defineProperty(xhr, 'responseText', { value: '{}', configurable: true });
+                        Object.defineProperty(xhr, 'response', {
+                            value: xhr.responseType === 'json' ? {} : '{}',
+                            configurable: true
+                        });
+                        Object.defineProperty(xhr, 'responseURL', { value: resolvedUrl, configurable: true });
+                        xhr.getAllResponseHeaders = () => 'content-type: application/json; charset=utf-8\r\n';
+                        xhr.getResponseHeader = (headerName) => (
+                            String(headerName || '').toLowerCase() === 'content-type'
+                                ? 'application/json; charset=utf-8'
+                                : null
+                        );
+                        if (typeof Event === 'function' && typeof xhr.dispatchEvent === 'function') {
+                            xhr.dispatchEvent(new Event('readystatechange'));
+                            xhr.dispatchEvent(new Event('load'));
+                            xhr.dispatchEvent(new Event('loadend'));
+                        }
+                    } catch (err) {}
+                }, 0);
+                return;
+            }
             if (this._xUrl && API_PATTERN.test(this._xUrl) && this._xHeaders) {
                 extractAndPostHeaders(this._xHeaders);
             }
@@ -1054,6 +1140,20 @@
         } catch (e) {}
         return origXHRSend.apply(this, arguments);
     };
+
+    try {
+        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+            const origSendBeacon = navigator.sendBeacon.bind(navigator);
+            navigator.sendBeacon = function(url, data) {
+                try {
+                    if (url && PROMOTED_LOG_PATTERN.test(String(url))) {
+                        return true;
+                    }
+                } catch (e) {}
+                return origSendBeacon(url, data);
+            };
+        }
+    } catch (e) {}
 
     // Bridge Web Notification API inside Mobile WebView so X notifications forward to Android Notification Center
     try {
