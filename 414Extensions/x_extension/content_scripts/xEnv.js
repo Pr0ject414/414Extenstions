@@ -14,14 +14,72 @@
     let isModuleEnabled = true;
     let alwaysMuteEnabled = true;
     let currentVolume = 1.0; // Default until loaded
+    let hideAdsEnabled = true;
+    let locationFilterEnabled = true;
+    let blockedCountries = [];
+    let blockedDeviceRegions = [];
+    let blockedNameFlags = [];
+    const userLocationCache = new Map(); // screenNameLower -> userData
+    const SESSION_FILTER_CONFIG_KEY = '__x414_filter_cfg_v1';
 
-    // Listen for Settings from Bridge (xSettingsLoader.js)
+    function hydrateUserLocationCache(rawCache) {
+        if (!rawCache || typeof rawCache !== 'object') return;
+        for (const [k, v] of Object.entries(rawCache)) {
+            if (k && v && typeof v === 'object') {
+                userLocationCache.set(String(k).toLowerCase(), v);
+            }
+        }
+    }
+
+    function loadPersistedFilterConfig() {
+        try {
+            if (typeof sessionStorage === 'undefined') return;
+            const raw = sessionStorage.getItem(SESSION_FILTER_CONFIG_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return;
+            if (typeof parsed.isEnabled === 'boolean') isModuleEnabled = parsed.isEnabled;
+            if (typeof parsed.hideAds === 'boolean') hideAdsEnabled = parsed.hideAds;
+            if (typeof parsed.locationEnabled === 'boolean') locationFilterEnabled = parsed.locationEnabled;
+            if (Array.isArray(parsed.blockedCountries)) blockedCountries = parsed.blockedCountries;
+            if (Array.isArray(parsed.blockedDeviceRegions)) blockedDeviceRegions = parsed.blockedDeviceRegions;
+            if (Array.isArray(parsed.blockedNameFlags)) blockedNameFlags = parsed.blockedNameFlags;
+        } catch (e) {}
+    }
+
+    function persistFilterConfigToSession() {
+        try {
+            if (typeof sessionStorage === 'undefined') return;
+            sessionStorage.setItem(SESSION_FILTER_CONFIG_KEY, JSON.stringify({
+                isEnabled: isModuleEnabled,
+                hideAds: hideAdsEnabled,
+                locationEnabled: locationFilterEnabled,
+                blockedCountries,
+                blockedDeviceRegions,
+                blockedNameFlags
+            }));
+        } catch (e) {}
+    }
+
+    loadPersistedFilterConfig();
+
+    // Listen for Settings from Bridge (xSettingsLoader.js) and Location updates from xObserver.js
     window.addEventListener('message', (event) => {
         if (event.source !== window) return;
-        if (event.data && event.data.type === 'X_SETTINGS_UPDATE') {
-            const { isEnabled, alwaysMute, volumeLevel } = event.data.payload;
-            isModuleEnabled = isEnabled;
-            alwaysMuteEnabled = alwaysMute;
+        if (event.data && event.data.type === 'X_SETTINGS_UPDATE' && event.data.payload) {
+            const payload = event.data.payload;
+            const { isEnabled, alwaysMute, volumeLevel } = payload;
+            if (typeof isEnabled === 'boolean') isModuleEnabled = isEnabled;
+            if (typeof alwaysMute === 'boolean') alwaysMuteEnabled = alwaysMute;
+            if (typeof payload.hideAds === 'boolean') hideAdsEnabled = payload.hideAds;
+            if (typeof payload.locationEnabled === 'boolean') locationFilterEnabled = payload.locationEnabled;
+            if (Array.isArray(payload.blockedCountries)) blockedCountries = payload.blockedCountries;
+            if (Array.isArray(payload.blockedDeviceRegions)) blockedDeviceRegions = payload.blockedDeviceRegions;
+            if (Array.isArray(payload.blockedNameFlags)) blockedNameFlags = payload.blockedNameFlags;
+            if (payload.userCache && typeof payload.userCache === 'object') {
+                hydrateUserLocationCache(payload.userCache);
+            }
+            persistFilterConfigToSession();
             
             if (typeof volumeLevel === 'number') {
                 const oldVolume = currentVolume;
@@ -39,6 +97,16 @@
                 }
             }
             // console.log("X Env: Settings updated.", { isModuleEnabled, alwaysMuteEnabled, currentVolume });
+        }
+
+        if (event.data && event.data.type === 'X_USER_LOCATION_RESOLVED' && event.data.payload) {
+            const { screenName, userData, users } = event.data.payload;
+            if (screenName && userData && typeof userData === 'object') {
+                userLocationCache.set(String(screenName).toLowerCase(), userData);
+            }
+            if (users && typeof users === 'object') {
+                hydrateUserLocationCache(users);
+            }
         }
         
         // Listen for Background Events (Context Menu)
@@ -869,8 +937,14 @@
         });
     }
 
-    // Run injection loop
-    setInterval(injectDownloadButtons, 2000);
+    // Run injection loop (skip when document is hidden)
+    const downloadBtnInterval = setInterval(() => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        injectDownloadButtons();
+    }, 3000);
+    if (typeof downloadBtnInterval?.unref === 'function') {
+        downloadBtnInterval.unref();
+    }
 
     // --- CUSTOM MENU INJECTION ---
 
@@ -892,9 +966,14 @@
 
                 const nodeRole = node.getAttribute ? node.getAttribute('role') : '';
                 if (nodeRole !== 'menuitem' && nodeRole !== 'menu' && testId !== 'Dropdown') {
-                    if (node.closest && node.closest('article[data-testid="tweet"]')) {
-                        if (testId === 'videoPlayer' || testId === 'videoComponent') {
-                            injectDownloadButtons(node.closest('article[data-testid="tweet"]'));
+                    const parentArticle = node.closest ? node.closest('article[data-testid="tweet"]') : null;
+                    if (parentArticle) {
+                        if (
+                            testId === 'videoPlayer' ||
+                            testId === 'videoComponent' ||
+                            (node.querySelector && node.querySelector('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video'))
+                        ) {
+                            injectDownloadButtons(parentArticle);
                         }
                         continue;
                     }
@@ -983,12 +1062,407 @@
     }
     startMenuObserver();
 
-    // --- GraphQL Header Interceptor & X Notification Badge Monitor ---
+    // --- GraphQL Header Interceptor, Pre-Render Timeline Filter & X Notification Badge Monitor ---
     let headersCaptured = false;
     let latestAuthHeaders = null;
     const API_PATTERN = /x\.com\/i\/api\/graphql/;
+    const TIMELINE_GRAPHQL_PATTERN = /\/i\/api\/graphql\/[^/]+\/(HomeTimeline|HomeLatestTimeline|UserTweets|UserTweetsAndReplies|SearchTimeline|ListLatestTweetsTimeline|CommunitiesRankedTimeline|CommunitiesTimeline|TweetDetail)(?:\?|$)/i;
     const BADGE_COUNT_PATTERN = /\/badge_count\/badge_count\.json/i;
     const PROMOTED_LOG_PATTERN = /\/i\/api\/1\.1\/promoted_content\/log\.json/i;
+    const SENTRY_ENVELOPE_PATTERN = /ingest\.([a-z0-9-]+\.)?sentry\.io\/api\/\d+\/(?:envelope|store)\b/i;
+
+    const NAME_FLAG_EMOJIS = {
+        'transgender flag': ['🏳️‍⚧️', '⚧️', '⚧'],
+        'transgender symbol': ['⚧️', '⚧'],
+        'rainbow / pride flag': ['🏳️‍🌈'],
+        'rainbow': ['🌈'],
+        'pirate flag': ['🏴‍☠️'],
+        'red flag': ['🚩'],
+        'black flag': ['🏴'],
+        'white flag': ['🏳️'],
+        'checkered flag': ['🏁'],
+        'crossed flags': ['🎌'],
+        'european union': ['🇪🇺'],
+        'united nations': ['🇺🇳'],
+        'watermelon': ['🍉'],
+        'hammer & sickle': ['☭'],
+        'rose': ['🌹'],
+        'sunflower': ['🌻'],
+        'syringe': ['💉'],
+        'face mask': ['😷'],
+        'blue heart': ['💙'],
+        'raised fist': ['✊', '✊🏻', '✊🏼', '✊🏽', '✊🏾', '✊🏿'],
+        'peace symbol': ['☮️', '☮'],
+        'star of david': ['✡️', '✡'],
+        'star & crescent': ['☪️', '☪'],
+        'latin cross': ['✝️', '✝'],
+        'orthodox cross': ['☦️', '☦'],
+        'afghanistan': ['🇦🇫'], 'albania': ['🇦🇱'], 'algeria': ['🇩🇿'], 'andorra': ['🇦🇩'], 'angola': ['🇦🇴'],
+        'argentina': ['🇦🇷'], 'armenia': ['🇦🇲'], 'australia': ['🇦🇺'], 'austria': ['🇦🇹'], 'azerbaijan': ['🇦🇿'],
+        'bahamas': ['🇧🇸'], 'bahrain': ['🇧🇭'], 'bangladesh': ['🇧🇩'], 'barbados': ['🇧🇧'], 'belarus': ['🇧🇾'],
+        'belgium': ['🇧🇪'], 'belize': ['🇧🇿'], 'benin': ['🇧🇯'], 'bhutan': ['🇧🇹'], 'bolivia': ['🇧🇴'],
+        'bosnia and herzegovina': ['🇧🇦'], 'botswana': ['🇧🇼'], 'brazil': ['🇧🇷'], 'brunei': ['🇧🇳'],
+        'bulgaria': ['🇧🇬'], 'burkina faso': ['🇧🇫'], 'burundi': ['🇧🇮'], 'cambodia': ['🇰🇭'], 'cameroon': ['🇨🇲'],
+        'canada': ['🇨🇦'], 'chile': ['🇨🇱'], 'china': ['🇨🇳'], 'colombia': ['🇨🇴'], 'costa rica': ['🇨🇷'],
+        'croatia': ['🇭🇷'], 'cuba': ['🇨🇺'], 'cyprus': ['🇨🇾'], 'czech republic': ['🇨🇿'], 'czechia': ['🇨🇿'],
+        'denmark': ['🇩🇰'], 'dominican republic': ['🇩🇴'], 'ecuador': ['🇪🇨'], 'egypt': ['🇪🇬'], 'el salvador': ['🇸🇻'],
+        'england': ['🏴󠁧󠁢󠁥󠁮󠁧󠁿'], 'estonia': ['🇪🇪'], 'ethiopia': ['🇪🇹'], 'finland': ['🇫🇮'], 'france': ['🇫🇷'],
+        'georgia': ['🇬🇪'], 'germany': ['🇩🇪'], 'ghana': ['🇬🇭'], 'greece': ['🇬🇷'], 'guatemala': ['🇬🇹'],
+        'haiti': ['🇭🇹'], 'honduras': ['🇭🇳'], 'hong kong': ['🇭🇰'], 'hungary': ['🇭🇺'], 'iceland': ['🇮🇸'],
+        'india': ['🇮🇳'], 'indonesia': ['🇮🇩'], 'iran': ['🇮🇷'], 'iraq': ['🇮🇶'], 'ireland': ['🇮🇪'],
+        'israel': ['🇮🇱'], 'italy': ['🇮🇹'], 'jamaica': ['🇯🇲'], 'japan': ['🇯🇵'], 'jordan': ['🇯🇴'],
+        'kazakhstan': ['🇰🇿'], 'kenya': ['🇰🇪'], 'kosovo': ['🇽🇰'], 'kuwait': ['🇰🇼'], 'latvia': ['🇱🇻'],
+        'lebanon': ['🇱🇧'], 'lithuania': ['🇱🇹'], 'luxembourg': ['🇱🇺'], 'malaysia': ['🇲🇾'], 'maldives': ['🇲🇻'],
+        'malta': ['🇲🇹'], 'mexico': ['🇲🇽'], 'moldova': ['🇲🇩'], 'monaco': ['🇲🇨'], 'mongolia': ['🇲🇳'],
+        'montenegro': ['🇲🇪'], 'morocco': ['🇲🇦'], 'nepal': ['🇳🇵'], 'netherlands': ['🇳🇱'], 'new zealand': ['🇳🇿'],
+        'nicaragua': ['🇳🇮'], 'nigeria': ['🇳🇬'], 'north korea': ['🇰🇵'], 'norway': ['🇳🇴'], 'oman': ['🇴🇲'],
+        'pakistan': ['🇵🇰'], 'palestine': ['🇵🇸'], 'panama': ['🇵🇦'], 'paraguay': ['🇵🇾'], 'peru': ['🇵🇪'],
+        'philippines': ['🇵🇭'], 'poland': ['🇵🇱'], 'portugal': ['🇵🇹'], 'puerto rico': ['🇵🇷'], 'qatar': ['🇶🇦'],
+        'romania': ['🇷🇴'], 'russia': ['🇷🇺'], 'saudi arabia': ['🇸🇦'], 'scotland': ['🏴󠁧󠁢󠁳󠁣󠁴󠁿'], 'senegal': ['🇸🇳'],
+        'serbia': ['🇷🇸'], 'singapore': ['🇸🇬'], 'slovakia': ['🇸🇰'], 'slovenia': ['🇸🇮'], 'south africa': ['🇿🇦'],
+        'south korea': ['🇰🇷'], 'spain': ['🇪🇸'], 'sri lanka': ['🇱🇰'], 'sudan': ['🇸🇩'], 'sweden': ['🇸🇪'],
+        'switzerland': ['🇨🇭'], 'syria': ['🇸🇾'], 'taiwan': ['🇹🇼'], 'thailand': ['🇹🇭'], 'tunisia': ['🇹🇳'],
+        'turkey': ['🇹🇷'], 'türkiye': ['🇹🇷'], 'uganda': ['🇺🇬'], 'ukraine': ['🇺🇦'],
+        'united arab emirates': ['🇦🇪'], 'uae': ['🇦🇪'], 'united kingdom': ['🇬🇧'], 'uk': ['🇬🇧'],
+        'united states': ['🇺🇸'], 'usa': ['🇺🇸'], 'uruguay': ['🇺🇾'], 'uzbekistan': ['🇺🇿'],
+        'venezuela': ['🇻🇪'], 'vietnam': ['🇻🇳'], 'wales': ['🏴󠁧󠁢󠁷󠁬󠁳󠁿'], 'yemen': ['🇾🇪'], 'zimbabwe': ['🇿🇼']
+    };
+
+    function stripVariationSelectors(str) {
+        return (str || '').replace(/[\uFE0E\uFE0F]/g, '');
+    }
+
+    function findMatchedNameFlagRuleForName(displayNameStr) {
+        if (!displayNameStr || !Array.isArray(blockedNameFlags) || blockedNameFlags.length === 0) return null;
+        const normDisplay = stripVariationSelectors(displayNameStr);
+        const normDisplayWithoutComposite = normDisplay
+            .replace(/\u{1F3F3}\u200D\u{26A7}/gu, '')
+            .replace(/\u{1F3F3}\u200D\u{1F308}/gu, '')
+            .replace(/\u{1F3F4}\u200D\u{2620}/gu, '');
+
+        for (const item of blockedNameFlags) {
+            if (!item) continue;
+            const rawRule = String(item).trim();
+            const ruleLower = rawRule.toLowerCase();
+            if (!ruleLower) continue;
+
+            const mappedEmojis = NAME_FLAG_EMOJIS[ruleLower];
+            if (mappedEmojis && mappedEmojis.length > 0) {
+                const haystack = (ruleLower === 'white flag' || ruleLower === 'black flag')
+                    ? normDisplayWithoutComposite
+                    : normDisplay;
+                for (const emoji of mappedEmojis) {
+                    const normEmoji = stripVariationSelectors(emoji);
+                    if (normEmoji && haystack.includes(normEmoji)) {
+                        return `Name Flag: ${mappedEmojis[0]} ${rawRule}`;
+                    }
+                }
+            } else {
+                const normCustom = stripVariationSelectors(rawRule).toLowerCase();
+                if (normCustom && normDisplay.toLowerCase().includes(normCustom)) {
+                    return `Name Flag: ${rawRule}`;
+                }
+            }
+        }
+        return null;
+    }
+
+    function findMatchedFilterRuleForAuthor(author) {
+        if (!author) return null;
+        const matchedFlag = findMatchedNameFlagRuleForName(author.displayName);
+        if (matchedFlag) return matchedFlag;
+
+        const screenNameLower = (author.screenName || '').toLowerCase();
+        const cached = (screenNameLower && userLocationCache.get(screenNameLower)) || author.inlineLocationData || null;
+        if (!cached) return null;
+
+        const locLower = String(cached.location || '').toLowerCase();
+        const devLower = String(cached.device || '').toLowerCase();
+        if (!locLower && !devLower) return null;
+
+        if (Array.isArray(blockedCountries)) {
+            for (const country of blockedCountries) {
+                if (!country) continue;
+                const needle = String(country).trim().toLowerCase();
+                if (needle && (locLower.includes(needle) || devLower.includes(needle))) {
+                    return String(country).trim();
+                }
+            }
+        }
+
+        if (Array.isArray(blockedDeviceRegions)) {
+            for (const region of blockedDeviceRegions) {
+                if (!region) continue;
+                const needle = String(region).trim().toLowerCase();
+                if (needle && (devLower.includes(needle) || locLower.includes(needle))) {
+                    return String(region).trim();
+                }
+            }
+        }
+        return null;
+    }
+
+    function unwrapTweetResult(rawResult) {
+        if (!rawResult || typeof rawResult !== 'object') return null;
+        if (rawResult.__typename === 'TweetWithVisibilityResults' && rawResult.tweet) {
+            return rawResult.tweet;
+        }
+        return rawResult.tweet || rawResult;
+    }
+
+    function extractAuthorFromUserResult(userResult) {
+        if (!userResult || typeof userResult !== 'object') return null;
+        const unwrapped = userResult.result || userResult;
+        const screenName = unwrapped?.core?.screen_name || unwrapped?.legacy?.screen_name || '';
+        const displayName = unwrapped?.core?.name || unwrapped?.legacy?.name || '';
+        let inlineLocationData = null;
+        if (unwrapped?.about_profile && typeof unwrapped.about_profile === 'object') {
+            const loc = unwrapped.about_profile.account_based_in || null;
+            const dev = unwrapped.about_profile.source || null;
+            if (loc || dev) {
+                inlineLocationData = { screenName, location: loc, device: dev };
+                if (screenName) {
+                    userLocationCache.set(screenName.toLowerCase(), inlineLocationData);
+                }
+            }
+        }
+        if (!screenName && !displayName) return null;
+        return { screenName, displayName, inlineLocationData };
+    }
+
+    function extractTweetAuthorsFromItemContent(itemContent, discoveredScreenNames) {
+        const authors = [];
+        if (!itemContent || typeof itemContent !== 'object') return authors;
+        const tweet = unwrapTweetResult(itemContent.tweet_results?.result);
+        if (!tweet) return authors;
+
+        const primaryAuthor = extractAuthorFromUserResult(tweet.core?.user_results);
+        if (primaryAuthor) {
+            authors.push(primaryAuthor);
+            if (primaryAuthor.screenName && discoveredScreenNames) {
+                discoveredScreenNames.add(primaryAuthor.screenName);
+            }
+        }
+
+        const retweeted = unwrapTweetResult(tweet.legacy?.retweeted_status_result?.result);
+        if (retweeted) {
+            const rtAuthor = extractAuthorFromUserResult(retweeted.core?.user_results);
+            if (rtAuthor) {
+                authors.push(rtAuthor);
+                if (rtAuthor.screenName && discoveredScreenNames) {
+                    discoveredScreenNames.add(rtAuthor.screenName);
+                }
+            }
+        }
+
+        const quoted = unwrapTweetResult(tweet.quoted_status_result?.result);
+        if (quoted) {
+            const qAuthor = extractAuthorFromUserResult(quoted.core?.user_results);
+            if (qAuthor && qAuthor.screenName && discoveredScreenNames) {
+                discoveredScreenNames.add(qAuthor.screenName);
+            }
+        }
+
+        return authors;
+    }
+
+    function isCursorTimelineEntry(entry) {
+        if (!entry || typeof entry !== 'object') return false;
+        const entryId = String(entry.entryId || '');
+        if (/^(?:cursor|bottom|top)-/i.test(entryId)) return true;
+        const content = entry.content;
+        if (!content || typeof content !== 'object') return false;
+        return (
+            content.entryType === 'TimelineTimelineCursor' ||
+            content.__typename === 'TimelineTimelineCursor' ||
+            content.itemContent?.itemType === 'TimelineTimelineCursor' ||
+            content.itemContent?.__typename === 'TimelineTimelineCursor'
+        );
+    }
+
+    function isPromotedTimelineEntry(entry) {
+        if (!entry || typeof entry !== 'object') return false;
+        const entryId = String(entry.entryId || '');
+        if (/^promoted[-_]?/i.test(entryId)) return true;
+        const content = entry.content;
+        if (!content || typeof content !== 'object') return false;
+        if (content.itemContent?.promotedMetadata) return true;
+        if (content.clientEventInfo?.component === 'urt_promoted_tweet') return true;
+        if (Array.isArray(content.items) && content.items.length > 0) {
+            const allPromoted = content.items.every(it =>
+                Boolean(it?.item?.itemContent?.promotedMetadata) ||
+                /^promoted[-_]?/i.test(String(it?.entryId || ''))
+            );
+            if (allPromoted) return true;
+        }
+        return false;
+    }
+
+    function isBlockedTimelineEntry(entry, discoveredScreenNames) {
+        if (!entry || typeof entry !== 'object') return false;
+        const content = entry.content;
+        if (!content || typeof content !== 'object') return false;
+
+        if (content.itemContent) {
+            const authors = extractTweetAuthorsFromItemContent(content.itemContent, discoveredScreenNames);
+            for (const author of authors) {
+                if (findMatchedFilterRuleForAuthor(author)) {
+                    return true;
+                }
+            }
+        }
+
+        if (Array.isArray(content.items) && content.items.length > 0) {
+            let hasTweetItems = false;
+            let anyMatched = false;
+            for (const subItem of content.items) {
+                const subContent = subItem?.item?.itemContent;
+                if (!subContent) continue;
+                const authors = extractTweetAuthorsFromItemContent(subContent, discoveredScreenNames);
+                if (authors.length > 0) {
+                    hasTweetItems = true;
+                    for (const author of authors) {
+                        if (findMatchedFilterRuleForAuthor(author)) {
+                            anyMatched = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (hasTweetItems && anyMatched) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function collectTimelineInstructionsArrays(node, out = [], depth = 0) {
+        if (!node || typeof node !== 'object' || depth > 10) return out;
+        if (Array.isArray(node.instructions)) {
+            out.push(node.instructions);
+        }
+        for (const key of Object.keys(node)) {
+            if (key === 'instructions') continue;
+            const child = node[key];
+            if (child && typeof child === 'object' && !Array.isArray(child)) {
+                collectTimelineInstructionsArrays(child, out, depth + 1);
+            }
+        }
+        return out;
+    }
+
+    function filterTimelineGraphQLPayload(data, url = '') {
+        if (!data || typeof data !== 'object' || !isModuleEnabled) {
+            return { data, modified: false };
+        }
+        const shouldFilterAds = Boolean(hideAdsEnabled);
+        const isTweetDetail = /\/TweetDetail(?:\?|$)/i.test(String(url || ''));
+        const shouldFilterLocations = Boolean(locationFilterEnabled && !isTweetDetail);
+
+        const instructionLists = collectTimelineInstructionsArrays(data);
+        if (instructionLists.length === 0) {
+            return { data, modified: false };
+        }
+
+        const discoveredScreenNames = new Set();
+        let modified = false;
+
+        for (const instructions of instructionLists) {
+            for (const inst of instructions) {
+                if (!inst || typeof inst !== 'object') continue;
+                if (Array.isArray(inst.entries) && inst.entries.length > 0) {
+                    let nonCursorCount = 0;
+                    for (const entry of inst.entries) {
+                        if (!isCursorTimelineEntry(entry)) {
+                            nonCursorCount++;
+                        }
+                    }
+                    const minSurvivingNonCursor = nonCursorCount >= 6 ? 2 : 1;
+                    let remainingNonCursor = nonCursorCount;
+                    const nextEntries = [];
+
+                    for (const entry of inst.entries) {
+                        if (isCursorTimelineEntry(entry)) {
+                            nextEntries.push(entry);
+                            continue;
+                        }
+                        if (shouldFilterAds && isPromotedTimelineEntry(entry)) {
+                            remainingNonCursor--;
+                            modified = true;
+                            continue;
+                        }
+                        const isBlocked = isBlockedTimelineEntry(entry, discoveredScreenNames);
+                        if (shouldFilterLocations && isBlocked && remainingNonCursor > minSurvivingNonCursor) {
+                            remainingNonCursor--;
+                            modified = true;
+                            continue;
+                        }
+                        if (entry?.content?.items && Array.isArray(entry.content.items) && shouldFilterAds) {
+                            const origLen = entry.content.items.length;
+                            entry.content.items = entry.content.items.filter(it =>
+                                !it?.item?.itemContent?.promotedMetadata &&
+                                !/^promoted[-_]?/i.test(String(it?.entryId || ''))
+                            );
+                            if (entry.content.items.length !== origLen) {
+                                modified = true;
+                            }
+                        }
+                        nextEntries.push(entry);
+                    }
+
+                    if (nextEntries.length !== inst.entries.length) {
+                        inst.entries = nextEntries;
+                    }
+                }
+
+                if (Array.isArray(inst.moduleItems) && inst.moduleItems.length > 0 && shouldFilterAds) {
+                    const origLen = inst.moduleItems.length;
+                    inst.moduleItems = inst.moduleItems.filter(it =>
+                        !it?.item?.itemContent?.promotedMetadata &&
+                        !/^promoted[-_]?/i.test(String(it?.entryId || ''))
+                    );
+                    if (inst.moduleItems.length !== origLen) {
+                        modified = true;
+                    }
+                }
+            }
+        }
+
+        if (discoveredScreenNames.size > 0) {
+            const uncachedNames = [];
+            for (const name of discoveredScreenNames) {
+                if (name && !userLocationCache.has(name.toLowerCase())) {
+                    uncachedNames.push(name);
+                }
+            }
+            if (uncachedNames.length > 0 && typeof window !== 'undefined' && typeof window.postMessage === 'function') {
+                window.postMessage({
+                    type: 'X_PREFETCH_USERS',
+                    payload: { screenNames: uncachedNames.slice(0, 25) }
+                }, '*');
+            }
+        }
+
+        return { data, modified };
+    }
+
+    function filterTimelineGraphQLResponseText(rawText, url = '') {
+        if (!rawText || typeof rawText !== 'string' || !isModuleEnabled) return rawText;
+        try {
+            const parsed = JSON.parse(rawText);
+            const { data, modified } = filterTimelineGraphQLPayload(parsed, url);
+            return modified ? JSON.stringify(data) : rawText;
+        } catch (e) {
+            return rawText;
+        }
+    }
+
+    function shouldShortCircuitTelemetryUrl(url) {
+        if (!url) return false;
+        const urlStr = String(url);
+        return PROMOTED_LOG_PATTERN.test(urlStr) || SENTRY_ENVELOPE_PATTERN.test(urlStr);
+    }
 
     function extractAndPostHeaders(headers) {
         let auth = null, csrf = null;
@@ -1041,7 +1515,7 @@
         let url = '';
         try {
             url = typeof input === 'string' ? input : (input?.url || '');
-            if (url && PROMOTED_LOG_PATTERN.test(url)) {
+            if (url && shouldShortCircuitTelemetryUrl(url)) {
                 if (typeof Response === 'function') {
                     return Promise.resolve(new Response('{}', {
                         status: 200,
@@ -1071,6 +1545,37 @@
                     }
                 }).catch(() => {});
             }
+            if (url && TIMELINE_GRAPHQL_PATTERN.test(url) && fetchPromise && typeof fetchPromise.then === 'function') {
+                return fetchPromise.then(async (res) => {
+                    try {
+                        if (!res || !res.ok || typeof res.text !== 'function') return res;
+                        const clone = typeof res.clone === 'function' ? res.clone() : res;
+                        const rawText = await clone.text();
+                        if (!rawText) return res;
+                        const filteredText = filterTimelineGraphQLResponseText(rawText, url);
+                        if (filteredText === rawText) return res;
+                        if (typeof Response === 'function') {
+                            const headers = new Headers(res.headers || { 'content-type': 'application/json; charset=utf-8' });
+                            return new Response(filteredText, {
+                                status: res.status || 200,
+                                statusText: res.statusText || 'OK',
+                                headers
+                            });
+                        }
+                        return {
+                            ok: res.ok,
+                            status: res.status,
+                            statusText: res.statusText,
+                            headers: res.headers,
+                            json: () => Promise.resolve(JSON.parse(filteredText)),
+                            text: () => Promise.resolve(filteredText),
+                            clone: function() { return this; }
+                        };
+                    } catch (err) {
+                        return res;
+                    }
+                });
+            }
         } catch (e) {}
         return fetchPromise;
     };
@@ -1078,6 +1583,54 @@
     const origXHROpen = XMLHttpRequest.prototype.open;
     const origXHRSetHeader = XMLHttpRequest.prototype.setRequestHeader;
     const origXHRSend = XMLHttpRequest.prototype.send;
+    const nativeXHRResponseTextDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText');
+    const nativeXHRResponseDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
+
+    function attachTimelineXHRFilter(xhr) {
+        if (!xhr || xhr._xTimelineFilterAttached) return;
+        xhr._xTimelineFilterAttached = true;
+
+        try {
+            Object.defineProperty(xhr, 'responseText', {
+                configurable: true,
+                get() {
+                    const raw = nativeXHRResponseTextDesc && typeof nativeXHRResponseTextDesc.get === 'function'
+                        ? nativeXHRResponseTextDesc.get.call(this)
+                        : '';
+                    if (this.readyState !== 4 || typeof raw !== 'string' || !raw) {
+                        return raw;
+                    }
+                    if (this._xFilteredSourceRaw !== raw) {
+                        this._xFilteredSourceRaw = raw;
+                        this._xFilteredResponseText = filterTimelineGraphQLResponseText(raw, this._xUrl);
+                    }
+                    return this._xFilteredResponseText;
+                }
+            });
+
+            Object.defineProperty(xhr, 'response', {
+                configurable: true,
+                get() {
+                    const rType = this.responseType || '';
+                    if (this.readyState === 4 && (rType === '' || rType === 'text')) {
+                        return this.responseText;
+                    }
+                    const rawResp = nativeXHRResponseDesc && typeof nativeXHRResponseDesc.get === 'function'
+                        ? nativeXHRResponseDesc.get.call(this)
+                        : null;
+                    if (this.readyState === 4 && rType === 'json' && rawResp && typeof rawResp === 'object') {
+                        if (!this._xFilteredJsonObj) {
+                            const cloned = JSON.parse(JSON.stringify(rawResp));
+                            filterTimelineGraphQLPayload(cloned, this._xUrl);
+                            this._xFilteredJsonObj = cloned;
+                        }
+                        return this._xFilteredJsonObj;
+                    }
+                    return rawResp;
+                }
+            });
+        } catch (e) {}
+    }
 
     XMLHttpRequest.prototype.open = function(method, url) {
         try {
@@ -1096,7 +1649,7 @@
 
     XMLHttpRequest.prototype.send = function() {
         try {
-            if (this._xUrl && PROMOTED_LOG_PATTERN.test(String(this._xUrl))) {
+            if (this._xUrl && shouldShortCircuitTelemetryUrl(this._xUrl)) {
                 const xhr = this;
                 const resolvedUrl = String(xhr._xUrl || 'https://x.com/i/api/1.1/promoted_content/log.json');
                 setTimeout(() => {
@@ -1128,6 +1681,9 @@
             if (this._xUrl && API_PATTERN.test(this._xUrl) && this._xHeaders) {
                 extractAndPostHeaders(this._xHeaders);
             }
+            if (this._xUrl && TIMELINE_GRAPHQL_PATTERN.test(this._xUrl)) {
+                attachTimelineXHRFilter(this);
+            }
             if (this._xUrl && BADGE_COUNT_PATTERN.test(this._xUrl) && typeof this.addEventListener === 'function') {
                 this.addEventListener('load', function() {
                     try {
@@ -1146,7 +1702,7 @@
             const origSendBeacon = navigator.sendBeacon.bind(navigator);
             navigator.sendBeacon = function(url, data) {
                 try {
-                    if (url && PROMOTED_LOG_PATTERN.test(String(url))) {
+                    if (url && shouldShortCircuitTelemetryUrl(url)) {
                         return true;
                     }
                 } catch (e) {}
@@ -1473,9 +2029,14 @@
             injectDownloadButtons,
             executeMainWorldTweetAction,
             pollXBadgeCount,
+            filterTimelineGraphQLPayload,
+            filterTimelineGraphQLResponseText,
+            userLocationCache,
             get isModuleEnabled() { return isModuleEnabled; },
             get alwaysMuteEnabled() { return alwaysMuteEnabled; },
-            get currentVolume() { return currentVolume; }
+            get currentVolume() { return currentVolume; },
+            get hideAdsEnabled() { return hideAdsEnabled; },
+            get locationFilterEnabled() { return locationFilterEnabled; }
         };
     }
 

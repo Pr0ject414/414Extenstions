@@ -160,4 +160,167 @@ describe('xEnv.js', () => {
         expect(fetchRes.status).toBe(200);
         expect(await fetchRes.text()).toBe('{}');
     });
+
+    it('should short-circuit Sentry envelope requests (ingest.us.sentry.io) across fetch, XMLHttpRequest, and sendBeacon to prevent 429 flood during scroll', async () => {
+        const sentryUrl = 'https://o4511910576324608.ingest.us.sentry.io/api/4512164876386304/envelope/?sentry_version=7&sentry_key=1e4f80efe000820c537d900bdc3696f2&sentry_client=sentry.javascript.browser%2F10.70.0';
+
+        // 1. fetch
+        const fetchRes = await window.fetch(sentryUrl, {
+            method: 'POST',
+            body: '{"event_id":"123"}'
+        });
+        expect(fetchRes.status).toBe(200);
+        expect(await fetchRes.text()).toBe('{}');
+
+        // 2. XMLHttpRequest
+        const xhr = new XMLHttpRequest();
+        const loadSpy = jest.fn();
+        xhr.addEventListener('load', loadSpy);
+        xhr.open('POST', sentryUrl, true);
+        xhr.send('{"event_id":"123"}');
+
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(loadSpy).toHaveBeenCalled();
+        expect(xhr.readyState).toBe(4);
+        expect(xhr.status).toBe(200);
+        expect(xhr.responseText).toBe('{}');
+    });
+
+    it('should pre-filter GraphQL HomeTimeline responses (stripping promoted ads, blocked countries, and blocked display-name flags while preserving cursors and prefetching uncached users)', async () => {
+        const postMessageSpy = jest.spyOn(window, 'postMessage');
+
+        // Configure filter rules and user cache via X_SETTINGS_UPDATE
+        window.dispatchEvent(new MessageEvent('message', {
+            source: window,
+            data: {
+                type: 'X_SETTINGS_UPDATE',
+                payload: {
+                    isEnabled: true,
+                    alwaysMute: true,
+                    volumeLevel: 1.0,
+                    hideAds: true,
+                    locationEnabled: true,
+                    blockedCountries: ['India'],
+                    blockedDeviceRegions: [],
+                    blockedNameFlags: ['watermelon'],
+                    userCache: {
+                        cached_blocked_author: {
+                            screenName: 'cached_blocked_author',
+                            location: 'India',
+                            device: 'Android'
+                        },
+                        cached_allowed_author: {
+                            screenName: 'cached_allowed_author',
+                            location: 'United States',
+                            device: 'iPhone'
+                        }
+                    }
+                }
+            }
+        }));
+
+        // Also broadcast a real-time resolved user via X_USER_LOCATION_RESOLVED
+        window.dispatchEvent(new MessageEvent('message', {
+            source: window,
+            data: {
+                type: 'X_USER_LOCATION_RESOLVED',
+                payload: {
+                    screenName: 'live_resolved_blocked',
+                    userData: {
+                        screenName: 'live_resolved_blocked',
+                        location: 'Mumbai, India',
+                        device: 'Web'
+                    }
+                }
+            }
+        }));
+
+        const makeTweetEntry = (entryId, screenName, displayName, isPromoted = false) => ({
+            entryId,
+            sortIndex: '100',
+            content: {
+                entryType: 'TimelineTimelineItem',
+                itemContent: {
+                    itemType: 'TimelineTweet',
+                    ...(isPromoted ? { promotedMetadata: { impressionId: 'ad_1' } } : {}),
+                    tweet_results: {
+                        result: {
+                            __typename: 'Tweet',
+                            rest_id: entryId.replace(/\D/g, '') || '1',
+                            core: {
+                                user_results: {
+                                    result: {
+                                        core: {
+                                            screen_name: screenName,
+                                            name: displayName
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const samplePayload = {
+            data: {
+                home: {
+                    home_timeline_urt: {
+                        instructions: [
+                            {
+                                type: 'TimelineAddEntries',
+                                entries: [
+                                    makeTweetEntry('promoted-tweet-1001', 'SponsorCo', 'Sponsor Co', true),
+                                    makeTweetEntry('tweet-1002', 'cached_blocked_author', 'Blocked Country User'),
+                                    makeTweetEntry('tweet-1003', 'live_resolved_blocked', 'Live Blocked User'),
+                                    makeTweetEntry('tweet-1004', 'flag_author', 'Flag Author 🍉'),
+                                    makeTweetEntry('tweet-1005', 'cached_allowed_author', 'Allowed US Author'),
+                                    makeTweetEntry('tweet-1006', 'uncached_fresh_author', 'Fresh Uncached Author'),
+                                    {
+                                        entryId: 'cursor-bottom-100',
+                                        content: {
+                                            entryType: 'TimelineTimelineCursor',
+                                            value: 'DAABCgAB',
+                                            cursorType: 'Bottom'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        };
+
+        const timelineUrl = 'https://x.com/i/api/graphql/abc123XYZ/HomeTimeline?variables=%7B%7D';
+        const { data: filtered, modified } = XEnv.filterTimelineGraphQLPayload(
+            JSON.parse(JSON.stringify(samplePayload)),
+            timelineUrl
+        );
+
+        expect(modified).toBe(true);
+        const remainingEntries = filtered.data.home.home_timeline_urt.instructions[0].entries;
+        const remainingIds = remainingEntries.map(e => e.entryId);
+
+        // Promoted ad, cached blocked country user, live-resolved blocked user, and name-flag user are stripped pre-render
+        expect(remainingIds).not.toContain('promoted-tweet-1001');
+        expect(remainingIds).not.toContain('tweet-1002');
+        expect(remainingIds).not.toContain('tweet-1003');
+        expect(remainingIds).not.toContain('tweet-1004');
+
+        // Allowed tweet, uncached tweet, and pagination cursor are preserved
+        expect(remainingIds).toEqual(['tweet-1005', 'tweet-1006', 'cursor-bottom-100']);
+
+        // Uncached screenNames are broadcast via X_PREFETCH_USERS for background pre-warming
+        expect(postMessageSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'X_PREFETCH_USERS',
+                payload: {
+                    screenNames: expect.arrayContaining(['uncached_fresh_author'])
+                }
+            }),
+            '*'
+        );
+    });
 });

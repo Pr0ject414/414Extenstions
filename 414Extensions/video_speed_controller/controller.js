@@ -627,6 +627,7 @@ function attachController(video, initialSpeed) {
     document.body.appendChild(host);
 
     let wasFS = false;
+    let lastAnotherVideoFS = false;
     let lastRectTop = NaN;
     let lastRectLeft = NaN;
     let lastRectWidth = NaN;
@@ -644,7 +645,7 @@ function attachController(video, initialSpeed) {
     let lastHostTop = '';
     let lastHostLeft = '';
 
-    // Position Sync Loop
+    // Position Sync Loop (Read-first, batched microtask DOM writes to prevent multi-video rAF layout thrashing)
     function syncPosition() {
         // If disabled or disconnected, remove and stop
         if (isGloballyDisabled || !video.isConnected) {
@@ -681,7 +682,10 @@ function attachController(video, initialSpeed) {
             targetParent.appendChild(host);
         }
 
-        host.classList.toggle('vsc-fs-hidden', anotherVideoFS);
+        if (anotherVideoFS !== lastAnotherVideoFS) {
+            lastAnotherVideoFS = anotherVideoFS;
+            host.classList.toggle('vsc-fs-hidden', anotherVideoFS);
+        }
 
         if (anotherVideoFS) {
             if (lastHostDisplay !== 'none') {
@@ -798,21 +802,24 @@ function attachController(video, initialSpeed) {
         }
 
         const nextDisplay = shouldShow ? 'block' : 'none';
-        if (lastHostDisplay !== nextDisplay) {
-            host.style.display = nextDisplay;
+        const nextTop = shouldShow ? `${Math.round(posTop)}px` : lastHostTop;
+        const nextLeft = shouldShow ? `${Math.round(posLeft)}px` : lastHostLeft;
+        const needsDisplayWrite = lastHostDisplay !== nextDisplay;
+        const needsTopWrite = shouldShow && lastHostTop !== nextTop;
+        const needsLeftWrite = shouldShow && lastHostLeft !== nextLeft;
+
+        if (needsDisplayWrite || needsTopWrite || needsLeftWrite) {
             lastHostDisplay = nextDisplay;
-        }
-        if (shouldShow) {
-            const nextTop = `${posTop}px`;
-            const nextLeft = `${posLeft}px`;
-            if (lastHostTop !== nextTop) {
-                host.style.top = nextTop;
+            if (shouldShow) {
                 lastHostTop = nextTop;
-            }
-            if (lastHostLeft !== nextLeft) {
-                host.style.left = nextLeft;
                 lastHostLeft = nextLeft;
             }
+            Promise.resolve().then(() => {
+                if (!host.isConnected) return;
+                if (needsDisplayWrite) host.style.display = nextDisplay;
+                if (needsTopWrite) host.style.top = nextTop;
+                if (needsLeftWrite) host.style.left = nextLeft;
+            });
         }
 
         requestAnimationFrame(syncPosition);

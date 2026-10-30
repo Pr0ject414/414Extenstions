@@ -6,6 +6,12 @@
     const X_ALWAYS_MUTE_KEY = 'isXAlwaysMuteEnabled';
     const X_MODULE_VISIBLE_KEY = 'isXModuleVisible';
     const X_VOLUME_LEVEL_KEY = 'xVolumeLevel';
+    const X_HIDE_ADS_ENABLED_KEY = 'isXHideAdsEnabled';
+    const X_LOCATION_ENABLED_KEY = 'isXLocationEnabled';
+    const BLOCKED_COUNTRIES_KEY = 'blockedCountries';
+    const BLOCKED_DEVICE_REGIONS_KEY = 'blockedDeviceRegions';
+    const BLOCKED_NAME_FLAGS_KEY = 'blockedNameFlags';
+    const LOCATION_CACHE_KEY = 'x_location_cache_v4';
 
     function postSettings() {
         chrome.storage.local.get([
@@ -13,14 +19,29 @@
             X_MODULE_ENABLED_KEY, 
             X_ALWAYS_MUTE_KEY,
             X_MODULE_VISIBLE_KEY,
-            X_VOLUME_LEVEL_KEY
+            X_VOLUME_LEVEL_KEY,
+            X_HIDE_ADS_ENABLED_KEY,
+            X_LOCATION_ENABLED_KEY,
+            BLOCKED_COUNTRIES_KEY,
+            BLOCKED_DEVICE_REGIONS_KEY,
+            BLOCKED_NAME_FLAGS_KEY,
+            LOCATION_CACHE_KEY
         ], (result) => {
+            if (!result) return;
             const isGlobalOn = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] !== false;
             const isXEnabled = result[X_MODULE_ENABLED_KEY] !== false;
             const isAlwaysMute = result[X_ALWAYS_MUTE_KEY] !== false;
             const volumeLevel = result[X_VOLUME_LEVEL_KEY] !== undefined ? result[X_VOLUME_LEVEL_KEY] : 1.0;
 
             const isXVisible = result[X_MODULE_VISIBLE_KEY] !== false;
+            const isHideAds = result[X_HIDE_ADS_ENABLED_KEY] !== false;
+            const isLocationEnabled = result[X_LOCATION_ENABLED_KEY] !== false;
+            const blockedCountries = Array.isArray(result[BLOCKED_COUNTRIES_KEY]) ? result[BLOCKED_COUNTRIES_KEY] : [];
+            const blockedDeviceRegions = Array.isArray(result[BLOCKED_DEVICE_REGIONS_KEY]) ? result[BLOCKED_DEVICE_REGIONS_KEY] : [];
+            const blockedNameFlags = Array.isArray(result[BLOCKED_NAME_FLAGS_KEY]) ? result[BLOCKED_NAME_FLAGS_KEY] : [];
+            const userCache = (result[LOCATION_CACHE_KEY] && typeof result[LOCATION_CACHE_KEY] === 'object')
+                ? result[LOCATION_CACHE_KEY]
+                : null;
 
             // Effectively enabled if Global is ON logic + X Specific ON logic + X Visible
             const effectiveEnabled = isGlobalOn && isXEnabled && isXVisible;
@@ -30,7 +51,13 @@
                 payload: {
                     isEnabled: effectiveEnabled,
                     alwaysMute: isAlwaysMute,
-                    volumeLevel: volumeLevel
+                    volumeLevel: volumeLevel,
+                    hideAds: isHideAds,
+                    locationEnabled: isLocationEnabled,
+                    blockedCountries,
+                    blockedDeviceRegions,
+                    blockedNameFlags,
+                    userCache
                 }
             }, '*');
         });
@@ -46,7 +73,13 @@
                 changes[X_MODULE_ENABLED_KEY] || 
                 changes[X_ALWAYS_MUTE_KEY] ||
                 changes[X_MODULE_VISIBLE_KEY] ||
-                changes[X_VOLUME_LEVEL_KEY]) {
+                changes[X_VOLUME_LEVEL_KEY] ||
+                changes[X_HIDE_ADS_ENABLED_KEY] ||
+                changes[X_LOCATION_ENABLED_KEY] ||
+                changes[BLOCKED_COUNTRIES_KEY] ||
+                changes[BLOCKED_DEVICE_REGIONS_KEY] ||
+                changes[BLOCKED_NAME_FLAGS_KEY] ||
+                changes[LOCATION_CACHE_KEY]) {
                 postSettings();
             }
         }

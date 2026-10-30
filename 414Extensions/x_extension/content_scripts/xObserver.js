@@ -708,116 +708,32 @@
     }
 
     const MAX_COLLAPSES_PER_SCROLL_WINDOW = 2;
-    const SCROLL_WINDOW_RESET_PX = 400;
+    const SCROLL_WINDOW_RESET_PX = 450;
+    const COLLAPSE_MAX_VIEWPORT_TOP_RATIO = 0.75;
     let lastCollapseWindowScrollY = 0;
     let collapsesInScrollWindow = 0;
-    let lastCollapseTimestampMs = 0;
     let isUserActivelyScrolling = false;
-    let pendingScrollScan = false;
-    let scrollIdleTimer = null;
+    let scrollIdleCollapseTimer = null;
     let deferredFlushTimer = null;
     const pendingDeferredArticles = new Set();
-    let trackedSpacerEl = null;
-    let spacerStyleObserver = null;
+    const collapseObservedArticles = new WeakSet();
+    let collapseIntersectionObserver = null;
 
-    function clampVirtualTimelineSpacerHeight(allowShrink = true) {
-        if (typeof document === 'undefined') return;
-        const timelineWrap = document.querySelector(
-            '[data-testid="primaryColumn"] [aria-label*="Timeline"], section[role="region"] [aria-label*="Timeline"]'
-        );
-        if (!timelineWrap) return;
-        if (timelineWrap.closest && timelineWrap.closest('.x-native-feed-hidden')) return;
-
-        const spacer = timelineWrap.firstElementChild;
-        if (!spacer || spacer.tagName !== 'DIV' || !spacer.style) return;
-
-        if (trackedSpacerEl !== spacer) {
-            trackedSpacerEl = spacer;
-            if (spacerStyleObserver) {
-                spacerStyleObserver.disconnect();
-                spacerStyleObserver = null;
-            }
-            if (typeof MutationObserver !== 'undefined') {
-                spacerStyleObserver = new MutationObserver(() => {
-                    clampVirtualTimelineSpacerHeight(!isUserActivelyScrolling);
-                });
-                spacerStyleObserver.observe(spacer, {
-                    attributes: true,
-                    attributeFilter: ['style'],
-                    childList: true
-                });
-            }
+    function parseCellTranslateY(cell) {
+        if (!cell || !cell.style) return null;
+        const transformStr = cell.style.transform || '';
+        if (!transformStr) return null;
+        const match = transformStr.match(/translateY\(\s*([+-]?\d+(?:\.\d+)?)px\s*\)/);
+        if (match && match[1] !== undefined) {
+            const val = parseFloat(match[1]);
+            return Number.isFinite(val) ? val : null;
         }
-
-        const rawMinHeight = spacer.style.minHeight || '';
-        if (!rawMinHeight || !rawMinHeight.endsWith('px')) return;
-        const currentMinHeight = parseFloat(rawMinHeight);
-        if (!Number.isFinite(currentMinHeight) || currentMinHeight <= 0) return;
-
-        if (spacer._xClampedMinHeight === undefined || Math.abs(currentMinHeight - spacer._xClampedMinHeight) > 2) {
-            spacer._xNativeMinHeight = currentMinHeight;
-        }
-        const nativeMinHeight = spacer._xNativeMinHeight || currentMinHeight;
-
-        const children = spacer.children;
-        if (!children || children.length === 0) return;
-
-        let maxTranslateY = -1;
-        let maxYCell = null;
-        let cellCount = 0;
-
-        for (let i = 0; i < children.length; i++) {
-            const cell = children[i];
-            if (!cell || !cell.getAttribute || cell.getAttribute('data-testid') !== 'cellInnerDiv') continue;
-            cellCount++;
-            const transformStr = (cell.style && cell.style.transform) || '';
-            const match = transformStr.match(/translateY\(\s*([+-]?\d+(?:\.\d+)?)px\s*\)/);
-            if (match && match[1] !== undefined) {
-                const y = parseFloat(match[1]);
-                if (Number.isFinite(y) && y > maxTranslateY) {
-                    maxTranslateY = y;
-                    maxYCell = cell;
-                }
-            }
-        }
-
-        if (cellCount === 0 || maxTranslateY <= 0) return;
-
-        let lastCellHeight = (maxYCell && maxYCell.offsetHeight > 0) ? maxYCell.offsetHeight : 0;
-        if (lastCellHeight <= 0 && maxYCell && typeof maxYCell.getBoundingClientRect === 'function') {
-            const cRect = maxYCell.getBoundingClientRect();
-            if (cRect && cRect.height > 0) {
-                lastCellHeight = cRect.height;
-            }
-        }
-        if (lastCellHeight <= 0) {
-            lastCellHeight = 650;
-        }
-        const maxCellBottom = maxTranslateY + Math.max(lastCellHeight, 400);
-
-        const currentScrollY = (typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0;
-        const viewportHeight = (typeof window !== 'undefined' && window.innerHeight) ||
-            (document.documentElement && document.documentElement.clientHeight) ||
-            800;
-
-        const allowedMinHeight = Math.max(
-            maxCellBottom + 600,
-            currentScrollY + viewportHeight + 1200
-        );
-
-        const desiredMinHeight = Math.round(Math.min(nativeMinHeight, allowedMinHeight));
-
-        if (desiredMinHeight > currentMinHeight + 80) {
-            spacer._xClampedMinHeight = desiredMinHeight;
-            spacer.style.minHeight = `${desiredMinHeight}px`;
-        } else if (allowShrink && desiredMinHeight < currentMinHeight - 200) {
-            spacer._xClampedMinHeight = desiredMinHeight;
-            spacer.style.minHeight = `${desiredMinHeight}px`;
-        }
+        return null;
     }
 
     function isElementReadyForViewportCollapse(el) {
         if (!el || typeof el.getBoundingClientRect !== 'function') return true;
+        if (isUserActivelyScrolling) return false;
         const rect = el.getBoundingClientRect();
         if (!rect) return true;
         // JSDOM / unit-test environments return all 0s for getBoundingClientRect unless mocked
@@ -827,58 +743,45 @@
         if (rect.height <= 0) {
             return false;
         }
-        // 1. Do not collapse cell heights while the user is actively flinging/scrolling
-        if (isUserActivelyScrolling) {
-            return false;
-        }
+
         const viewportHeight = (typeof window !== 'undefined' && window.innerHeight) ||
             (typeof document !== 'undefined' && document.documentElement && document.documentElement.clientHeight) ||
             800;
 
-        // 2. Never collapse elements above the viewport (already scrolled past) or below the viewport (in X's bottom overscan buffer)
-        if (rect.bottom <= 0 || rect.top >= viewportHeight) {
+        // 1. Never collapse elements scrolled above the viewport (prevents upward scroll jumps),
+        // elements in the bottom 25% of the viewport, or elements anywhere in X's bottom overscan buffer.
+        // Keeping the bottom 25% of the viewport + the entire bottom overscan buffer uncollapsed
+        // prevents X's ResizeObserver from pulling offscreen overscan cells into view and cascading.
+        if (rect.bottom <= 0 || rect.top < -40 || rect.top >= viewportHeight * COLLAPSE_MAX_VIEWPORT_TOP_RATIO) {
             return false;
         }
 
-        // 3. If inside X's virtualized cellInnerDiv, verify X's VirtualScroller has finished measuring/positioning
-        // and that preceding visible cells do not already fill the viewport
+        // 2. If inside X's virtualized cellInnerDiv, verify X's VirtualScroller has finished its initial
+        // measurement pass without triggering synchronous getBoundingClientRect() loops on siblings.
         const cell = el.closest ? el.closest('[data-testid="cellInnerDiv"]') : null;
         if (cell) {
             if (cell.style && cell.style.opacity === '0') {
                 return false;
             }
-            const cellRect = typeof cell.getBoundingClientRect === 'function' ? cell.getBoundingClientRect() : rect;
-            if (cellRect && cellRect.top >= viewportHeight * 0.75) {
-                return false;
-            }
-            let visibleHeightAbove = 0;
-            let prev = cell.previousElementSibling;
-            while (prev) {
-                if (prev.getAttribute && prev.getAttribute('data-testid') === 'cellInnerDiv' && typeof prev.getBoundingClientRect === 'function') {
+            const prev = cell.previousElementSibling;
+            if (prev && prev.getAttribute && prev.getAttribute('data-testid') === 'cellInnerDiv') {
+                const cellY = parseCellTranslateY(cell);
+                const prevY = parseCellTranslateY(prev);
+                if (cellY !== null && prevY !== null) {
+                    if (cellY <= prevY + 1) {
+                        return false;
+                    }
+                } else if (typeof prev.getBoundingClientRect === 'function') {
                     const pRect = prev.getBoundingClientRect();
-                    if (pRect && pRect.height > 0) {
-                        if (cellRect && cellRect.height > 0 && cellRect.top < pRect.top) {
-                            // Out-of-order / unpositioned cell stacked at top before X's ResizeObserver pass
-                            return false;
-                        }
-                        if (pRect.bottom > 0 && pRect.top < viewportHeight) {
-                            const visibleTop = Math.max(0, pRect.top);
-                            const visibleBottom = Math.min(viewportHeight, pRect.bottom);
-                            if (visibleBottom > visibleTop) {
-                                visibleHeightAbove += (visibleBottom - visibleTop);
-                            }
-                        }
+                    if (pRect && pRect.height > 0 && rect.top <= pRect.top + 1) {
+                        return false;
                     }
                 }
-                prev = prev.previousElementSibling;
-            }
-            if (visibleHeightAbove >= viewportHeight) {
-                return false;
             }
         }
 
-        // 4. Cap total height collapses at a stationary scrollY so collapsing cells in the viewport
-        // cannot domino-cascade through an entire 35-tweet batch without user scroll
+        // 3. Cap total height collapses per scroll window so collapsing cells in a stationary feed
+        // cannot domino-cascade through an entire batch without substantial user scroll movement.
         const currentScrollY = (typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0;
         if (Math.abs(currentScrollY - lastCollapseWindowScrollY) >= SCROLL_WINDOW_RESET_PX) {
             lastCollapseWindowScrollY = currentScrollY;
@@ -903,11 +806,20 @@
             collapsesInScrollWindow = 0;
         }
         collapsesInScrollWindow++;
-        lastCollapseTimestampMs = Date.now();
+    }
+
+    function unobserveDeferredCollapseArticle(article) {
+        if (!article || !collapseIntersectionObserver) return;
+        if (collapseObservedArticles.has(article)) {
+            collapseObservedArticles.delete(article);
+            try {
+                collapseIntersectionObserver.unobserve(article);
+            } catch (e) {}
+        }
     }
 
     function flushDeferredViewportCollapses() {
-        if (!isContextValid() || pendingDeferredArticles.size === 0 || isUserActivelyScrolling) return;
+        if (!isContextValid() || pendingDeferredArticles.size === 0) return;
         const shouldHideAds = !cachedSettings || (
             cachedSettings.isGlobalMasterSwitchEnabled !== false &&
             cachedSettings.isXModuleEnabled !== false &&
@@ -922,6 +834,7 @@
         for (const article of Array.from(pendingDeferredArticles)) {
             if (!article || !article.isConnected) {
                 pendingDeferredArticles.delete(article);
+                unobserveDeferredCollapseArticle(article);
                 continue;
             }
 
@@ -989,9 +902,9 @@
 
             if (!article._xDeferredAdCollapse && !article._xDeferredFilter && !article._xHasDeferredChildFilter) {
                 pendingDeferredArticles.delete(article);
+                unobserveDeferredCollapseArticle(article);
             }
         }
-        clampVirtualTimelineSpacerHeight(!isUserActivelyScrolling);
     }
 
     function scheduleDeferredViewportFlush() {
@@ -999,18 +912,48 @@
         deferredFlushTimer = setTimeout(() => {
             deferredFlushTimer = null;
             flushDeferredViewportCollapses();
-        }, 80);
+        }, 50);
+    }
+
+    function ensureCollapseIntersectionObserver() {
+        if (collapseIntersectionObserver || typeof IntersectionObserver === 'undefined') return;
+        collapseIntersectionObserver = new IntersectionObserver((entries) => {
+            if (!isContextValid()) return;
+            let shouldFlush = false;
+            for (const entry of entries) {
+                const article = entry.target;
+                if (
+                    entry.isIntersecting &&
+                    article &&
+                    (article._xDeferredAdCollapse || article._xDeferredFilter || article._xHasDeferredChildFilter)
+                ) {
+                    pendingDeferredArticles.add(article);
+                    shouldFlush = true;
+                }
+            }
+            if (shouldFlush) {
+                flushDeferredViewportCollapses();
+            }
+        }, {
+            rootMargin: '0px 0px -25% 0px',
+            threshold: 0
+        });
     }
 
     function registerDeferredArticle(article) {
         if (!article) return;
         pendingDeferredArticles.add(article);
-        ensureIntersectionObserver();
-        if (tweetIntersectionObserver && !observedTweets.has(article)) {
-            observedTweets.add(article);
-            tweetIntersectionObserver.observe(article);
+        ensureCollapseIntersectionObserver();
+        if (collapseIntersectionObserver && !collapseObservedArticles.has(article)) {
+            collapseObservedArticles.add(article);
+            try {
+                collapseIntersectionObserver.observe(article);
+            } catch (e) {}
         }
-        scheduleDeferredViewportFlush();
+        const cell = article.closest ? article.closest('[data-testid="cellInnerDiv"]') : null;
+        if (cell && cell.style && cell.style.opacity === '0') {
+            scheduleDeferredViewportFlush();
+        }
     }
 
     function ensureIntersectionObserver() {
@@ -1022,16 +965,9 @@
             for (const entry of entries) {
                 const article = entry.target;
                 if (entry.isIntersecting) {
-                    if (
-                        (article._xDeferredAdCollapse || article._xDeferredFilter || article._xHasDeferredChildFilter) &&
-                        !isUserActivelyScrolling
-                    ) {
+                    if (article._xDeferredAdCollapse || article._xDeferredFilter || article._xHasDeferredChildFilter) {
                         pendingDeferredArticles.add(article);
-                        if (Date.now() - lastCollapseTimestampMs < 250) {
-                            scheduleDeferredViewportFlush();
-                        } else {
-                            flushDeferredViewportCollapses();
-                        }
+                        flushDeferredViewportCollapses();
                     }
                 }
 
@@ -1065,18 +1001,57 @@
         });
     }
 
-    function checkIsAdTweet(article) {
-        if (!article) return false;
+    function resetRecycledArticleIfNeeded(article) {
+        if (!article) return;
         const statusLink = article.querySelector ? article.querySelector('a[href*="/status/"]') : null;
         const currentHref = statusLink ? (statusLink.getAttribute('href') || '') : '';
         if (currentHref && article._xLastAdCheckHref !== undefined && article._xLastAdCheckHref !== currentHref) {
             delete article._xIsAdChecked;
             delete article._xSeenCheckGen;
+            delete article._xPrimaryLocationData;
+            delete article._xHeaderElem;
+            delete article._xDeferredAdCollapse;
+            delete article._xDeferredFilter;
+            delete article._xHasDeferredChildFilter;
+            pendingDeferredArticles.delete(article);
+            unobserveDeferredCollapseArticle(article);
             if (article.dataset) {
                 delete article.dataset.xTweetId;
+                delete article.dataset.xFilterRevealed;
+            }
+            if (article._xAdCollapsed || article._xSavedInlineStyle !== undefined) {
+                if (window.XLocationUI && typeof window.XLocationUI.restoreAdTweet === 'function') {
+                    window.XLocationUI.restoreAdTweet(article);
+                } else {
+                    article.style.removeProperty('max-height');
+                    article.style.removeProperty('min-height');
+                    article.style.removeProperty('height');
+                    article.style.removeProperty('overflow');
+                    article.style.removeProperty('opacity');
+                    article.style.removeProperty('pointer-events');
+                    article._xAdCollapsed = false;
+                }
+            }
+            if (
+                (article.classList && article.classList.contains('x-tweet-blocked')) ||
+                article._xFilteredPlaceholder
+            ) {
+                if (window.XLocationUI && typeof window.XLocationUI.unfilterTweet === 'function') {
+                    window.XLocationUI.unfilterTweet(article);
+                } else {
+                    article.style.display = '';
+                    article.classList?.remove('x-tweet-blocked');
+                }
             }
         }
-        article._xLastAdCheckHref = currentHref;
+        if (currentHref) {
+            article._xLastAdCheckHref = currentHref;
+        }
+    }
+
+    function checkIsAdTweet(article) {
+        if (!article) return false;
+        resetRecycledArticleIfNeeded(article);
         if (typeof article._xIsAdChecked === 'boolean') {
             return article._xIsAdChecked;
         }
@@ -1157,23 +1132,21 @@
             return true;
         }
         delete article._xDeferredAdCollapse;
-        if (article._xAdCollapsed || article._xAdCellWrapper || article._xSavedInlineStyle !== undefined) {
-            if (window.XLocationUI && typeof window.XLocationUI.restoreAdTweet === 'function') {
-                window.XLocationUI.restoreAdTweet(article);
-            } else if (article._xAdCollapsed) {
-                article.style.removeProperty('max-height');
-                article.style.removeProperty('min-height');
-                article.style.removeProperty('height');
-                article.style.removeProperty('overflow');
-                article.style.removeProperty('opacity');
-                article.style.removeProperty('pointer-events');
-                article._xAdCollapsed = false;
-            }
+        if (window.XLocationUI && typeof window.XLocationUI.restoreAdTweet === 'function') {
+            window.XLocationUI.restoreAdTweet(article);
+        } else if (article._xAdCollapsed) {
+            article.style.removeProperty('max-height');
+            article.style.removeProperty('min-height');
+            article.style.removeProperty('height');
+            article.style.removeProperty('overflow');
+            article.style.removeProperty('opacity');
+            article.style.removeProperty('pointer-events');
+            article._xAdCollapsed = false;
         }
         return isAd;
     }
 
-    function scanTweetsForFriendsSync(forceRecheck = false) {
+    function scanTweetsForFriendsSync(forceRecheck = false, prequeriedArticles = null) {
         if (!isFriendsSyncActive || !isContextValid()) return;
 
         if (forceRecheck) {
@@ -1181,9 +1154,22 @@
         }
 
         ensureIntersectionObserver();
-        syncFriendsTimelineUI(forceRecheck);
+        const needsTimelineSync = forceRecheck ||
+            !hasLoadedTimelineOnce ||
+            (Date.now() - lastTimelineFetchMs) >= 6000 ||
+            !document.querySelector('[data-testid="x-friends-tab"]') ||
+            (
+                cachedTimelineData &&
+                Array.isArray(cachedTimelineData.unseenForcedPosts) &&
+                cachedTimelineData.unseenForcedPosts.some(p => p && !p.isDismissed && !dismissedForcedLocalSet.has(String(p.tweetId))) &&
+                !document.getElementById('x-forced-home-feed') &&
+                ((typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0) <= 80
+            );
+        if (needsTimelineSync) {
+            syncFriendsTimelineUI(forceRecheck);
+        }
 
-        const articles = document.querySelectorAll('article[data-testid="tweet"]');
+        const articles = prequeriedArticles || document.querySelectorAll('article[data-testid="tweet"]');
         if (articles.length === 0) return;
 
         const tweetMap = new Map(); // tweetId -> Array<{ article, headerElem, screenName }>
@@ -1680,6 +1666,90 @@
                 }
             }
         }
+        try {
+            if (typeof window !== 'undefined' && typeof window.postMessage === 'function') {
+                window.postMessage({
+                    type: 'X_USER_LOCATION_RESOLVED',
+                    payload: { users: rawCache }
+                }, '*');
+            }
+        } catch (e) {}
+    }
+
+    function broadcastResolvedUserLocation(screenNameLower, userData) {
+        if (!screenNameLower || !userData) return;
+        try {
+            if (typeof window !== 'undefined' && typeof window.postMessage === 'function') {
+                window.postMessage({
+                    type: 'X_USER_LOCATION_RESOLVED',
+                    payload: { screenName: screenNameLower, userData }
+                }, '*');
+            }
+        } catch (e) {}
+    }
+
+    function prefetchUserLocationIfUncached(rawScreenName) {
+        if (!rawScreenName || !isContextValid()) return;
+        const screenName = String(rawScreenName).trim();
+        if (!screenName) return;
+        const screenNameLower = screenName.toLowerCase();
+        const cached = localUserCache.get(screenNameLower);
+        if (cached) {
+            broadcastResolvedUserLocation(screenNameLower, cached);
+            return;
+        }
+        if (inflightScreenNames.has(screenNameLower)) {
+            return;
+        }
+        const waiters = [];
+        inflightScreenNames.set(screenNameLower, waiters);
+        try {
+            chrome.runtime.sendMessage({
+                action: 'X_FETCH_USER_INFO',
+                payload: { screenName }
+            }, (response) => {
+                inflightScreenNames.delete(screenNameLower);
+                const hasErr = safeHasError();
+                const userData = (!hasErr && response && response.success && response.data) ? response.data : null;
+                if (userData) {
+                    localUserCache.set(screenNameLower, userData);
+                    broadcastResolvedUserLocation(screenNameLower, userData);
+                }
+                const activeSettings = cachedSettings;
+                for (let i = 0; i < waiters.length; i++) {
+                    const w = waiters[i];
+                    inflightElements.delete(w.elem);
+                    if (userData && w.elem) {
+                        processedElements.add(w.elem);
+                        w.elem._xProcessedScreenName = screenNameLower;
+                        if (window.XLocationUI) {
+                            window.XLocationUI.renderInlineBadge(w.elem, userData);
+                        }
+                        w.elem._xLastProcessedText = w.elem.textContent || '';
+                        if (w.filterTarget && activeSettings) {
+                            applyTweetFilterForElement(w.filterTarget, userData, activeSettings, w.elem);
+                        }
+                    }
+                }
+            });
+        } catch (err) {
+            inflightScreenNames.delete(screenNameLower);
+            for (let i = 0; i < waiters.length; i++) {
+                inflightElements.delete(waiters[i].elem);
+            }
+        }
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('message', (event) => {
+            if (event.source !== window || !event.data) return;
+            if (event.data.type === 'X_PREFETCH_USERS' && event.data.payload && Array.isArray(event.data.payload.screenNames)) {
+                const names = event.data.payload.screenNames.slice(0, 25);
+                for (let i = 0; i < names.length; i++) {
+                    prefetchUserLocationIfUncached(names[i]);
+                }
+            }
+        });
     }
 
     function withObserverSettings(cb) {
@@ -1698,7 +1768,15 @@
     }
 
     function processUserElement(elem, settings, shouldHideAds) {
-        if (!elem || processedElements.has(elem) || inflightElements.has(elem) || !isContextValid()) return;
+        if (!elem || !isContextValid()) return;
+
+        const currentText = elem.textContent || '';
+        if (processedElements.has(elem) && elem._xLastProcessedText === currentText) {
+            return;
+        }
+        if (inflightElements.has(elem) && elem._xInflightText === currentText) {
+            return;
+        }
 
         const enclosingArticle = elem.closest ? elem.closest('article[data-testid="tweet"]') : null;
         if (enclosingArticle && (enclosingArticle._xAdCollapsed || (shouldHideAds && checkIsAdTweet(enclosingArticle)))) {
@@ -1709,15 +1787,38 @@
         if (!screenName) return;
         const screenNameLower = screenName.toLowerCase();
 
+        if (processedElements.has(elem)) {
+            if (elem._xProcessedScreenName === screenNameLower) {
+                elem._xLastProcessedText = currentText;
+                return;
+            }
+            processedElements.delete(elem);
+            inflightElements.delete(elem);
+        }
+
         const filterTarget = getFilterTargetForUserElement(elem);
+        if (filterTarget && elem._xProcessedScreenName && elem._xProcessedScreenName !== screenNameLower) {
+            delete filterTarget._xPrimaryLocationData;
+            delete filterTarget._xDeferredFilter;
+            if (filterTarget.classList && filterTarget.classList.contains('x-tweet-blocked')) {
+                if (window.XLocationUI && typeof window.XLocationUI.unfilterTweet === 'function') {
+                    window.XLocationUI.unfilterTweet(filterTarget);
+                } else {
+                    filterTarget.style.display = '';
+                    filterTarget.classList.remove('x-tweet-blocked');
+                }
+            }
+        }
 
         // 1. Synchronous in-memory cache hit: badge & filter in 0ms without IPC roundtrip
         const cachedUserData = localUserCache.get(screenNameLower);
         if (cachedUserData) {
             processedElements.add(elem);
+            elem._xProcessedScreenName = screenNameLower;
             if (window.XLocationUI) {
                 window.XLocationUI.renderInlineBadge(elem, cachedUserData);
             }
+            elem._xLastProcessedText = elem.textContent || '';
             if (filterTarget) {
                 applyTweetFilterForElement(filterTarget, cachedUserData, settings, elem);
             }
@@ -1731,6 +1832,7 @@
 
         // 3. Deduplicate in-flight IPC requests for the same screenName
         inflightElements.add(elem);
+        elem._xInflightText = currentText;
         const existingWaiters = inflightScreenNames.get(screenNameLower);
         if (existingWaiters) {
             existingWaiters.push({ elem, filterTarget });
@@ -1750,6 +1852,7 @@
                 const userData = (!hasErr && response && response.success && response.data) ? response.data : null;
                 if (userData) {
                     localUserCache.set(screenNameLower, userData);
+                    broadcastResolvedUserLocation(screenNameLower, userData);
                 }
                 const activeSettings = cachedSettings || settings;
                 for (let i = 0; i < waiters.length; i++) {
@@ -1757,9 +1860,11 @@
                     inflightElements.delete(w.elem);
                     if (userData && w.elem) {
                         processedElements.add(w.elem);
+                        w.elem._xProcessedScreenName = screenNameLower;
                         if (window.XLocationUI) {
                             window.XLocationUI.renderInlineBadge(w.elem, userData);
                         }
+                        w.elem._xLastProcessedText = w.elem.textContent || '';
                         if (w.filterTarget) {
                             applyTweetFilterForElement(w.filterTarget, userData, activeSettings, w.elem);
                         }
@@ -1780,10 +1885,6 @@
             if (observer) observer.disconnect();
             return;
         }
-        if (isUserActivelyScrolling) {
-            pendingScrollScan = true;
-            return;
-        }
         // Use a non-resetting throttle so DOM mutations coalesce into a single async pass
         // AFTER X's VirtualScroller finishes its synchronous commit and ResizeObserver measurement.
         if (scanTimeout) return;
@@ -1792,10 +1893,6 @@
             scanTimeout = null;
             if (!isContextValid()) {
                 if (observer) observer.disconnect();
-                return;
-            }
-            if (isUserActivelyScrolling) {
-                pendingScrollScan = true;
                 return;
             }
             try {
@@ -1811,25 +1908,24 @@
                         scanMobileDomNotifications();
                     }
 
+                    const articles = document.querySelectorAll('article[data-testid="tweet"]');
                     if (settings.isGlobalMasterSwitchEnabled === false || settings.isXModuleEnabled === false) {
                         isFriendsSyncActive = false;
-                        document.querySelectorAll('article[data-testid="tweet"]').forEach(article => {
+                        articles.forEach(article => {
                             applyAdStealthState(article, false);
                         });
                         return;
                     }
 
                     const shouldHideAds = settings.isXHideAdsEnabled !== false;
-                    document.querySelectorAll('article[data-testid="tweet"]').forEach(article => {
+                    articles.forEach(article => {
                         applyAdStealthState(article, shouldHideAds);
                     });
 
                     isFriendsSyncActive = settings.isXFriendsSyncEnabled !== false;
                     if (isFriendsSyncActive) {
-                        scanTweetsForFriendsSync();
+                        scanTweetsForFriendsSync(false, articles);
                     }
-
-                    clampVirtualTimelineSpacerHeight(!isUserActivelyScrolling);
 
                     if (settings.isXLocationEnabled === false) {
                         return;
@@ -1839,8 +1935,6 @@
                     userNames.forEach(elem => {
                         processUserElement(elem, settings, shouldHideAds);
                     });
-
-                    clampVirtualTimelineSpacerHeight(!isUserActivelyScrolling);
                 });
             } catch (err) {
                 if (observer) observer.disconnect();
@@ -1863,35 +1957,27 @@
     document.addEventListener('click', handleUserInteraction, { capture: true, passive: true });
     document.addEventListener('play', handleUserInteraction, { capture: true, passive: true });
 
-    // Pause DOM height collapses while actively scrolling to prevent mid-scroll ResizeObserver hitches,
-    // flush newly in-viewport deferred collapses once scroll settles, and clean up scrolled-past cards.
+    // Lightweight passive scroll listener: zero DOM queries or forced reflows during scroll
     let scrollCleanupTimer = null;
     function handleWindowScrollForSeenCards() {
         isUserActivelyScrolling = true;
-        const currentScrollY = typeof window.scrollY === 'number' ? window.scrollY : (window.pageYOffset || 0);
-        if (Math.abs(currentScrollY - lastCollapseWindowScrollY) >= SCROLL_WINDOW_RESET_PX) {
-            lastCollapseWindowScrollY = currentScrollY;
-            collapsesInScrollWindow = 0;
+        if (scrollIdleCollapseTimer) {
+            clearTimeout(scrollIdleCollapseTimer);
         }
-        clampVirtualTimelineSpacerHeight(false);
-        if (scrollIdleTimer) {
-            clearTimeout(scrollIdleTimer);
-        }
-        scrollIdleTimer = setTimeout(() => {
-            scrollIdleTimer = null;
+        scrollIdleCollapseTimer = setTimeout(() => {
+            scrollIdleCollapseTimer = null;
             isUserActivelyScrolling = false;
-            flushDeferredViewportCollapses();
-            clampVirtualTimelineSpacerHeight(true);
-            if (pendingScrollScan) {
-                pendingScrollScan = false;
-                scanDOM();
+            const currentScrollY = typeof window.scrollY === 'number' ? window.scrollY : (window.pageYOffset || 0);
+            if (Math.abs(currentScrollY - lastCollapseWindowScrollY) >= SCROLL_WINDOW_RESET_PX) {
+                lastCollapseWindowScrollY = currentScrollY;
+                collapsesInScrollWindow = 0;
             }
-        }, 120);
+            if (pendingDeferredArticles.size > 0) {
+                scheduleDeferredViewportFlush();
+            }
+        }, 150);
 
-        if (!isFriendsSyncActive) return;
-        if (scrollCleanupTimer) {
-            clearTimeout(scrollCleanupTimer);
-        }
+        if (!isFriendsSyncActive || scrollCleanupTimer) return;
         scrollCleanupTimer = setTimeout(() => {
             scrollCleanupTimer = null;
             if (window.XLocationUI && typeof window.XLocationUI.removeSeenCardsScrolledPast === 'function') {

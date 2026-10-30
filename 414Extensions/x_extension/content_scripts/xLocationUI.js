@@ -300,7 +300,16 @@
     }
 
     function renderInlineBadge(containerElem, data) {
-        if (!containerElem || containerElem.querySelector('.x-location-flag')) return;
+        if (!containerElem || !data) return;
+        const existingBadge = containerElem.querySelector('.x-location-inline-badge');
+        if (existingBadge) {
+            const prevScreenName = existingBadge._xLocationData && existingBadge._xLocationData.screenName;
+            if (prevScreenName && data.screenName && prevScreenName.toLowerCase() !== data.screenName.toLowerCase()) {
+                existingBadge.remove();
+            } else if (containerElem.querySelector('.x-location-flag')) {
+                return;
+            }
+        }
 
         const badge = getOrCreateInlineBadge(containerElem, data.screenName);
         badge._xLocationData = data;
@@ -2727,13 +2736,25 @@
         }
 
         if (tweet._xFilteredPlaceholder && tweet._xFilteredPlaceholder.isConnected) {
-            tweet.style.display = 'none';
-            tweet.classList.add('x-tweet-blocked');
-            return tweet._xFilteredPlaceholder;
+            if (tweet._xFilteredPlaceholder._xFilterKey === currentKey) {
+                tweet.style.display = 'none';
+                tweet.classList.add('x-tweet-blocked');
+                return tweet._xFilteredPlaceholder;
+            }
+            unfilterTweet(tweet);
+        }
+
+        if (
+            tweet.previousElementSibling &&
+            tweet.previousElementSibling.classList &&
+            tweet.previousElementSibling.classList.contains('x-tweet-filtered-placeholder')
+        ) {
+            tweet.previousElementSibling.remove();
         }
 
         const placeholder = document.createElement('div');
         placeholder.className = 'x-tweet-filtered-placeholder';
+        placeholder._xFilterKey = currentKey;
         placeholder.addEventListener('click', (e) => {
             e.stopPropagation();
         });
@@ -2945,15 +2966,16 @@
 
     function restoreAdTweet(article) {
         if (!article) return false;
-        if (!article._xAdCollapsed && !article._xAdCellWrapper && article._xSavedInlineStyle === undefined) {
+        const cellWrapper = article._xAdCellWrapper || getCellWrapperForArticle(article);
+        const hasCollapsedWrapper = Boolean(cellWrapper && cellWrapper._xSavedInlineStyle !== undefined);
+        if (!article._xAdCollapsed && !article._xAdCellWrapper && !hasCollapsedWrapper && article._xSavedInlineStyle === undefined) {
             return false;
         }
-        if (article._xAdCollapsed) {
+        if (article._xAdCollapsed || article._xSavedInlineStyle !== undefined) {
             restoreStealthCollapseStyles(article);
             article._xAdCollapsed = false;
         }
-        const cellWrapper = article._xAdCellWrapper || getCellWrapperForArticle(article);
-        if (cellWrapper && cellWrapper._xSavedInlineStyle !== undefined) {
+        if (hasCollapsedWrapper) {
             restoreStealthCollapseStyles(cellWrapper);
         }
         delete article._xAdCellWrapper;

@@ -2294,7 +2294,182 @@ describe('xLocationUI.js', () => {
         jest.useRealTimers();
     });
 
-    test('xObserver clamps runaway min-height (55475.3px) on virtual timeline spacer to mounted cellInnerDiv bounds and expands smoothly on scroll', () => {
+    test('xObserver never mutates virtual timeline spacer min-height, suppresses mid-scroll collapses, blocks unpositioned translateY(0px) stacks, and flushes upper-viewport deferred items after scroll idle', () => {
+        jest.useFakeTimers();
+        delete window.XObserverInjected;
+        Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true, writable: true });
+
+        let collapseObserverCallback = null;
+        const originalIO = global.IntersectionObserver;
+        global.IntersectionObserver = class MockIO {
+            constructor(cb, options) {
+                this.cb = cb;
+                this.options = options || {};
+                if (this.options.rootMargin && String(this.options.rootMargin).includes('-25%')) {
+                    collapseObserverCallback = cb;
+                }
+            }
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        };
+
+        const sendMessageMock = jest.fn((msg, cb) => {
+            if (msg.action === 'X_FETCH_USER_INFO' && cb) {
+                cb({
+                    success: true,
+                    data: {
+                        screenName: msg.payload.screenName,
+                        location: 'India',
+                        device: 'Android'
+                    }
+                });
+                return;
+            }
+            if (cb) cb({ success: true, timelinePosts: [], unseenForcedPosts: [], connectedFriends: [] });
+        });
+
+        global.chrome = {
+            runtime: {
+                id: 'test-ext-id',
+                lastError: null,
+                onMessage: { addListener: jest.fn() },
+                sendMessage: sendMessageMock
+            },
+            storage: {
+                local: {
+                    get: jest.fn((keys, cb) => {
+                        cb({
+                            isGlobalMasterSwitchEnabled: true,
+                            isXModuleEnabled: true,
+                            isXLocationEnabled: true,
+                            isXHideAdsEnabled: true,
+                            isXFriendsSyncEnabled: true,
+                            blockedCountries: ['India'],
+                            blockedDeviceRegions: [],
+                            blockedNameFlags: [],
+                            x_location_cache_v4: {
+                                overscan_usr: {
+                                    screenName: 'overscan_usr',
+                                    location: 'India',
+                                    device: 'Android'
+                                }
+                            }
+                        });
+                    })
+                },
+                onChanged: { addListener: jest.fn() }
+            }
+        };
+
+        const primaryCol = document.createElement('div');
+        primaryCol.setAttribute('data-testid', 'primaryColumn');
+        const section = document.createElement('section');
+        section.setAttribute('role', 'region');
+        const timelineWrap = document.createElement('div');
+        timelineWrap.setAttribute('aria-label', 'Timeline: Your Home Timeline');
+        const spacer = document.createElement('div');
+        spacer.style.position = 'relative';
+        spacer.style.minHeight = '9059px';
+
+        // Cell 0: Normal visible tweet at translateY(0px)
+        const cell0 = document.createElement('div');
+        cell0.setAttribute('data-testid', 'cellInnerDiv');
+        cell0.style.transform = 'translateY(0px)';
+        const rectSpy0 = jest.fn(() => ({ top: 0, bottom: 500, left: 0, right: 600, width: 600, height: 500 }));
+        cell0.getBoundingClientRect = rectSpy0;
+        const article0 = document.createElement('article');
+        article0.setAttribute('data-testid', 'tweet');
+        article0.getBoundingClientRect = rectSpy0;
+        cell0.appendChild(article0);
+        spacer.appendChild(cell0);
+
+        // Cell 1: Blocked tweet initially in bottom overscan buffer (top: 1200px >= 800 * 0.75)
+        const cell1 = document.createElement('div');
+        cell1.setAttribute('data-testid', 'cellInnerDiv');
+        cell1.style.transform = 'translateY(1200px)';
+        let cell1Top = 1200;
+        const getCell1Rect = () => ({ top: cell1Top, bottom: cell1Top + 450, left: 0, right: 600, width: 600, height: 450 });
+        cell1.getBoundingClientRect = getCell1Rect;
+        const article1 = document.createElement('article');
+        article1.setAttribute('data-testid', 'tweet');
+        article1.getBoundingClientRect = getCell1Rect;
+        const header1 = document.createElement('div');
+        header1.setAttribute('data-testid', 'User-Name');
+        header1.textContent = '@overscan_usr';
+        article1.appendChild(header1);
+        cell1.appendChild(article1);
+        spacer.appendChild(cell1);
+
+        timelineWrap.appendChild(spacer);
+        section.appendChild(timelineWrap);
+        primaryCol.appendChild(section);
+        document.body.appendChild(primaryCol);
+
+        const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
+        const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
+        eval(observerScriptContent);
+
+        jest.advanceTimersByTime(100);
+
+        // 1. Spacer minHeight is NEVER mutated when stationary or when scrolling (no scrollbar oscillation)
+        expect(spacer.style.minHeight).toBe('9059px');
+
+        // 2. Deep overscan tweet (top: 1200px) stays uncollapsed so X's overscan buffer stays full
+        expect(article1.style.display).toBe('');
+        expect(article1._xDeferredFilter).toBeDefined();
+
+        // 3. During active scrolling, synchronous getBoundingClientRect() is not called and mid-scroll collapses are suppressed
+        rectSpy0.mockClear();
+        cell1Top = 350; // Moves into upper viewport during active scroll
+        window.scrollY = 500;
+        window.dispatchEvent(new Event('scroll'));
+        expect(spacer.style.minHeight).toBe('9059px');
+        expect(rectSpy0).not.toHaveBeenCalled();
+
+        // Even if IntersectionObserver fires while actively scrolling, collapse is held back until scroll idle
+        expect(collapseObserverCallback).not.toBeNull();
+        collapseObserverCallback([{ target: article1, isIntersecting: true }]);
+        expect(article1.style.display).toBe('');
+
+        // 4. Once scrolling stops for 150ms (+ 50ms flush), the deferred upper-viewport item collapses cleanly
+        jest.advanceTimersByTime(220);
+        expect(article1.style.display).toBe('none');
+        expect(cell1.querySelector('.x-tweet-filtered-placeholder')).not.toBeNull();
+        expect(spacer.style.minHeight).toBe('9059px');
+
+        // 5. Verify X_PREFETCH_USERS message from xEnv.js triggers background prefetch and X_USER_LOCATION_RESOLVED broadcast
+        const postMessageSpy = jest.spyOn(window, 'postMessage');
+        window.dispatchEvent(new MessageEvent('message', {
+            source: window,
+            data: {
+                type: 'X_PREFETCH_USERS',
+                payload: { screenNames: ['prefetched_author_1'] }
+            }
+        }));
+        expect(sendMessageMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                action: 'X_FETCH_USER_INFO',
+                payload: { screenName: 'prefetched_author_1' }
+            }),
+            expect.any(Function)
+        );
+        expect(postMessageSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'X_USER_LOCATION_RESOLVED',
+                payload: expect.objectContaining({
+                    screenName: 'prefetched_author_1'
+                })
+            }),
+            '*'
+        );
+
+        global.IntersectionObserver = originalIO;
+        window.scrollY = 0;
+        jest.useRealTimers();
+    });
+
+    test('xObserver and xLocationUI cleanly restore recycled cellInnerDiv wrappers, recycled articles, and recycled User-Name headers during virtual scrolling', async () => {
         jest.useFakeTimers();
         delete window.XObserverInjected;
 
@@ -2315,7 +2490,22 @@ describe('xLocationUI.js', () => {
                             isXModuleEnabled: true,
                             isXLocationEnabled: true,
                             isXHideAdsEnabled: true,
-                            isXFriendsSyncEnabled: true
+                            isXFriendsSyncEnabled: false,
+                            blockedCountries: ['Pakistan'],
+                            blockedDeviceRegions: [],
+                            blockedNameFlags: [],
+                            x_location_cache_v4: {
+                                blocked_pk_user: {
+                                    screenName: 'blocked_pk_user',
+                                    location: 'Pakistan',
+                                    device: 'Android'
+                                },
+                                allowed_us_user: {
+                                    screenName: 'allowed_us_user',
+                                    location: 'United States',
+                                    device: 'iPhone'
+                                }
+                            }
                         });
                     })
                 },
@@ -2323,34 +2513,34 @@ describe('xLocationUI.js', () => {
             }
         };
 
-        const primaryCol = document.createElement('div');
-        primaryCol.setAttribute('data-testid', 'primaryColumn');
-        const section = document.createElement('section');
-        section.setAttribute('role', 'region');
-        const timelineWrap = document.createElement('div');
-        timelineWrap.setAttribute('aria-label', 'Timeline: Your Home Timeline');
-        const spacer = document.createElement('div');
-        spacer.style.position = 'relative';
-        spacer.style.minHeight = '55475.3px';
+        // 1. Cell with an Ad that gets stealth-collapsed (collapsing both adArticle and cellBorderWrapper)
+        const adCell = document.createElement('div');
+        adCell.setAttribute('data-testid', 'cellInnerDiv');
+        const cellBorderWrapper = document.createElement('div');
+        cellBorderWrapper.className = 'css-g5y9jx r-qklmqi';
+        const adArticle = document.createElement('article');
+        adArticle.setAttribute('data-testid', 'tweet');
+        adArticle.innerHTML = `<div><div data-testid="User-Name"><a href="/SponsorBrand">@SponsorBrand</a></div><div><span>Ad</span><button data-testid="caret" type="button"></button></div></div>`;
+        cellBorderWrapper.appendChild(adArticle);
+        adCell.appendChild(cellBorderWrapper);
+        document.body.appendChild(adCell);
 
-        const offsets = [0, 484, 485.333, 1119.33, 2051.33, 2766.67, 3300.67];
-        offsets.forEach((y) => {
-            const cell = document.createElement('div');
-            cell.setAttribute('data-testid', 'cellInnerDiv');
-            cell.style.transform = `translateY(${y}px)`;
-            cell.style.position = 'absolute';
-            cell.style.width = '100%';
-            cell.getBoundingClientRect = () => ({ top: y, bottom: y + 600, left: 0, right: 600, width: 600, height: 600 });
-            const article = document.createElement('article');
-            article.setAttribute('data-testid', 'tweet');
-            cell.appendChild(article);
-            spacer.appendChild(cell);
-        });
-
-        timelineWrap.appendChild(spacer);
-        section.appendChild(timelineWrap);
-        primaryCol.appendChild(section);
-        document.body.appendChild(primaryCol);
+        // 2. Cell with a blocked user tweet (@blocked_pk_user) whose article and User-Name will be recycled in-place
+        const recycledCell = document.createElement('div');
+        recycledCell.setAttribute('data-testid', 'cellInnerDiv');
+        const recycledArticle = document.createElement('article');
+        recycledArticle.setAttribute('data-testid', 'tweet');
+        const statusLink = document.createElement('a');
+        statusLink.setAttribute('href', '/blocked_pk_user/status/1111111111');
+        const recycledHeader = document.createElement('div');
+        recycledHeader.setAttribute('data-testid', 'User-Name');
+        const handleSpan = document.createElement('span');
+        handleSpan.textContent = '@blocked_pk_user';
+        recycledHeader.appendChild(handleSpan);
+        recycledArticle.appendChild(statusLink);
+        recycledArticle.appendChild(recycledHeader);
+        recycledCell.appendChild(recycledArticle);
+        document.body.appendChild(recycledCell);
 
         const observerScriptPath = path.resolve(__dirname, '../../x_extension/content_scripts/xObserver.js');
         const observerScriptContent = fs.readFileSync(observerScriptPath, 'utf8');
@@ -2358,19 +2548,38 @@ describe('xLocationUI.js', () => {
 
         jest.advanceTimersByTime(100);
 
-        const clampedPx = parseFloat(spacer.style.minHeight);
-        expect(clampedPx).toBeLessThan(6000);
-        expect(clampedPx).toBeGreaterThanOrEqual(4500);
+        // Verify initial state: adCell's wrapper is collapsed to 0px, and recycledArticle is filtered
+        expect(cellBorderWrapper.style.height).toBe('0px');
+        expect(recycledArticle.style.display).toBe('none');
+        expect(recycledCell.querySelector('.x-tweet-filtered-placeholder')).not.toBeNull();
 
-        // Simulate user scrolling down to scrollY = 5000px: spacer minHeight expands immediately
-        const prevScrollY = window.scrollY;
-        window.scrollY = 5000;
-        window.dispatchEvent(new Event('scroll'));
+        // 3. Simulate React VirtualScroller replacing adArticle inside cellBorderWrapper with a brand-new normal tweet article
+        cellBorderWrapper.removeChild(adArticle);
+        const normalArticleInAdCell = document.createElement('article');
+        normalArticleInAdCell.setAttribute('data-testid', 'tweet');
+        normalArticleInAdCell.innerHTML = `<div data-testid="User-Name"><a href="/allowed_us_user">@allowed_us_user</a></div><a href="/allowed_us_user/status/2222222222"><time>1h</time></a>`;
+        cellBorderWrapper.appendChild(normalArticleInAdCell);
 
-        const expandedPx = parseFloat(spacer.style.minHeight);
-        expect(expandedPx).toBeGreaterThan(clampedPx);
+        // 4. Simulate React VirtualScroller recycling recycledArticle & recycledHeader in-place for @allowed_us_user
+        statusLink.setAttribute('href', '/allowed_us_user/status/3333333333');
+        handleSpan.textContent = '@allowed_us_user';
 
-        window.scrollY = prevScrollY;
+        // Flush MutationObserver microtasks before advancing scanTimeout
+        await Promise.resolve();
+        jest.advanceTimersByTime(100);
+
+        // cellBorderWrapper must be restored to normal height (not stuck at 0px!)
+        expect(cellBorderWrapper.style.height).toBe('');
+        expect(cellBorderWrapper.style.opacity).toBe('');
+
+        // recycledArticle must be unfiltered, placeholder removed, and badge updated to United States
+        expect(recycledArticle.style.display).toBe('');
+        expect(recycledArticle.classList.contains('x-tweet-blocked')).toBe(false);
+        expect(recycledCell.querySelector('.x-tweet-filtered-placeholder')).toBeNull();
+        const badgeFlag = recycledHeader.querySelector('.x-location-flag');
+        expect(badgeFlag).not.toBeNull();
+        expect(badgeFlag.title).toContain('United States');
+
         jest.useRealTimers();
     });
 });
