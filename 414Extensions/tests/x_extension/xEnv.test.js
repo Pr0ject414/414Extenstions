@@ -323,4 +323,139 @@ describe('xEnv.js', () => {
             '*'
         );
     });
+
+    test('preserves at least 12 entries on full-size timeline batches and throttles back-to-back pagination to prevent runaway VirtualScroller cascades', () => {
+        window.dispatchEvent(new MessageEvent('message', {
+            source: window,
+            data: {
+                type: 'X_SETTINGS_UPDATED',
+                payload: {
+                    alwaysMute: false,
+                    volumeLevel: 1.0,
+                    hideAds: true,
+                    locationEnabled: true,
+                    blockedCountries: ['India'],
+                    blockedDeviceRegions: [],
+                    blockedNameFlags: ['watermelon'],
+                    userCache: {
+                        cached_blocked_author: {
+                            screenName: 'cached_blocked_author',
+                            location: 'India',
+                            device: 'Android'
+                        }
+                    }
+                }
+            }
+        }));
+
+        const makeBlockedTweetEntry = (entryId, idx) => ({
+            entryId,
+            sortIndex: String(9000 - idx),
+            content: {
+                entryType: 'TimelineTimelineItem',
+                itemContent: {
+                    itemType: 'TimelineTweet',
+                    tweet_results: {
+                        result: {
+                            __typename: 'Tweet',
+                            rest_id: String(100 + idx),
+                            core: {
+                                user_results: {
+                                    result: {
+                                        core: {
+                                            screen_name: 'cached_blocked_author',
+                                            name: `Blocked User ${idx} 🍉`
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const entries = [];
+        for (let i = 0; i < 20; i++) {
+            entries.push(makeBlockedTweetEntry(`tweet-${100 + i}`, i));
+        }
+        entries.push({
+            entryId: 'cursor-bottom-200',
+            content: {
+                entryType: 'TimelineTimelineCursor',
+                value: 'CURSOR_200',
+                cursorType: 'Bottom'
+            }
+        });
+
+        const fullBatchPayload = {
+            data: {
+                home: {
+                    home_timeline_urt: {
+                        instructions: [
+                            {
+                                type: 'TimelineAddEntries',
+                                entries
+                            }
+                        ]
+                    }
+                }
+            }
+        };
+
+        const timelineUrl = 'https://x.com/i/api/graphql/abc123XYZ/HomeTimeline?variables=%7B%7D';
+        const firstText = XEnv.filterTimelineGraphQLResponseText(JSON.stringify(fullBatchPayload), timelineUrl);
+        const firstParsed = JSON.parse(firstText);
+        const firstRemaining = firstParsed.data.home.home_timeline_urt.instructions[0].entries;
+
+        // 20 non-cursor tweets -> minimum 12 tweets preserved + 1 cursor = 13 entries
+        expect(firstRemaining.length).toBe(13);
+
+        // Immediate second pagination response without user scrolling is not stripped (stops runaway fetch loop)
+        const secondText = XEnv.filterTimelineGraphQLResponseText(JSON.stringify(fullBatchPayload), timelineUrl);
+        const secondParsed = JSON.parse(secondText);
+        const secondRemaining = secondParsed.data.home.home_timeline_urt.instructions[0].entries;
+        expect(secondRemaining.length).toBe(21);
+    });
+
+    test('bails out in O(1) when clicking interactive tweet buttons without querying unrelated timeline videos', () => {
+        const videoTweet = document.createElement('article');
+        videoTweet.setAttribute('data-testid', 'tweet');
+        const unrelatedVideo = document.createElement('video');
+        const rectSpy = jest.spyOn(unrelatedVideo, 'getBoundingClientRect');
+        videoTweet.appendChild(unrelatedVideo);
+        document.body.appendChild(videoTweet);
+
+        const textTweet = document.createElement('article');
+        textTweet.setAttribute('data-testid', 'tweet');
+        const likeBtn = document.createElement('button');
+        likeBtn.setAttribute('data-testid', 'like');
+        const likeIcon = document.createElement('span');
+        likeBtn.appendChild(likeIcon);
+        textTweet.appendChild(likeBtn);
+        document.body.appendChild(textTweet);
+
+        likeIcon.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+        expect(rectSpy).not.toHaveBeenCalled();
+    });
+
+    test('prevents non-input elements inside aria-hidden subtrees from retaining focus', () => {
+        const hiddenOverlay = document.createElement('div');
+        hiddenOverlay.setAttribute('aria-hidden', 'true');
+        hiddenOverlay.setAttribute('tabindex', '-1');
+        document.body.appendChild(hiddenOverlay);
+
+        hiddenOverlay.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        expect(hiddenOverlay.hasAttribute('tabindex')).toBe(false);
+
+        const hiddenLink = document.createElement('a');
+        hiddenLink.setAttribute('href', '/home');
+        hiddenLink.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(hiddenLink);
+
+        const blurSpy = jest.spyOn(hiddenLink, 'blur');
+        hiddenLink.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        expect(blurSpy).toHaveBeenCalled();
+    });
 });

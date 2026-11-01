@@ -120,26 +120,70 @@
         // Listen for Save Volume from itself (already exists)
     });
 
+    const INTERACTIVE_CONTROL_SELECTOR = [
+        'button', 'a', 'input', 'textarea', 'select', 'label',
+        '[role="button"]', '[role="link"]', '[role="slider"]', '[role="menu"]',
+        '[role="menuitem"]', '[role="menuitemcheckbox"]', '[role="menuitemradio"]',
+        '[role="switch"]', '[role="checkbox"]', '[role="radio"]', '[role="progressbar"]', '[role="tab"]',
+        '[data-testid="like"]', '[data-testid="unlike"]', '[data-testid="retweet"]', '[data-testid="unretweet"]',
+        '[data-testid="reply"]', '[data-testid="bookmark"]', '[data-testid="removeBookmark"]', '[data-testid="caret"]',
+        '[aria-label="Mute"]', '[aria-label="Unmute"]', '[aria-label*="Volume"]',
+        '[data-testid="volumeSlider"]', '[data-testid="sound_slider"]',
+        '[data-testid="progressBar"]', '[data-testid="scrubber"]',
+        '[aria-label="Seek slider"]', '[aria-label="ProgressBar"]',
+        '[data-testid="playButton"]', '[data-testid="pauseButton"]'
+    ].join(',');
+
     function getVolumeSliderFromTarget(target) {
-        if (!target) return null;
+        if (!target || typeof target.closest !== 'function') return null;
         // 1. Check if target IS or IS INSIDE the slider
         let slider = target.closest('[aria-label*="Volume"], [data-testid="volumeSlider"], [data-testid="sound_slider"]');
         if (slider) return slider;
-        
-        // 2. Check if target CONTAINS the slider (is the track/parent)
-        // We look for a direct child slider, or just a slider inside. 
-        // Given X's structure, the track is the parent.
-        if (target.querySelector) {
+
+        // 2. Only check direct track child when target is inside a video player and has a small child count
+        if (
+            target.querySelector &&
+            target.childElementCount > 0 &&
+            target.childElementCount <= 4 &&
+            target.closest('[data-testid="videoPlayer"], [data-testid="videoComponent"]')
+        ) {
             slider = target.querySelector('[aria-label*="Volume"], [data-testid="volumeSlider"], [data-testid="sound_slider"]');
         }
         return slider;
     }
+
+    function preventAriaHiddenFocusRetention(target) {
+        if (!target || typeof target.closest !== 'function') return;
+        const ariaHiddenEl = target.closest('[aria-hidden="true"]');
+        if (!ariaHiddenEl) return;
+        if (target.getAttribute && target.getAttribute('tabindex') === '-1') {
+            target.removeAttribute('tabindex');
+        }
+        if (ariaHiddenEl.getAttribute && ariaHiddenEl.getAttribute('tabindex') === '-1') {
+            ariaHiddenEl.removeAttribute('tabindex');
+        }
+    }
+
+    // Prevent Chrome "Blocked aria-hidden on an element because its descendant retained focus"
+    // when X's presentation overlays or recycled virtual cells have aria-hidden="true" + tabindex="-1"
+    document.addEventListener('focusin', (e) => {
+        const t = e.target;
+        if (!t || typeof t.closest !== 'function' || typeof t.blur !== 'function') return;
+        const tag = t.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable) return;
+        if (t.closest('[aria-hidden="true"]')) {
+            try {
+                t.blur();
+            } catch (err) {}
+        }
+    }, true);
 
     // 1. CLICK LISTENER (User Intent & Volume Interaction)
     let isUserInteractingWithVolume = false;
     let volumeInteractionTimeout = null;
 
     document.addEventListener('mousedown', (e) => {
+        preventAriaHiddenFocusRetention(e.target);
         handleInteractionStart(e.target);
     }, true);
     
@@ -148,6 +192,7 @@
     }, { capture: true, passive: true });
 
     document.addEventListener('pointerdown', (e) => {
+        preventAriaHiddenFocusRetention(e.target);
         handleInteractionStart(e.target);
     }, { capture: true, passive: true });
 
@@ -199,6 +244,7 @@
         if (!isModuleEnabled || !alwaysMuteEnabled) return;
 
         const target = e.target;
+        if (!target || typeof target.closest !== 'function') return;
 
         // 1. Explicitly Detect Volume Slider Interaction (Fixes "Click to Set")
         // We catch this early to ensure the flag is set during the click handling phase
@@ -208,26 +254,8 @@
              return; // Let click propagate to X
         }
 
-        // 2. Ignore Other Controls (Exclusions)
-        // This includes Scrubbers, Buttons, etc.
-        const excludedRoles = ['slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
-        const roleSelector = excludedRoles.map(role => `[role="${role}"]`).join(',');
-        
-        if (
-            target.tagName === 'BUTTON' || 
-            target.tagName === 'INPUT' || 
-            target.closest(roleSelector) || 
-            target.closest('[aria-label="Mute"]') || 
-            target.closest('[aria-label="Unmute"]') || 
-            target.closest('[aria-label*="Volume"]') || 
-            target.closest('[data-testid="volumeSlider"]') ||
-            target.closest('[data-testid="progressBar"]') || 
-            target.closest('[data-testid="scrubber"]') || 
-            target.closest('[aria-label="Seek slider"]') || 
-            target.closest('[aria-label="ProgressBar"]') ||
-            target.closest('[data-testid="playButton"]') || 
-            target.closest('[data-testid="pauseButton"]')
-        ) return;
+        // 2. Ignore Other Controls (Buttons, Links, Like/Repost/Reply/Bookmark, Scrubbers, etc.) in a single fast check
+        if (target.closest(INTERACTIVE_CONTROL_SELECTOR)) return;
 
         const video = findRelatedVideo(target);
         if (video) {
@@ -264,7 +292,7 @@
         const video = findRelatedVideo(target);
         if (video) {
             lastRightClickedVideo = video;
-        } else {
+        } else if (target && typeof target.closest === 'function') {
             const container = target.closest('[data-testid="videoPlayer"], [data-testid="videoComponent"]');
             if (container) {
                 lastRightClickedVideo = container.querySelector('video');
@@ -281,8 +309,11 @@
     };
 
     document.addEventListener('pointerdown', (e) => {
+        const target = e.target;
+        if (!target || typeof target.closest !== 'function') return;
+        if (target.closest(INTERACTIVE_CONTROL_SELECTOR)) return;
         // Track the video state at the START of a potential click sequence
-        const video = findRelatedVideo(e.target);
+        const video = findRelatedVideo(target);
         if (video) {
             const now = Date.now();
             // New burst or different video?
@@ -300,20 +331,10 @@
         if (!isModuleEnabled) return;
 
         const target = e.target;
+        if (!target || typeof target.closest !== 'function') return;
         
         // Use same exclusion logic as click listener to avoid double clicking controls
-        const excludedRoles = ['slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
-        const roleSelector = excludedRoles.map(role => `[role="${role}"]`).join(',');
-        
-        if (
-            target.tagName === 'BUTTON' || 
-            target.tagName === 'INPUT' || 
-            target.closest(roleSelector) || 
-            target.closest('[data-testid="volumeSlider"]') || 
-            target.closest('[data-testid="progressBar"]') || 
-            target.closest('[data-testid="scrubber"]') || 
-            target.closest('[aria-label="Seek slider"]')
-        ) return;
+        if (target.closest(INTERACTIVE_CONTROL_SELECTOR)) return;
 
         const video = findRelatedVideo(target);
         if (video) {
@@ -389,7 +410,8 @@
         // But we still track explicit unmute buttons.
 
         const target = e.target;
-        if (target && target.tagName === 'VIDEO' && target.classList && target.classList.contains('x-friend-card-video')) {
+        if (!target || typeof target.closest !== 'function') return;
+        if (target.tagName === 'VIDEO' && target.classList && target.classList.contains('x-friend-card-video')) {
             allowedUnmuted.add(target);
             const rect = target.getBoundingClientRect();
             const isControlBarClick = rect.height > 0 && e.clientY > 0 && e.clientY > rect.bottom - 44;
@@ -409,16 +431,13 @@
             }
             return;
         }
-        const muteButton = target.closest('[aria-label="Mute"]');
         const unmuteButton = target.closest('[aria-label="Unmute"]');
         // Broadened Slider Selector for Click Unmuting
-        const volSlider = getVolumeSliderFromTarget(target);
+        const volSlider = unmuteButton ? null : getVolumeSliderFromTarget(target);
         
         // If clicking unmute or volume slider, user wants sound.
         if (unmuteButton || volSlider) {
-             const video = findRelatedVideo(unmuteButton || (volSlider ? target : null)); 
-             // Note: findRelatedVideo walks up. If volSlider was found via querySelector (down), 
-             // target might be the parent. findRelatedVideo(target) is correct.
+             const video = findRelatedVideo(unmuteButton || target);
              
              if (video) {
                  // console.log("X Env: User allowed video.", video);
@@ -440,11 +459,26 @@
     }, true);
 
     function findRelatedVideo(controlElement) {
+        if (!controlElement || typeof controlElement !== 'object') return null;
+        if (controlElement.tagName === 'VIDEO') return controlElement;
+        if (typeof controlElement.closest === 'function') {
+            const playerContainer = controlElement.closest('[data-testid="videoPlayer"], [data-testid="videoComponent"]');
+            if (playerContainer && typeof playerContainer.querySelector === 'function') {
+                return playerContainer.querySelector('video');
+            }
+        }
         let current = controlElement;
-        for (let i = 0; i < 15; i++) {
-            if (!current) break;
-            const video = current.querySelector('video');
-            if (video) return video;
+        for (let i = 0; i < 6; i++) {
+            if (!current || current.nodeType !== 1) break;
+            const tag = current.tagName;
+            if (tag === 'SECTION' || tag === 'MAIN' || tag === 'BODY' || tag === 'HTML') break;
+            const testId = current.getAttribute ? current.getAttribute('data-testid') : '';
+            if (testId === 'cellInnerDiv' || testId === 'primaryColumn') break;
+            if (typeof current.querySelector === 'function') {
+                const video = current.querySelector('video');
+                if (video) return video;
+            }
+            if (tag === 'ARTICLE') break;
             current = current.parentElement;
         }
         return null;
@@ -800,6 +834,10 @@
                 color: inherit !important;
                 pointer-events: none !important;
             }
+            article[inert] .vsc-download-btn,
+            article[style*="pointer-events: none"] .vsc-download-btn {
+                pointer-events: none !important;
+            }
         `;
         (document.head || document.documentElement).appendChild(style);
     }
@@ -841,6 +879,9 @@
             }
 
             const article = player.closest ? player.closest('article') : null;
+            if (article && (article._xAdCollapsed || article.hasAttribute?.('inert'))) {
+                return;
+            }
             const actionBar = findArticleActionBar(article);
 
             if (actionBar) {
@@ -1378,7 +1419,12 @@
                             nonCursorCount++;
                         }
                     }
-                    const minSurvivingNonCursor = nonCursorCount >= 6 ? 2 : 1;
+                    // For real X timeline batches (20-35 entries), keep at least 60% (>=12 entries)
+                    // so the batch height always satisfies X's VirtualScroller overscan threshold
+                    // and prevents back-to-back runaway pagination loops.
+                    const minSurvivingNonCursor = nonCursorCount > 6
+                        ? Math.max(12, Math.ceil(nonCursorCount * 0.6))
+                        : (nonCursorCount >= 6 ? 2 : 1);
                     let remainingNonCursor = nonCursorCount;
                     const nextEntries = [];
 
@@ -1439,7 +1485,7 @@
             if (uncachedNames.length > 0 && typeof window !== 'undefined' && typeof window.postMessage === 'function') {
                 window.postMessage({
                     type: 'X_PREFETCH_USERS',
-                    payload: { screenNames: uncachedNames.slice(0, 25) }
+                    payload: { screenNames: uncachedNames.slice(0, 6) }
                 }, '*');
             }
         }
@@ -1447,8 +1493,42 @@
         return { data, modified };
     }
 
+    let lastTimelineNetworkFilterAt = 0;
+    let lastTimelineNetworkFilterScrollY = 0;
+    const TIMELINE_NETWORK_FILTER_COOLDOWN_MS = 3500;
+    const TIMELINE_NETWORK_FILTER_SCROLL_DELTA_PX = 600;
+
+    function shouldThrottleNetworkTimelineFilter() {
+        if (!isModuleEnabled) return true;
+        const hasLocationRules = Boolean(
+            locationFilterEnabled && (
+                (Array.isArray(blockedCountries) && blockedCountries.length > 0) ||
+                (Array.isArray(blockedDeviceRegions) && blockedDeviceRegions.length > 0) ||
+                (Array.isArray(blockedNameFlags) && blockedNameFlags.length > 0)
+            )
+        );
+        if (!hideAdsEnabled && !hasLocationRules) return true;
+
+        const now = Date.now();
+        const curScrollY = (typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0;
+        if (
+            lastTimelineNetworkFilterAt > 0 &&
+            (now - lastTimelineNetworkFilterAt) < TIMELINE_NETWORK_FILTER_COOLDOWN_MS &&
+            Math.abs(curScrollY - lastTimelineNetworkFilterScrollY) < TIMELINE_NETWORK_FILTER_SCROLL_DELTA_PX
+        ) {
+            // X's VirtualScroller fired an automatic follow-up pagination request without user scroll.
+            // Do not strip entries on chained requests so the overscan buffer fills immediately.
+            return true;
+        }
+        lastTimelineNetworkFilterAt = now;
+        lastTimelineNetworkFilterScrollY = curScrollY;
+        return false;
+    }
+
     function filterTimelineGraphQLResponseText(rawText, url = '') {
-        if (!rawText || typeof rawText !== 'string' || !isModuleEnabled) return rawText;
+        if (!rawText || typeof rawText !== 'string' || shouldThrottleNetworkTimelineFilter()) {
+            return rawText;
+        }
         try {
             const parsed = JSON.parse(rawText);
             const { data, modified } = filterTimelineGraphQLPayload(parsed, url);
@@ -1620,9 +1700,13 @@
                         : null;
                     if (this.readyState === 4 && rType === 'json' && rawResp && typeof rawResp === 'object') {
                         if (!this._xFilteredJsonObj) {
-                            const cloned = JSON.parse(JSON.stringify(rawResp));
-                            filterTimelineGraphQLPayload(cloned, this._xUrl);
-                            this._xFilteredJsonObj = cloned;
+                            if (shouldThrottleNetworkTimelineFilter()) {
+                                this._xFilteredJsonObj = rawResp;
+                            } else {
+                                const cloned = JSON.parse(JSON.stringify(rawResp));
+                                filterTimelineGraphQLPayload(cloned, this._xUrl);
+                                this._xFilteredJsonObj = cloned;
+                            }
                         }
                         return this._xFilteredJsonObj;
                     }

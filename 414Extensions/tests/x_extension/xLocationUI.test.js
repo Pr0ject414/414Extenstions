@@ -2550,7 +2550,9 @@ describe('xLocationUI.js', () => {
 
         // Verify initial state: adCell's wrapper is collapsed to 0px, and recycledArticle is filtered
         expect(cellBorderWrapper.style.height).toBe('0px');
+        expect(adArticle.hasAttribute('inert')).toBe(true);
         expect(recycledArticle.style.display).toBe('none');
+        expect(recycledArticle.hasAttribute('inert')).toBe(true);
         expect(recycledCell.querySelector('.x-tweet-filtered-placeholder')).not.toBeNull();
 
         // 3. Simulate React VirtualScroller replacing adArticle inside cellBorderWrapper with a brand-new normal tweet article
@@ -2568,12 +2570,14 @@ describe('xLocationUI.js', () => {
         await Promise.resolve();
         jest.advanceTimersByTime(100);
 
-        // cellBorderWrapper must be restored to normal height (not stuck at 0px!)
+        // cellBorderWrapper must be restored to normal height (not stuck at 0px!) and inert cleared
         expect(cellBorderWrapper.style.height).toBe('');
         expect(cellBorderWrapper.style.opacity).toBe('');
+        expect(cellBorderWrapper.hasAttribute('inert')).toBe(false);
 
-        // recycledArticle must be unfiltered, placeholder removed, and badge updated to United States
+        // recycledArticle must be unfiltered, inert cleared, placeholder removed, and badge updated to United States
         expect(recycledArticle.style.display).toBe('');
+        expect(recycledArticle.hasAttribute('inert')).toBe(false);
         expect(recycledArticle.classList.contains('x-tweet-blocked')).toBe(false);
         expect(recycledCell.querySelector('.x-tweet-filtered-placeholder')).toBeNull();
         const badgeFlag = recycledHeader.querySelector('.x-location-flag');

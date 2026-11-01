@@ -352,11 +352,20 @@
 
     function recordTweetSeen(tweetId, article = null) {
         if (!tweetId || !isFriendsSyncActive || !isContextValid()) return;
+        if (locallyMarkedSeen.has(tweetId)) {
+            if (article && article.classList && article.classList.contains('x-friend-tweet-card') && !article.classList.contains('is-seen-by-me')) {
+                if (window.XLocationUI && typeof window.XLocationUI.markCardSeenInDOM === 'function') {
+                    window.XLocationUI.markCardSeenInDOM(tweetId);
+                }
+            }
+            return;
+        }
+
         const liveArticle = (article && article.isConnected)
             ? article
             : (document.querySelector(`article[data-tweet-id="${tweetId}"], article[data-x-tweet-id="${tweetId}"]`) || article);
 
-        if (liveArticle && Object.keys(pendingSeenMetaMap).length < MAX_PENDING_SEEN_META) {
+        if (liveArticle && !pendingSeenMetaMap[tweetId] && Object.keys(pendingSeenMetaMap).length < MAX_PENDING_SEEN_META) {
             const meta = (liveArticle._xPostItem && liveArticle._xPostItem.meta && liveArticle._xPostItem.meta.screenName)
                 ? liveArticle._xPostItem.meta
                 : extractTweetMetadataFromArticle(liveArticle, tweetId);
@@ -384,8 +393,6 @@
                 }
             }
         }
-
-        if (locallyMarkedSeen.has(tweetId)) return;
 
         addLocallyMarkedSeen(tweetId);
         pendingSeenQueue.add(tweetId);
@@ -707,9 +714,9 @@
         } catch (err) {}
     }
 
-    const MAX_COLLAPSES_PER_SCROLL_WINDOW = 2;
-    const SCROLL_WINDOW_RESET_PX = 450;
-    const COLLAPSE_MAX_VIEWPORT_TOP_RATIO = 0.75;
+    const MAX_COLLAPSES_PER_SCROLL_WINDOW = 6;
+    const SCROLL_WINDOW_RESET_PX = 250;
+    const COLLAPSE_MAX_VIEWPORT_TOP_RATIO = 1.1;
     let lastCollapseWindowScrollY = 0;
     let collapsesInScrollWindow = 0;
     let isUserActivelyScrolling = false;
@@ -748,10 +755,8 @@
             (typeof document !== 'undefined' && document.documentElement && document.documentElement.clientHeight) ||
             800;
 
-        // 1. Never collapse elements scrolled above the viewport (prevents upward scroll jumps),
-        // elements in the bottom 25% of the viewport, or elements anywhere in X's bottom overscan buffer.
-        // Keeping the bottom 25% of the viewport + the entire bottom overscan buffer uncollapsed
-        // prevents X's ResizeObserver from pulling offscreen overscan cells into view and cascading.
+        // 1. Never collapse elements scrolled above the viewport (prevents upward scroll jumps)
+        // or elements deep in X's bottom overscan buffer (prevents shrinking offscreen overscan cells).
         if (rect.bottom <= 0 || rect.top < -40 || rect.top >= viewportHeight * COLLAPSE_MAX_VIEWPORT_TOP_RATIO) {
             return false;
         }
@@ -765,16 +770,23 @@
             }
             const prev = cell.previousElementSibling;
             if (prev && prev.getAttribute && prev.getAttribute('data-testid') === 'cellInnerDiv') {
-                const cellY = parseCellTranslateY(cell);
-                const prevY = parseCellTranslateY(prev);
-                if (cellY !== null && prevY !== null) {
-                    if (cellY <= prevY + 1) {
-                        return false;
-                    }
-                } else if (typeof prev.getBoundingClientRect === 'function') {
-                    const pRect = prev.getBoundingClientRect();
-                    if (pRect && pRect.height > 0 && rect.top <= pRect.top + 1) {
-                        return false;
+                const prevCollapsedZero = Boolean(
+                    prev.firstElementChild &&
+                    prev.firstElementChild.style &&
+                    prev.firstElementChild.style.height === '0px'
+                );
+                if (!prevCollapsedZero) {
+                    const cellY = parseCellTranslateY(cell);
+                    const prevY = parseCellTranslateY(prev);
+                    if (cellY !== null && prevY !== null) {
+                        if (cellY <= prevY + 1) {
+                            return false;
+                        }
+                    } else if (typeof prev.getBoundingClientRect === 'function') {
+                        const pRect = prev.getBoundingClientRect();
+                        if (pRect && pRect.height > 0 && rect.top <= pRect.top + 1) {
+                            return false;
+                        }
                     }
                 }
             }
@@ -1007,6 +1019,7 @@
         const currentHref = statusLink ? (statusLink.getAttribute('href') || '') : '';
         if (currentHref && article._xLastAdCheckHref !== undefined && article._xLastAdCheckHref !== currentHref) {
             delete article._xIsAdChecked;
+            delete article._xWrapperRestoreChecked;
             delete article._xSeenCheckGen;
             delete article._xPrimaryLocationData;
             delete article._xHeaderElem;
@@ -1029,6 +1042,12 @@
                     article.style.removeProperty('overflow');
                     article.style.removeProperty('opacity');
                     article.style.removeProperty('pointer-events');
+                    try {
+                        article.inert = false;
+                        if (typeof article.removeAttribute === 'function') {
+                            article.removeAttribute('inert');
+                        }
+                    } catch (e) {}
                     article._xAdCollapsed = false;
                 }
             }
@@ -1041,6 +1060,12 @@
                 } else {
                     article.style.display = '';
                     article.classList?.remove('x-tweet-blocked');
+                    try {
+                        article.inert = false;
+                        if (typeof article.removeAttribute === 'function') {
+                            article.removeAttribute('inert');
+                        }
+                    } catch (e) {}
                 }
             }
         }
@@ -1127,6 +1152,12 @@
                 article.style.setProperty('overflow', 'hidden', 'important');
                 article.style.setProperty('opacity', '0', 'important');
                 article.style.setProperty('pointer-events', 'none', 'important');
+                try {
+                    article.inert = true;
+                    if (typeof article.setAttribute === 'function') {
+                        article.setAttribute('inert', '');
+                    }
+                } catch (e) {}
                 article._xAdCollapsed = true;
             }
             return true;
@@ -1141,6 +1172,12 @@
             article.style.removeProperty('overflow');
             article.style.removeProperty('opacity');
             article.style.removeProperty('pointer-events');
+            try {
+                article.inert = false;
+                if (typeof article.removeAttribute === 'function') {
+                    article.removeAttribute('inert');
+                }
+            } catch (e) {}
             article._xAdCollapsed = false;
         }
         return isAd;
@@ -1176,9 +1213,11 @@
 
         articles.forEach(article => {
             if (article._xAdCollapsed || checkIsAdTweet(article)) return;
-            const tweetId = extractTweetIdFromArticle(article);
+            const tweetId = article.dataset?.xTweetId || extractTweetIdFromArticle(article);
             if (!tweetId) return;
-            article.dataset.xTweetId = tweetId;
+            if (article.dataset && article.dataset.xTweetId !== tweetId) {
+                article.dataset.xTweetId = tweetId;
+            }
 
             if (tweetIntersectionObserver && !observedTweets.has(article)) {
                 observedTweets.add(article);
@@ -1744,8 +1783,10 @@
         window.addEventListener('message', (event) => {
             if (event.source !== window || !event.data) return;
             if (event.data.type === 'X_PREFETCH_USERS' && event.data.payload && Array.isArray(event.data.payload.screenNames)) {
-                const names = event.data.payload.screenNames.slice(0, 25);
+                if (isUserActivelyScrolling || inflightScreenNames.size >= 4) return;
+                const names = event.data.payload.screenNames.slice(0, 4);
                 for (let i = 0; i < names.length; i++) {
+                    if (inflightScreenNames.size >= 4) break;
                     prefetchUserLocationIfUncached(names[i]);
                 }
             }
@@ -2036,17 +2077,19 @@
 
     // Start MutationObserver (ignore removal-only mutations and counter text updates to prevent re-scan loops)
     observer = new MutationObserver((mutations) => {
+        if (typeof document === 'undefined' || !document) return;
         if (!Array.isArray(mutations) || mutations.length === 0) {
             scanDOM();
             return;
         }
         let hasRelevantMutation = false;
+        const canCheckForcedFeedRemoval = isFriendsSyncActive && hasLoadedTimelineOnce && typeof document.getElementById === 'function' && !document.getElementById('x-forced-home-feed');
         for (let i = 0; i < mutations.length; i++) {
             const m = mutations[i];
-            if (m.removedNodes && m.removedNodes.length > 0) {
+            if (canCheckForcedFeedRemoval && m.removedNodes && m.removedNodes.length > 0) {
                 for (let j = 0; j < m.removedNodes.length; j++) {
                     const rn = m.removedNodes[j];
-                    if (!rn || rn._xIntentionallyRemoved) continue;
+                    if (!rn || rn.nodeType !== 1 || rn._xIntentionallyRemoved) continue;
                     const forcedFeedDescendant = (rn.id === 'x-forced-home-feed')
                         ? rn
                         : (rn.querySelector ? rn.querySelector('#x-forced-home-feed') : null);
@@ -2068,7 +2111,18 @@
             }
             let hasNonExtensionAddedNode = false;
             for (let k = 0; k < m.addedNodes.length; k++) {
-                if (!isIgnoredExtensionNode(m.addedNodes[k])) {
+                const addedNode = m.addedNodes[k];
+                if (!addedNode) continue;
+                if (addedNode.nodeType === 1) {
+                    if (!isIgnoredExtensionNode(addedNode)) {
+                        hasNonExtensionAddedNode = true;
+                        break;
+                    }
+                } else if (
+                    target &&
+                    target.closest &&
+                    target.closest('[data-testid="User-Name"], [data-testid="UserName"], [data-testid="UserCell"]')
+                ) {
                     hasNonExtensionAddedNode = true;
                     break;
                 }

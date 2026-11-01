@@ -985,10 +985,16 @@ document.addEventListener('mousedown', (e) => {
         return;
     }
 
+    if (attachedVideos.size === 0) {
+        activeClickedVideo = null;
+        return;
+    }
+
     const videos = Array.from(attachedVideos);
     const targetVideo = videos.find(video => {
         if (!video || !video.isConnected) return false;
         if (e.target === video) return true;
+        if (video.closest && video.closest('[inert], .x-tweet-blocked')) return false;
         const rect = video.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return false;
         return (
@@ -999,8 +1005,8 @@ document.addEventListener('mousedown', (e) => {
 
     activeClickedVideo = targetVideo || null;
 
-    // 1. Basic Filters for Hold-to-Override: Ignore non-left clicks, interactive controls, or links
-    if (e.button !== 0) return;
+    // 1. Basic Filters for Hold-to-Override: Ignore non-left clicks, non-video clicks, interactive controls, or links
+    if (e.button !== 0 || !targetVideo) return;
 
     const excludedRoles = ['button', 'slider', 'menu', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'switch', 'checkbox', 'radio', 'progressbar'];
     const roleSelector = excludedRoles.map(role => `[role="${role}"]`).join(',');
@@ -1027,21 +1033,20 @@ document.addEventListener('mousedown', (e) => {
         }
     }
 
-    if (targetVideo) {
-        // Delay activation to distinguish click vs hold
-        const delayMs = 500;
+    // Delay activation to distinguish click vs hold
+    const delayMs = 500;
 
-        const timerId = setTimeout(() => {
-            overrideTriggeredByMouse = true;
-            shouldSuppressClick = true; // Prepare to kill the click
-            triggerOverride(targetVideo, true);
-        }, delayMs);
+    const timerId = setTimeout(() => {
+        overrideTriggeredByMouse = true;
+        shouldSuppressClick = true; // Prepare to kill the click
+        triggerOverride(targetVideo, true);
+    }, delayMs);
 
-        const onRelease = (e) => {
-             // Blur Event
-             if (e && e.type === 'blur' && e.target !== window) {
-                 return;
-             }
+    const onRelease = (e) => {
+         // Blur Event
+         if (e && e.type === 'blur' && e.target !== window) {
+             return;
+         }
 
              // Ignore mouseleave events from child elements of the document
              if (e && e.type === 'mouseleave' && e.target !== document && e.target !== document.documentElement) {
@@ -1078,19 +1083,18 @@ document.addEventListener('mousedown', (e) => {
              document.removeEventListener('mousemove', onMouseMoveCheck, true);
         };
 
-        // Dead Man's Switch: If mouse moves and buttons are 0, we missed the release.
-        const onMouseMoveCheck = (e) => {
-            if (e.buttons === 0) {
-                onRelease(e);
-            }
-        };
+    // Dead Man's Switch: If mouse moves and buttons are 0, we missed the release.
+    const onMouseMoveCheck = (e) => {
+        if (e.buttons === 0) {
+            onRelease(e);
+        }
+    };
 
-        document.addEventListener('mouseup', onRelease, true);
-        document.addEventListener('dragend', onRelease, true);
-        document.addEventListener('mouseleave', onRelease, true); // Fail-safe: mouse leaves window
-        window.addEventListener('blur', onRelease, true); // Fail-safe: alt-tab
-        document.addEventListener('mousemove', onMouseMoveCheck, true); // Dead Man's Switch for drags
-    }
+    document.addEventListener('mouseup', onRelease, true);
+    document.addEventListener('dragend', onRelease, true);
+    document.addEventListener('mouseleave', onRelease, true); // Fail-safe: mouse leaves window
+    window.addEventListener('blur', onRelease, true); // Fail-safe: alt-tab
+    document.addEventListener('mousemove', onMouseMoveCheck, true); // Dead Man's Switch for drags
 }, true); // Capture
 
 document.addEventListener('click', (e) => {

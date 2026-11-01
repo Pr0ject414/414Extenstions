@@ -13,20 +13,24 @@
     const BLOCKED_NAME_FLAGS_KEY = 'blockedNameFlags';
     const LOCATION_CACHE_KEY = 'x_location_cache_v4';
 
-    function postSettings() {
-        chrome.storage.local.get([
-            GLOBAL_MASTER_SWITCH_ENABLED_KEY, 
-            X_MODULE_ENABLED_KEY, 
-            X_ALWAYS_MUTE_KEY,
-            X_MODULE_VISIBLE_KEY,
-            X_VOLUME_LEVEL_KEY,
-            X_HIDE_ADS_ENABLED_KEY,
-            X_LOCATION_ENABLED_KEY,
-            BLOCKED_COUNTRIES_KEY,
-            BLOCKED_DEVICE_REGIONS_KEY,
-            BLOCKED_NAME_FLAGS_KEY,
-            LOCATION_CACHE_KEY
-        ], (result) => {
+    const SETTING_KEYS = [
+        GLOBAL_MASTER_SWITCH_ENABLED_KEY,
+        X_MODULE_ENABLED_KEY,
+        X_ALWAYS_MUTE_KEY,
+        X_MODULE_VISIBLE_KEY,
+        X_VOLUME_LEVEL_KEY,
+        X_HIDE_ADS_ENABLED_KEY,
+        X_LOCATION_ENABLED_KEY,
+        BLOCKED_COUNTRIES_KEY,
+        BLOCKED_DEVICE_REGIONS_KEY,
+        BLOCKED_NAME_FLAGS_KEY
+    ];
+
+    function postSettings(includeCache = false) {
+        const keysToRead = includeCache
+            ? [...SETTING_KEYS, LOCATION_CACHE_KEY]
+            : SETTING_KEYS;
+        chrome.storage.local.get(keysToRead, (result) => {
             if (!result) return;
             const isGlobalOn = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] !== false;
             const isXEnabled = result[X_MODULE_ENABLED_KEY] !== false;
@@ -39,34 +43,38 @@
             const blockedCountries = Array.isArray(result[BLOCKED_COUNTRIES_KEY]) ? result[BLOCKED_COUNTRIES_KEY] : [];
             const blockedDeviceRegions = Array.isArray(result[BLOCKED_DEVICE_REGIONS_KEY]) ? result[BLOCKED_DEVICE_REGIONS_KEY] : [];
             const blockedNameFlags = Array.isArray(result[BLOCKED_NAME_FLAGS_KEY]) ? result[BLOCKED_NAME_FLAGS_KEY] : [];
-            const userCache = (result[LOCATION_CACHE_KEY] && typeof result[LOCATION_CACHE_KEY] === 'object')
+            const userCache = (includeCache && result[LOCATION_CACHE_KEY] && typeof result[LOCATION_CACHE_KEY] === 'object')
                 ? result[LOCATION_CACHE_KEY]
                 : null;
 
             // Effectively enabled if Global is ON logic + X Specific ON logic + X Visible
             const effectiveEnabled = isGlobalOn && isXEnabled && isXVisible;
 
+            const payload = {
+                isEnabled: effectiveEnabled,
+                alwaysMute: isAlwaysMute,
+                volumeLevel: volumeLevel,
+                hideAds: isHideAds,
+                locationEnabled: isLocationEnabled,
+                blockedCountries,
+                blockedDeviceRegions,
+                blockedNameFlags
+            };
+            if (userCache) {
+                payload.userCache = userCache;
+            }
+
             window.postMessage({
                 type: 'X_SETTINGS_UPDATE',
-                payload: {
-                    isEnabled: effectiveEnabled,
-                    alwaysMute: isAlwaysMute,
-                    volumeLevel: volumeLevel,
-                    hideAds: isHideAds,
-                    locationEnabled: isLocationEnabled,
-                    blockedCountries,
-                    blockedDeviceRegions,
-                    blockedNameFlags,
-                    userCache
-                }
+                payload
             }, '*');
         });
     }
 
-    // Initial Load
-    postSettings();
+    // Initial Load (hydrate initial location cache once)
+    postSettings(true);
 
-    // Listen for changes
+    // Listen for setting changes (incremental location cache updates are broadcast directly by xObserver.js)
     chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'local') {
             if (changes[GLOBAL_MASTER_SWITCH_ENABLED_KEY] || 
@@ -78,9 +86,8 @@
                 changes[X_LOCATION_ENABLED_KEY] ||
                 changes[BLOCKED_COUNTRIES_KEY] ||
                 changes[BLOCKED_DEVICE_REGIONS_KEY] ||
-                changes[BLOCKED_NAME_FLAGS_KEY] ||
-                changes[LOCATION_CACHE_KEY]) {
-                postSettings();
+                changes[BLOCKED_NAME_FLAGS_KEY]) {
+                postSettings(false);
             }
         }
     });

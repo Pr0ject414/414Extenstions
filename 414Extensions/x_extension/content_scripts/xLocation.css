@@ -233,6 +233,13 @@
     pointer-events: none !important;
 }
 
+article[inert] .vsc-download-btn,
+article[style*="pointer-events: none"] .vsc-download-btn,
+[data-testid="cellInnerDiv"][style*="opacity: 0"],
+[data-testid="cellInnerDiv"][style*="opacity:0"] {
+    pointer-events: none !important;
+}
+
 /* Filtered Tweet Replacement Notice (Blocked Tweet Style) */
 .x-tweet-filtered-placeholder {
     display: flex;

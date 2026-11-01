@@ -2813,8 +2813,18 @@
             } catch (err) {}
         });
 
+        if (typeof document !== 'undefined' && document.activeElement && tweet.contains && tweet.contains(document.activeElement)) {
+            try {
+                if (typeof document.activeElement.blur === 'function') {
+                    document.activeElement.blur();
+                }
+            } catch (e) {}
+        }
+
         tweet.style.display = 'none';
         tweet.classList.add('x-tweet-blocked');
+        tweet.inert = true;
+        if (tweet.setAttribute) tweet.setAttribute('inert', '');
 
         if (tweet.parentNode) {
             tweet.parentNode.insertBefore(placeholder, tweet);
@@ -2840,6 +2850,8 @@
         tweet._xFilteredPlaceholder = null;
         tweet.style.display = '';
         tweet.classList.remove('x-tweet-blocked');
+        tweet.inert = false;
+        if (tweet.removeAttribute) tweet.removeAttribute('inert');
     }
 
     const COLLAPSED_AD_PROPS = [
@@ -2913,6 +2925,8 @@
         for (const [prop, val] of COLLAPSED_AD_PROPS) {
             elem.style.setProperty(prop, val, 'important');
         }
+        elem.inert = true;
+        if (elem.setAttribute) elem.setAttribute('inert', '');
     }
 
     function restoreStealthCollapseStyles(elem) {
@@ -2929,6 +2943,8 @@
                 elem.style.removeProperty(prop);
             }
         }
+        elem.inert = false;
+        if (elem.removeAttribute) elem.removeAttribute('inert');
     }
 
     function getCellWrapperForArticle(article) {
@@ -2946,6 +2962,13 @@
         if (!article) return false;
         if (article._xAdCollapsed && article.style && article.style.height === '0px') {
             return true;
+        }
+        if (typeof document !== 'undefined' && document.activeElement && article.contains && article.contains(document.activeElement)) {
+            try {
+                if (typeof document.activeElement.blur === 'function') {
+                    document.activeElement.blur();
+                }
+            } catch (e) {}
         }
         const mediaNodes = article.querySelectorAll ? article.querySelectorAll('video, audio') : [];
         mediaNodes.forEach(media => {
@@ -2966,6 +2989,12 @@
 
     function restoreAdTweet(article) {
         if (!article) return false;
+        if (!article._xAdCollapsed && !article._xAdCellWrapper && article._xSavedInlineStyle === undefined) {
+            if (article._xWrapperRestoreChecked) {
+                return false;
+            }
+            article._xWrapperRestoreChecked = true;
+        }
         const cellWrapper = article._xAdCellWrapper || getCellWrapperForArticle(article);
         const hasCollapsedWrapper = Boolean(cellWrapper && cellWrapper._xSavedInlineStyle !== undefined);
         if (!article._xAdCollapsed && !article._xAdCellWrapper && !hasCollapsedWrapper && article._xSavedInlineStyle === undefined) {
