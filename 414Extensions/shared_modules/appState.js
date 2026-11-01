@@ -11,6 +11,7 @@ export let fabModuleEnabled = true;
 export let youTubeModuleEnabled = true;
 export let xModuleEnabled = true;
 export let crunchyrollModuleEnabled = true;
+export let miscModuleEnabled = true;
 export let volumeModuleEnabled = true;
 export let vscModuleEnabled = true;
 
@@ -19,6 +20,7 @@ export let fabModuleVisible = true;
 export let youTubeModuleVisible = true;
 export let xModuleVisible = true;
 export let crunchyrollModuleVisible = true;
+export let miscModuleVisible = true;
 export let volumeModuleVisible = true;
 export let vscModuleVisible = true;
 
@@ -35,12 +37,14 @@ const APP_STATE_DEFAULTS = {
     [CoreConstants.YOUTUBE_MODULE_ENABLED_KEY]: true,
     [CoreConstants.X_MODULE_ENABLED_KEY]: true,
     [CoreConstants.CRUNCHYROLL_MODULE_ENABLED_KEY]: true,
+    [CoreConstants.MISC_MODULE_ENABLED_KEY]: true,
     [CoreConstants.VOLUME_MODULE_ENABLED_KEY]: true,
     [CoreConstants.VSC_MODULE_ENABLED_KEY]: true,
     [CoreConstants.FAB_MODULE_VISIBLE_KEY]: true,
     [CoreConstants.YOUTUBE_MODULE_VISIBLE_KEY]: true,
     [CoreConstants.X_MODULE_VISIBLE_KEY]: true,
     [CoreConstants.CRUNCHYROLL_MODULE_VISIBLE_KEY]: true,
+    [CoreConstants.MISC_MODULE_VISIBLE_KEY]: true,
     [CoreConstants.VOLUME_MODULE_VISIBLE_KEY]: true,
     [CoreConstants.VSC_MODULE_VISIBLE_KEY]: true,
     [CoreConstants.GLOBAL_MAX_RETRIES_KEY]: 5,
@@ -87,6 +91,10 @@ export function setCrunchyrollModuleEnabled(value) {
     crunchyrollModuleEnabled = !!value;
 }
 
+export function setMiscModuleEnabled(value) {
+    miscModuleEnabled = !!value;
+}
+
 export function setVolumeModuleEnabled(value) {
     volumeModuleEnabled = !!value;
 }
@@ -109,6 +117,10 @@ export function setXModuleVisible(value) {
 
 export function setCrunchyrollModuleVisible(value) {
     crunchyrollModuleVisible = !!value;
+}
+
+export function setMiscModuleVisible(value) {
+    miscModuleVisible = !!value;
 }
 
 export function setVolumeModuleVisible(value) {
@@ -141,12 +153,14 @@ export async function saveGlobalState() {
             [CoreConstants.YOUTUBE_MODULE_ENABLED_KEY]: youTubeModuleEnabled,
             [CoreConstants.X_MODULE_ENABLED_KEY]: xModuleEnabled,
             [CoreConstants.CRUNCHYROLL_MODULE_ENABLED_KEY]: crunchyrollModuleEnabled,
+            [CoreConstants.MISC_MODULE_ENABLED_KEY]: miscModuleEnabled,
             [CoreConstants.VOLUME_MODULE_ENABLED_KEY]: volumeModuleEnabled,
             [CoreConstants.VSC_MODULE_ENABLED_KEY]: vscModuleEnabled,
             [CoreConstants.FAB_MODULE_VISIBLE_KEY]: fabModuleVisible,
             [CoreConstants.YOUTUBE_MODULE_VISIBLE_KEY]: youTubeModuleVisible,
             [CoreConstants.X_MODULE_VISIBLE_KEY]: xModuleVisible,
             [CoreConstants.CRUNCHYROLL_MODULE_VISIBLE_KEY]: crunchyrollModuleVisible,
+            [CoreConstants.MISC_MODULE_VISIBLE_KEY]: miscModuleVisible,
             [CoreConstants.VOLUME_MODULE_VISIBLE_KEY]: volumeModuleVisible,
             [CoreConstants.VSC_MODULE_VISIBLE_KEY]: vscModuleVisible,
             [CoreConstants.GLOBAL_MAX_RETRIES_KEY]: globalMaxRetries,
@@ -170,12 +184,14 @@ export async function loadGlobalState() {
         youTubeModuleEnabled = loadedState[CoreConstants.YOUTUBE_MODULE_ENABLED_KEY];
         xModuleEnabled = loadedState[CoreConstants.X_MODULE_ENABLED_KEY];
         crunchyrollModuleEnabled = loadedState[CoreConstants.CRUNCHYROLL_MODULE_ENABLED_KEY];
+        miscModuleEnabled = loadedState[CoreConstants.MISC_MODULE_ENABLED_KEY];
         volumeModuleEnabled = loadedState[CoreConstants.VOLUME_MODULE_ENABLED_KEY];
         vscModuleEnabled = loadedState[CoreConstants.VSC_MODULE_ENABLED_KEY];
         fabModuleVisible = loadedState[CoreConstants.FAB_MODULE_VISIBLE_KEY];
         youTubeModuleVisible = loadedState[CoreConstants.YOUTUBE_MODULE_VISIBLE_KEY];
         xModuleVisible = loadedState[CoreConstants.X_MODULE_VISIBLE_KEY];
         crunchyrollModuleVisible = loadedState[CoreConstants.CRUNCHYROLL_MODULE_VISIBLE_KEY];
+        miscModuleVisible = loadedState[CoreConstants.MISC_MODULE_VISIBLE_KEY];
         volumeModuleVisible = loadedState[CoreConstants.VOLUME_MODULE_VISIBLE_KEY];
         vscModuleVisible = loadedState[CoreConstants.VSC_MODULE_VISIBLE_KEY];
         globalMaxRetries = loadedState[CoreConstants.GLOBAL_MAX_RETRIES_KEY];
@@ -188,6 +204,7 @@ export async function loadGlobalState() {
             youTubeModuleEnabled,
             xModuleEnabled,
             crunchyrollModuleEnabled,
+            miscModuleEnabled,
             volumeModuleEnabled,
             vscModuleEnabled,
             rateLimitCoolDownUntil: rateLimitCoolDownUntil > 0 ? new Date(rateLimitCoolDownUntil).toISOString() : "Not set",

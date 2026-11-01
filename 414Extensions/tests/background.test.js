@@ -94,6 +94,9 @@ describe('background coordinator message routing', () => {
         messageListener({ action: 'setCrunchyrollModuleEnabled', enabled: false }, {}, sendResponse);
         expect(AppState.crunchyrollModuleEnabled).toBe(false);
 
+        messageListener({ action: 'setMiscModuleEnabled', enabled: false }, {}, sendResponse);
+        expect(AppState.miscModuleEnabled).toBe(false);
+
         messageListener({ action: 'setVolumeModuleEnabled', enabled: false }, {}, sendResponse);
         expect(AppState.volumeModuleEnabled).toBe(false);
 

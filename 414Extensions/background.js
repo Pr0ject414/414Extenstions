@@ -95,6 +95,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             AppState.saveGlobalState();
             sendResponse({ success: true });
             return true;
+        case "setMiscModuleEnabled":
+            AppState.setMiscModuleEnabled(request.enabled);
+            AppState.saveGlobalState();
+            sendResponse({ success: true });
+            return true;
         case "setVolumeModuleEnabled":
             AppState.setVolumeModuleEnabled(request.enabled);
             AppState.saveGlobalState();
@@ -112,12 +117,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 youTubeModuleEnabled: AppState.youTubeModuleEnabled,
                 xModuleEnabled: AppState.xModuleEnabled,
                 crunchyrollModuleEnabled: AppState.crunchyrollModuleEnabled,
+                miscModuleEnabled: AppState.miscModuleEnabled,
                 volumeModuleEnabled: AppState.volumeModuleEnabled,
                 vscModuleEnabled: AppState.vscModuleEnabled,
                 fabModuleVisible: AppState.fabModuleVisible,
                 youTubeModuleVisible: AppState.youTubeModuleVisible,
                 xModuleVisible: AppState.xModuleVisible,
                 crunchyrollModuleVisible: AppState.crunchyrollModuleVisible,
+                miscModuleVisible: AppState.miscModuleVisible,
                 volumeModuleVisible: AppState.volumeModuleVisible,
                 vscModuleVisible: AppState.vscModuleVisible,
             });

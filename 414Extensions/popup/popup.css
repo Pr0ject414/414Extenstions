@@ -320,7 +320,8 @@ body.master-disabled .power-indicator-dot {
 .fab-module-toggle-container,
 .youtube-module-toggle-container,
 .x-module-toggle-container,
-.crunchyroll-module-toggle-container {
+.crunchyroll-module-toggle-container,
+.misc-module-toggle-container {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(59, 130, 246, 0.04) 100%) !important;
     border: 1px solid rgba(99, 102, 241, 0.3) !important;
     margin-bottom: 14px !important;
@@ -329,7 +330,8 @@ body.master-disabled .power-indicator-dot {
 .fab-module-toggle-container:hover,
 .youtube-module-toggle-container:hover,
 .x-module-toggle-container:hover,
-.crunchyroll-module-toggle-container:hover {
+.crunchyroll-module-toggle-container:hover,
+.misc-module-toggle-container:hover {
     border-color: rgba(99, 102, 241, 0.5) !important;
     box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
 }

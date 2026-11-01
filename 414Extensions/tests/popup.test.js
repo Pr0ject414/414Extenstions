@@ -70,6 +70,10 @@ describe('popup.js', () => {
         const scriptContent = fs.readFileSync(scriptPath, 'utf8');
         eval(scriptContent);
 
+        const miscUiPath = path.resolve(__dirname, '../popup/misc_ui.js');
+        const miscUiContent = fs.readFileSync(miscUiPath, 'utf8');
+        eval(miscUiContent);
+
         // Dispatch DOMContentLoaded
         document.dispatchEvent(new Event('DOMContentLoaded'));
     });
@@ -191,5 +195,27 @@ describe('popup.js', () => {
         hideAdsToggle.checked = true;
         hideAdsToggle.dispatchEvent(new Event('change'));
         expect(mockStorageData.isXHideAdsEnabled).toBe(true);
+    });
+
+    test('should default Google Images Save button remover toggle to OFF (false) and persist when toggled', () => {
+        const miscTabBtn = document.querySelector('.tab-button[data-tab="misc-controls"]');
+        expect(miscTabBtn).not.toBeNull();
+        miscTabBtn.click();
+
+        const miscPowerToggle = document.getElementById('miscModulePowerToggle');
+        const hideSaveToggle = document.getElementById('googleImagesHideSaveToggle');
+
+        expect(miscPowerToggle).not.toBeNull();
+        expect(miscPowerToggle.checked).toBe(true);
+        expect(hideSaveToggle).not.toBeNull();
+        expect(hideSaveToggle.checked).toBe(false);
+
+        hideSaveToggle.checked = true;
+        hideSaveToggle.dispatchEvent(new Event('change'));
+        expect(mockStorageData.isGoogleImagesHideSaveEnabled).toBe(true);
+
+        hideSaveToggle.checked = false;
+        hideSaveToggle.dispatchEvent(new Event('change'));
+        expect(mockStorageData.isGoogleImagesHideSaveEnabled).toBe(false);
     });
 });

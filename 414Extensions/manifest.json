@@ -139,6 +139,18 @@
         "crunchyroll_extension/content_scripts/crunchyrollEndSlateCloser.js",
         "crunchyroll_extension/content_scripts/crunchyrollControlsHider.js"
       ]
+    },
+    {
+      "run_at": "document_idle",
+      "matches": [
+        "*://*.google.com/*"
+      ],
+      "css": [
+        "misc_extension/content_scripts/googleImagesSaveHider.css"
+      ],
+      "js": [
+        "misc_extension/content_scripts/googleImagesSaveHider.js"
+      ]
     }
   ],
   "content_security_policy": {

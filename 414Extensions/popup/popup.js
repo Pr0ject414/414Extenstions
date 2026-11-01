@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const visibilityYouTubeToggle = document.getElementById('visibilityYouTubeToggle');
     const visibilityXToggle = document.getElementById('visibilityXToggle');
     const visibilityCrunchyrollToggle = document.getElementById('visibilityCrunchyrollToggle');
+    const visibilityMiscToggle = document.getElementById('visibilityMiscToggle');
 
     // --- X Module Elements ---
     const xModulePowerToggle = document.getElementById('xModulePowerToggle');
@@ -40,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const YOUTUBE_MODULE_VISIBLE_KEY = 'isYouTubeModuleVisible';
     const X_MODULE_VISIBLE_KEY = 'isXModuleVisible';
     const CRUNCHYROLL_MODULE_VISIBLE_KEY = 'isCrunchyrollModuleVisible';
+    const MISC_MODULE_VISIBLE_KEY = 'isMiscModuleVisible';
     const X_MODULE_ENABLED_KEY = 'isXModuleEnabled';
     const X_ALWAYS_MUTE_KEY = 'isXAlwaysMuteEnabled';
 
@@ -52,6 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
         YOUTUBE_MODULE_VISIBLE_KEY,
         X_MODULE_VISIBLE_KEY,
         CRUNCHYROLL_MODULE_VISIBLE_KEY,
+        MISC_MODULE_VISIBLE_KEY,
         X_MODULE_ENABLED_KEY,
         X_ALWAYS_MUTE_KEY
     ], (result) => {
@@ -63,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (visibilityYouTubeToggle) visibilityYouTubeToggle.checked = result[YOUTUBE_MODULE_VISIBLE_KEY] !== false;
         if (visibilityXToggle) visibilityXToggle.checked = result[X_MODULE_VISIBLE_KEY] !== false;
         if (visibilityCrunchyrollToggle) visibilityCrunchyrollToggle.checked = result[CRUNCHYROLL_MODULE_VISIBLE_KEY] !== false;
+        if (visibilityMiscToggle) visibilityMiscToggle.checked = result[MISC_MODULE_VISIBLE_KEY] !== false;
 
         if (xModulePowerToggle) xModulePowerToggle.checked = result[X_MODULE_ENABLED_KEY] !== false;
         if (xAlwaysMuteToggle) xAlwaysMuteToggle.checked = result[X_ALWAYS_MUTE_KEY] !== false;
@@ -633,7 +637,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { el: visibilityFabToggle, key: FAB_MODULE_VISIBLE_KEY },
         { el: visibilityYouTubeToggle, key: YOUTUBE_MODULE_VISIBLE_KEY },
         { el: visibilityXToggle, key: X_MODULE_VISIBLE_KEY },
-        { el: visibilityCrunchyrollToggle, key: CRUNCHYROLL_MODULE_VISIBLE_KEY }
+        { el: visibilityCrunchyrollToggle, key: CRUNCHYROLL_MODULE_VISIBLE_KEY },
+        { el: visibilityMiscToggle, key: MISC_MODULE_VISIBLE_KEY }
     ].forEach(({ el, key }) => {
         if (el) {
             el.addEventListener('change', () => {
@@ -898,14 +903,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // This function can be called by module scripts to correctly set their disabled state.
     function setDependentModulesState() {
         const isGlobalOn = globalMasterSwitchToggle.checked;
-        const moduleIds = ['fab-controls', 'youtube-controls', 'x-controls', 'crunchyroll-controls', 'volume-controls', 'speed-controls'];
+        const moduleIds = ['fab-controls', 'youtube-controls', 'x-controls', 'crunchyroll-controls', 'misc-controls', 'volume-controls', 'speed-controls'];
         moduleIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.classList.toggle('effectively-disabled', !isGlobalOn);
         });
         
         // Also disable the power toggles themselves
-        const toggleIds = ['fabModulePowerToggle', 'youTubeModulePowerToggle', 'xModulePowerToggle', 'crunchyrollModulePowerToggle', 'vscPowerToggle'];
+        const toggleIds = ['fabModulePowerToggle', 'youTubeModulePowerToggle', 'xModulePowerToggle', 'crunchyrollModulePowerToggle', 'miscModulePowerToggle', 'vscPowerToggle'];
         toggleIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.disabled = !isGlobalOn;
@@ -966,6 +971,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'youtube-controls': visibilityYouTubeToggle?.checked !== false,
             'x-controls': visibilityXToggle?.checked !== false,
             'crunchyroll-controls': visibilityCrunchyrollToggle?.checked !== false,
+            'misc-controls': visibilityMiscToggle?.checked !== false,
             'general-settings': true // Always visible
         };
 

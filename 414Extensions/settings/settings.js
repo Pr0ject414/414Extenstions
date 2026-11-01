@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const visibilityYouTubeToggle = document.getElementById('visibilityYouTubeToggle');
     const visibilityXToggle = document.getElementById('visibilityXToggle');
     const visibilityCrunchyrollToggle = document.getElementById('visibilityCrunchyrollToggle');
+    const visibilityMiscToggle = document.getElementById('visibilityMiscToggle');
 
     // Storage Keys (Must match those defined in coreConstants.js and fabConstants.js)
     const GLOBAL_SETTINGS_STORAGE_KEYS = {
@@ -58,7 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
         FAB_MODULE_VISIBLE: 'isFabModuleVisible',
         YOUTUBE_MODULE_VISIBLE: 'isYouTubeModuleVisible',
         X_MODULE_VISIBLE: 'isXModuleVisible',
-        CRUNCHYROLL_MODULE_VISIBLE: 'isCrunchyrollModuleVisible'
+        CRUNCHYROLL_MODULE_VISIBLE: 'isCrunchyrollModuleVisible',
+        MISC_MODULE_VISIBLE: 'isMiscModuleVisible'
     };
 
     const FAB_SETTINGS_STORAGE_KEYS = {
@@ -121,8 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
             [FAB_SETTINGS_STORAGE_KEYS.MAX_CONCURRENT_FAB_TABS]: 2,
             [FAB_SETTINGS_STORAGE_KEYS.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS]: 5000,
             [FAB_SETTINGS_STORAGE_KEYS.FAB_FREE_ITEM_GRACE_CYCLES]: 4,
-            [FAB_SETTINGS_STORAGE_KEYS.FAB_BROWSE_PAGE_SCAN_INTERVAL_MS]: 5000,
-            [FAB_SETTINGS_STORAGE_KEYS.FAB_FREE_ITEM_GRACE_CYCLES]: 4,
             [VSC_STORAGE_KEYS.BLACKLIST]: '',
             [VSC_STORAGE_KEYS.SHORTCUTS]: DEFAULT_VSC_SHORTCUTS,
             [VSC_STORAGE_KEYS.OPTIONS]: DEFAULT_VSC_OPTIONS,
@@ -165,6 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (visibilityYouTubeToggle) visibilityYouTubeToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE] !== false;
             if (visibilityXToggle) visibilityXToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.X_MODULE_VISIBLE] !== false;
             if (visibilityCrunchyrollToggle) visibilityCrunchyrollToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.CRUNCHYROLL_MODULE_VISIBLE] !== false;
+            if (visibilityMiscToggle) visibilityMiscToggle.checked = result[GLOBAL_SETTINGS_STORAGE_KEYS.MISC_MODULE_VISIBLE] !== false;
         });
     }
 
@@ -253,7 +254,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 [GLOBAL_SETTINGS_STORAGE_KEYS.FAB_MODULE_VISIBLE]: visibilityFabToggle.checked,
                 [GLOBAL_SETTINGS_STORAGE_KEYS.YOUTUBE_MODULE_VISIBLE]: visibilityYouTubeToggle.checked,
                 [GLOBAL_SETTINGS_STORAGE_KEYS.X_MODULE_VISIBLE]: visibilityXToggle.checked,
-                [GLOBAL_SETTINGS_STORAGE_KEYS.CRUNCHYROLL_MODULE_VISIBLE]: visibilityCrunchyrollToggle.checked
+                [GLOBAL_SETTINGS_STORAGE_KEYS.CRUNCHYROLL_MODULE_VISIBLE]: visibilityCrunchyrollToggle.checked,
+                [GLOBAL_SETTINGS_STORAGE_KEYS.MISC_MODULE_VISIBLE]: visibilityMiscToggle ? visibilityMiscToggle.checked : true
             };
             chrome.storage.local.set(settings, () => {
                 if (chrome.runtime.lastError) {

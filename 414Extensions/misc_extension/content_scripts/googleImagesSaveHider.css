@@ -1,0 +1,9 @@
+/* KylesChromeExtensions/misc_extension/content_scripts/googleImagesSaveHider.css */
+
+html.ext414-hide-gimg-save div[jsname="la3Mvf"],
+html.ext414-hide-gimg-save div[jscontroller="iG3Zmf"],
+html.ext414-hide-gimg-save div[jsname="CL9xOb"][role="button"],
+html.ext414-hide-gimg-save div[jsname="TomQf"][role="button"],
+.ext414-gimg-save-hidden {
+    display: none !important;
+}

@@ -35,6 +35,7 @@
             <button class="tab-button" data-tab="youtube-controls"><span>📺</span> YouTube</button>
             <button class="tab-button" data-tab="x-controls" title="X (Twitter)"><span>𝕏</span></button>
             <button class="tab-button" data-tab="crunchyroll-controls"><span>🎬</span> Crunchyroll</button>
+            <button class="tab-button" data-tab="misc-controls"><span>🧩</span> Misc</button>
             <button class="tab-button" data-tab="general-settings"><span>⚙️</span> General</button>
         </nav>
 
@@ -378,6 +379,31 @@
             </p>
         </div>
 
+        <!-- Misc Tab -->
+        <div id="misc-controls" class="tab-content">
+            <p class="tab-description">Miscellaneous web decluttering and quality-of-life tweaks</p>
+            <h2><span>🧩</span> Misc Tweaks</h2>
+            <div class="setting misc-module-toggle-container">
+                <label for="miscModulePowerToggle">Misc Helper Power:</label>
+                <label class="switch">
+                    <input type="checkbox" id="miscModulePowerToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <h3 class="sub-heading">Google Search &amp; Images</h3>
+            <div class="setting">
+                <label for="googleImagesHideSaveToggle">Remove Google Images Save Button:</label>
+                <label class="switch">
+                    <input type="checkbox" id="googleImagesHideSaveToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <p class="placeholder-text">
+                Hides the floating "Save" / "Saved" button overlay on Google Images results.
+            </p>
+        </div>
+
         <!-- General Settings Tab -->
         <div id="general-settings" class="tab-content">
             <p class="tab-description">Extension-wide preferences and module visibility</p>
@@ -432,6 +458,13 @@
                     <span class="slider"></span>
                 </label>
             </div>
+            <div class="setting">
+                <label for="visibilityMiscToggle">Misc Tweaks</label>
+                <label class="switch">
+                    <input type="checkbox" id="visibilityMiscToggle" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
 
             <h3 class="sub-heading">Credits & Open Source</h3>
             <div class="setting" style="display: block; font-size: 11px; line-height: 1.5;">
@@ -445,5 +478,6 @@
     <script src="fab_ui.js"></script>
     <script src="youtube_ui.js"></script>
     <script src="crunchyroll_ui.js"></script>
+    <script src="misc_ui.js"></script>
 </body>
 </html>
