@@ -18,6 +18,7 @@ class LRUCache {
     }
 
     set(key, value) {
+        if (!key || !value || typeof value !== 'object' || value.error) return;
         const lowerKey = key.toLowerCase();
         if (this.cache.has(lowerKey)) {
             this.cache.delete(lowerKey);
@@ -47,11 +48,21 @@ class LRUCache {
 
     fromObject(obj) {
         this.cache.clear();
+        let truncated = false;
         if (obj && typeof obj === 'object') {
-            for (const [k, v] of Object.entries(obj)) {
+            const rawEntries = Object.entries(obj);
+            const validEntries = rawEntries.filter(([k, v]) => k && v && typeof v === 'object' && !v.error);
+            if (validEntries.length !== rawEntries.length || validEntries.length > this.maxSize) {
+                truncated = true;
+            }
+            const kept = validEntries.length > this.maxSize
+                ? validEntries.slice(-this.maxSize)
+                : validEntries;
+            for (const [k, v] of kept) {
                 this.cache.set(k.toLowerCase(), v);
             }
         }
+        return truncated;
     }
 }
 
@@ -67,8 +78,12 @@ export class XLocationCacheManager {
         if (this.isLoaded) return;
         try {
             const data = await chrome.storage.local.get(['x_location_cache_v4']);
-            if (data.x_location_cache_v4) {
-                this.lru.fromObject(data.x_location_cache_v4);
+            if (data && data.x_location_cache_v4) {
+                const truncated = this.lru.fromObject(data.x_location_cache_v4);
+                if (truncated) {
+                    this.dirty = true;
+                    await this.saveToStorage();
+                }
             }
         } catch (err) {
             console.warn('X Location Cache: Load failed', err);
@@ -84,6 +99,9 @@ export class XLocationCacheManager {
                 this.saveToStorage();
             }
         }, CACHE_CONFIG.SAVE_INTERVAL_MS);
+        if (typeof this.saveInterval?.unref === 'function') {
+            this.saveInterval.unref();
+        }
     }
 
     async saveToStorage() {

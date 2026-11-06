@@ -20,13 +20,28 @@
     let blockedDeviceRegions = [];
     let blockedNameFlags = [];
     const userLocationCache = new Map(); // screenNameLower -> userData
+    const MAX_USER_LOCATION_CACHE = 2000;
     const SESSION_FILTER_CONFIG_KEY = '__x414_filter_cfg_v1';
+
+    function setUserLocationCache(screenNameLower, userData) {
+        if (!screenNameLower || !userData || typeof userData !== 'object' || userData.error) return;
+        const key = String(screenNameLower).toLowerCase();
+        if (userLocationCache.has(key)) {
+            userLocationCache.delete(key);
+        } else if (userLocationCache.size >= MAX_USER_LOCATION_CACHE) {
+            userLocationCache.delete(userLocationCache.keys().next().value);
+        }
+        userLocationCache.set(key, userData);
+    }
 
     function hydrateUserLocationCache(rawCache) {
         if (!rawCache || typeof rawCache !== 'object') return;
-        for (const [k, v] of Object.entries(rawCache)) {
-            if (k && v && typeof v === 'object') {
-                userLocationCache.set(String(k).toLowerCase(), v);
+        const entries = Object.entries(rawCache);
+        const startIdx = Math.max(0, entries.length - MAX_USER_LOCATION_CACHE);
+        for (let i = startIdx; i < entries.length; i++) {
+            const [k, v] = entries[i];
+            if (k && v && typeof v === 'object' && !v.error) {
+                setUserLocationCache(k, v);
             }
         }
     }
@@ -102,7 +117,7 @@
         if (event.data && event.data.type === 'X_USER_LOCATION_RESOLVED' && event.data.payload) {
             const { screenName, userData, users } = event.data.payload;
             if (screenName && userData && typeof userData === 'object') {
-                userLocationCache.set(String(screenName).toLowerCase(), userData);
+                setUserLocationCache(screenName, userData);
             }
             if (users && typeof users === 'object') {
                 hydrateUserLocationCache(users);
@@ -998,6 +1013,8 @@
                 if (!node || node.nodeType !== 1) continue;
 
                 const testId = node.getAttribute ? node.getAttribute('data-testid') : '';
+                if (testId === 'app-text-transition-container') continue;
+
                 if (testId === 'cellInnerDiv' || node.tagName === 'ARTICLE') {
                     if (node.querySelector && node.querySelector('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video')) {
                         injectDownloadButtons(node);
@@ -1007,17 +1024,16 @@
 
                 const nodeRole = node.getAttribute ? node.getAttribute('role') : '';
                 if (nodeRole !== 'menuitem' && nodeRole !== 'menu' && testId !== 'Dropdown') {
-                    const parentArticle = node.closest ? node.closest('article[data-testid="tweet"]') : null;
-                    if (parentArticle) {
-                        if (
-                            testId === 'videoPlayer' ||
-                            testId === 'videoComponent' ||
-                            (node.querySelector && node.querySelector('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video'))
-                        ) {
-                            injectDownloadButtons(parentArticle);
-                        }
-                        continue;
+                    if (
+                        testId === 'videoPlayer' ||
+                        testId === 'videoComponent' ||
+                        node.tagName === 'VIDEO' ||
+                        (node.childElementCount > 0 && node.querySelector && node.querySelector('[data-testid="videoPlayer"], [data-testid="videoComponent"], video.x-friend-card-video'))
+                    ) {
+                        const parentArticle = node.closest ? node.closest('article[data-testid="tweet"], article.x-friend-tweet-card') : null;
+                        injectDownloadButtons(parentArticle || node);
                     }
+                    continue;
                 }
 
                 // X's menu items usually have role="menuitem"
@@ -1263,7 +1279,7 @@
             if (loc || dev) {
                 inlineLocationData = { screenName, location: loc, device: dev };
                 if (screenName) {
-                    userLocationCache.set(screenName.toLowerCase(), inlineLocationData);
+                    setUserLocationCache(screenName, inlineLocationData);
                 }
             }
         }
@@ -1378,13 +1394,24 @@
         return false;
     }
 
+    const NON_TIMELINE_SUBTREE_KEYS = new Set([
+        'tweet_results',
+        'user_results',
+        'responseObjects',
+        'errors',
+        'extensions',
+        'clientEventInfo',
+        'feedbackInfo'
+    ]);
+
     function collectTimelineInstructionsArrays(node, out = [], depth = 0) {
-        if (!node || typeof node !== 'object' || depth > 10) return out;
+        if (!node || typeof node !== 'object' || depth > 7) return out;
         if (Array.isArray(node.instructions)) {
             out.push(node.instructions);
+            return out;
         }
         for (const key of Object.keys(node)) {
-            if (key === 'instructions') continue;
+            if (NON_TIMELINE_SUBTREE_KEYS.has(key)) continue;
             const child = node[key];
             if (child && typeof child === 'object' && !Array.isArray(child)) {
                 collectTimelineInstructionsArrays(child, out, depth + 1);
@@ -1625,7 +1652,13 @@
                     }
                 }).catch(() => {});
             }
-            if (url && TIMELINE_GRAPHQL_PATTERN.test(url) && fetchPromise && typeof fetchPromise.then === 'function') {
+            if (
+                window.__X414_ENABLE_NETWORK_TIMELINE_FILTER__ === true &&
+                url &&
+                TIMELINE_GRAPHQL_PATTERN.test(url) &&
+                fetchPromise &&
+                typeof fetchPromise.then === 'function'
+            ) {
                 return fetchPromise.then(async (res) => {
                     try {
                         if (!res || !res.ok || typeof res.text !== 'function') return res;
@@ -1765,7 +1798,11 @@
             if (this._xUrl && API_PATTERN.test(this._xUrl) && this._xHeaders) {
                 extractAndPostHeaders(this._xHeaders);
             }
-            if (this._xUrl && TIMELINE_GRAPHQL_PATTERN.test(this._xUrl)) {
+            if (
+                window.__X414_ENABLE_NETWORK_TIMELINE_FILTER__ === true &&
+                this._xUrl &&
+                TIMELINE_GRAPHQL_PATTERN.test(this._xUrl)
+            ) {
                 attachTimelineXHRFilter(this);
             }
             if (this._xUrl && BADGE_COUNT_PATTERN.test(this._xUrl) && typeof this.addEventListener === 'function') {

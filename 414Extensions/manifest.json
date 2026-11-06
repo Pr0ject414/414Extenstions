@@ -63,7 +63,7 @@
         "x_extension/content_scripts/xEnv.js"
       ],
       "world": "MAIN",
-      "all_frames": true
+      "all_frames": false
     },
     {
       "run_at": "document_start",
@@ -80,7 +80,7 @@
         "x_extension/content_scripts/xObserver.js"
       ],
       "world": "ISOLATED",
-      "all_frames": true
+      "all_frames": false
     },
     {
       "run_at": "document_start",

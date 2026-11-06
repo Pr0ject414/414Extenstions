@@ -42,6 +42,8 @@ export class XFriendsSyncManager {
         this.lastPublishedCreatedAtSec = 0;
         this.flushTimeout = null;
         this.inflightHydrations = new Map();
+        this.failedHydrationUntil = new Map();
+        this.snowflakeTimeCache = new Map();
         this.lastSyncNotifications = { newInvites: [], newForcedPosts: [] };
 
         this.state = {
@@ -127,12 +129,20 @@ export class XFriendsSyncManager {
 
     getSnowflakeTimestampMs(tweetId) {
         if (!this.isValidRecentTweetId(tweetId)) return 0;
+        const trimmed = tweetId.trim();
+        const cached = this.snowflakeTimeCache.get(trimmed);
+        if (cached !== undefined) return cached;
         try {
-            const idBig = BigInt(tweetId.trim());
-            if (idBig >= MIN_SNOWFLAKE_ID) {
-                return Number((idBig >> 22n) + TWITTER_EPOCH_MS);
+            const idBig = BigInt(trimmed);
+            const ms = idBig >= MIN_SNOWFLAKE_ID
+                ? Number((idBig >> 22n) + TWITTER_EPOCH_MS)
+                : 0;
+            if (this.snowflakeTimeCache.size >= 4000) {
+                const oldest = this.snowflakeTimeCache.keys().next().value;
+                if (oldest !== undefined) this.snowflakeTimeCache.delete(oldest);
             }
-            return 0;
+            this.snowflakeTimeCache.set(trimmed, ms);
+            return ms;
         } catch (e) {
             return 0;
         }
@@ -189,7 +199,7 @@ export class XFriendsSyncManager {
                 id,
                 isUnavailable: true,
                 isHydrated: true,
-                hydrationVersion: 3,
+                hydrationVersion: 4,
                 updatedAt: rawMeta.updatedAt || existing.updatedAt || Date.now()
             };
         }
@@ -570,11 +580,6 @@ export class XFriendsSyncManager {
         if (!meta) return true;
         if (meta.isUnavailable) return false;
         if (!meta.isHydrated || meta.hydrationVersion !== 4) return true;
-        if (meta.quotedTweet && (!meta.quotedTweet.avatarUrl || !meta.quotedTweet.authorName)) return true;
-        if (!meta.screenName || (!meta.text && (!meta.media || meta.media.length === 0) && !meta.quotedTweet && !meta.parentTweet)) return true;
-        if (Array.isArray(meta.media) && meta.media.some(m => (m.type === 'video' || m.type === 'animated_gif') && !m.videoUrl)) {
-            return true;
-        }
         return false;
     }
 
@@ -590,7 +595,13 @@ export class XFriendsSyncManager {
                 .filter(id => this.isValidRecentTweetId(id))
         )).slice(0, 25);
 
-        const toFetch = uniqueIds.filter(id => this.needsTweetHydration(id));
+        const nowMs = Date.now();
+        const toFetch = uniqueIds.filter(id => {
+            if (!this.needsTweetHydration(id)) return false;
+            const cooldownUntil = this.failedHydrationUntil.get(id);
+            if (cooldownUntil && nowMs < cooldownUntil) return false;
+            return true;
+        });
         let changed = false;
 
         const fetchOne = async (id) => {
@@ -602,6 +613,7 @@ export class XFriendsSyncManager {
                     const url = `https://cdn.syndication.twimg.com/tweet-result?id=${encodeURIComponent(id)}&token=x`;
                     const resp = await this.fetchFn(url, { credentials: 'omit' });
                     if (resp && resp.status === 404) {
+                        this.failedHydrationUntil.delete(id);
                         const meta = this.parseSyndicationTweet(id, null);
                         if (meta) {
                             this.state.postMetaMap[id] = meta;
@@ -609,15 +621,19 @@ export class XFriendsSyncManager {
                         }
                         return;
                     }
-                    if (!resp || !resp.ok) return;
+                    if (!resp || !resp.ok) {
+                        this.failedHydrationUntil.set(id, Date.now() + 5 * 60 * 1000);
+                        return;
+                    }
                     const data = await resp.json();
                     const meta = this.parseSyndicationTweet(id, data);
                     if (meta) {
+                        this.failedHydrationUntil.delete(id);
                         this.state.postMetaMap[id] = meta;
                         changed = true;
                     }
                 } catch (err) {
-                    // Ignore transient network errors so retry can happen later
+                    this.failedHydrationUntil.set(id, Date.now() + 5 * 60 * 1000);
                 } finally {
                     this.inflightHydrations.delete(id);
                 }
@@ -1034,10 +1050,20 @@ export class XFriendsSyncManager {
             }
 
             if (tweetMetaMap && typeof tweetMetaMap === 'object' && tweetMetaMap[id]) {
+                const prevMeta = this.state.postMetaMap[id];
                 const sanitized = this.sanitizeTweetMeta(id, tweetMetaMap[id]);
                 if (sanitized) {
+                    const isMeaningfulUpdate = !prevMeta
+                        || (!prevMeta.isHydrated && (
+                            sanitized.isHydrated
+                            || sanitized.text !== prevMeta.text
+                            || sanitized.screenName !== prevMeta.screenName
+                            || (sanitized.media?.length || 0) > (prevMeta.media?.length || 0)
+                        ));
                     this.state.postMetaMap[id] = sanitized;
-                    metaUpdated++;
+                    if (isMeaningfulUpdate) {
+                        metaUpdated++;
+                    }
                 }
             }
         }

@@ -38,6 +38,10 @@ export const CRUNCHYROLL_MODULE_ENABLED_KEY = 'isCrunchyrollModuleEnabled';
 export const CRUNCHYROLL_AUTO_CLOSE_END_SLATE_KEY = 'isCrunchyrollAutoCloseEndSlateEnabled';
 export const CRUNCHYROLL_HIDE_CONTROLS_ON_SPEED_KEY = 'isCrunchyrollHideControlsOnSpeedEnabled';
 
+// Master On/Off Switch & Feature Keys for the Misc Module
+export const MISC_MODULE_ENABLED_KEY = 'isMiscModuleEnabled';
+export const GOOGLE_IMAGES_HIDE_SAVE_KEY = 'isGoogleImagesHideSaveEnabled';
+
 // Global rate limiting
 export const RATE_LIMIT_COOL_DOWN_UNTIL_KEY = 'rateLimitCoolDownUntil';
 
@@ -48,6 +52,7 @@ export const FAB_MODULE_VISIBLE_KEY = 'isFabModuleVisible';
 export const YOUTUBE_MODULE_VISIBLE_KEY = 'isYouTubeModuleVisible';
 export const X_MODULE_VISIBLE_KEY = 'isXModuleVisible';
 export const CRUNCHYROLL_MODULE_VISIBLE_KEY = 'isCrunchyrollModuleVisible';
+export const MISC_MODULE_VISIBLE_KEY = 'isMiscModuleVisible';
 
 // Configurable global network settings keys (values loaded from storage)
 export const GLOBAL_MAX_RETRIES_KEY = 'maxRetries';

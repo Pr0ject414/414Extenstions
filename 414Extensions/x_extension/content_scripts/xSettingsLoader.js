@@ -26,16 +26,17 @@
         BLOCKED_NAME_FLAGS_KEY
     ];
 
-    function postSettings(includeCache = false) {
-        const keysToRead = includeCache
-            ? [...SETTING_KEYS, LOCATION_CACHE_KEY]
-            : SETTING_KEYS;
-        chrome.storage.local.get(keysToRead, (result) => {
+    let lastKnownVolume = 1.0;
+    let volumeSaveTimer = null;
+
+    function postSettings() {
+        chrome.storage.local.get(SETTING_KEYS, (result) => {
             if (!result) return;
             const isGlobalOn = result[GLOBAL_MASTER_SWITCH_ENABLED_KEY] !== false;
             const isXEnabled = result[X_MODULE_ENABLED_KEY] !== false;
             const isAlwaysMute = result[X_ALWAYS_MUTE_KEY] !== false;
             const volumeLevel = result[X_VOLUME_LEVEL_KEY] !== undefined ? result[X_VOLUME_LEVEL_KEY] : 1.0;
+            lastKnownVolume = volumeLevel;
 
             const isXVisible = result[X_MODULE_VISIBLE_KEY] !== false;
             const isHideAds = result[X_HIDE_ADS_ENABLED_KEY] !== false;
@@ -43,9 +44,6 @@
             const blockedCountries = Array.isArray(result[BLOCKED_COUNTRIES_KEY]) ? result[BLOCKED_COUNTRIES_KEY] : [];
             const blockedDeviceRegions = Array.isArray(result[BLOCKED_DEVICE_REGIONS_KEY]) ? result[BLOCKED_DEVICE_REGIONS_KEY] : [];
             const blockedNameFlags = Array.isArray(result[BLOCKED_NAME_FLAGS_KEY]) ? result[BLOCKED_NAME_FLAGS_KEY] : [];
-            const userCache = (includeCache && result[LOCATION_CACHE_KEY] && typeof result[LOCATION_CACHE_KEY] === 'object')
-                ? result[LOCATION_CACHE_KEY]
-                : null;
 
             // Effectively enabled if Global is ON logic + X Specific ON logic + X Visible
             const effectiveEnabled = isGlobalOn && isXEnabled && isXVisible;
@@ -60,9 +58,6 @@
                 blockedDeviceRegions,
                 blockedNameFlags
             };
-            if (userCache) {
-                payload.userCache = userCache;
-            }
 
             window.postMessage({
                 type: 'X_SETTINGS_UPDATE',
@@ -71,8 +66,8 @@
         });
     }
 
-    // Initial Load (hydrate initial location cache once)
-    postSettings(true);
+    // Initial Load (xObserver.js owns location cache hydration & incremental resolution)
+    postSettings();
 
     // Listen for setting changes (incremental location cache updates are broadcast directly by xObserver.js)
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -87,7 +82,7 @@
                 changes[BLOCKED_COUNTRIES_KEY] ||
                 changes[BLOCKED_DEVICE_REGIONS_KEY] ||
                 changes[BLOCKED_NAME_FLAGS_KEY]) {
-                postSettings(false);
+                postSettings();
             }
         }
     });
@@ -99,19 +94,21 @@
         if (event.data && event.data.type === 'X_SAVE_VOLUME') {
             const newVolume = event.data.payload;
             if (typeof newVolume === 'number' && newVolume >= 0 && newVolume <= 1) {
-                chrome.storage.local.get([X_VOLUME_LEVEL_KEY], (res) => {
-                    if (res[X_VOLUME_LEVEL_KEY] !== newVolume) {
-                        try {
-                            chrome.storage.local.set({ [X_VOLUME_LEVEL_KEY]: newVolume });
-                        } catch (error) {
-                            // Ignore "Context invalidated" errors which happen if the extension
-                            // was reloaded while this page is still open.
-                            if (!error.message.includes("Extension context invalidated")) {
-                                console.error("[X Settings] Storage set error:", error);
-                            }
+                if (Math.abs(newVolume - lastKnownVolume) < 0.005) return;
+                lastKnownVolume = newVolume;
+                if (volumeSaveTimer) clearTimeout(volumeSaveTimer);
+                volumeSaveTimer = setTimeout(() => {
+                    volumeSaveTimer = null;
+                    try {
+                        chrome.storage.local.set({ [X_VOLUME_LEVEL_KEY]: lastKnownVolume });
+                    } catch (error) {
+                        // Ignore "Context invalidated" errors which happen if the extension
+                        // was reloaded while this page is still open.
+                        if (!error.message.includes("Extension context invalidated")) {
+                            console.error("[X Settings] Storage set error:", error);
                         }
                     }
-                });
+                }, 250);
             }
         }
 

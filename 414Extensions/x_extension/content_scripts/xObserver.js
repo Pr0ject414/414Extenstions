@@ -8,18 +8,68 @@
     const SEEN_FLUSH_MS = 2000;
     const MAX_LOCAL_MARKED_SEEN = 1000;
     const MAX_PENDING_SEEN_META = 25;
+    const MAX_LOCAL_USER_CACHE = 2000;
+    const USER_LOOKUP_FAIL_COOLDOWN_MS = 60 * 1000;
+    const HYDRATION_FAIL_COOLDOWN_MS = 60 * 1000;
 
     const processedElements = new WeakSet();
     const inflightElements = new WeakSet();
     const observedTweets = new WeakSet();
     const localUserCache = new Map(); // screenNameLower -> userData
     const inflightScreenNames = new Map(); // screenNameLower -> Array<{ elem, filterTarget }>
+    const failedUserLookupUntil = new Map(); // screenNameLower -> timestampMs
+    const failedHydrationUntil = new Map(); // tweetId -> timestampMs
     const dwellTimers = new Map(); // tweetId -> timerId
     const locallyMarkedSeen = new Set();
     const dismissedForcedLocalSet = new Set();
     const pendingSeenQueue = new Set();
     const pendingSeenMetaMap = {}; // tweetId -> TweetMeta
     let cachedSettings = null;
+    let hasHydratedStorageCache = false;
+    let lastForcedFeedCheckMs = 0;
+
+    function setLocalUserCache(screenNameLower, userData) {
+        if (!screenNameLower || !userData || typeof userData !== 'object' || userData.error) return;
+        const key = String(screenNameLower).toLowerCase();
+        if (localUserCache.has(key)) {
+            localUserCache.delete(key);
+        } else if (localUserCache.size >= MAX_LOCAL_USER_CACHE) {
+            localUserCache.delete(localUserCache.keys().next().value);
+        }
+        localUserCache.set(key, userData);
+    }
+
+    function isUserLookupOnCooldown(screenNameLower) {
+        const until = failedUserLookupUntil.get(screenNameLower);
+        if (!until) return false;
+        if (Date.now() < until) return true;
+        failedUserLookupUntil.delete(screenNameLower);
+        return false;
+    }
+
+    function markUserLookupFailed(screenNameLower) {
+        if (!screenNameLower) return;
+        if (failedUserLookupUntil.size >= 1000) {
+            failedUserLookupUntil.delete(failedUserLookupUntil.keys().next().value);
+        }
+        failedUserLookupUntil.set(screenNameLower, Date.now() + USER_LOOKUP_FAIL_COOLDOWN_MS);
+    }
+
+    function isHydrationOnCooldown(tweetId) {
+        const until = failedHydrationUntil.get(tweetId);
+        if (!until) return false;
+        if (Date.now() < until) return true;
+        failedHydrationUntil.delete(tweetId);
+        return false;
+    }
+
+    function markHydrationFailed(tweetId) {
+        if (!tweetId) return;
+        if (failedHydrationUntil.size >= 1000) {
+            failedHydrationUntil.delete(failedHydrationUntil.keys().next().value);
+        }
+        failedHydrationUntil.set(tweetId, Date.now() + HYDRATION_FAIL_COOLDOWN_MS);
+    }
 
     function addLocallyMarkedSeen(tweetId) {
         if (!tweetId) return;
@@ -462,10 +512,18 @@
 
     function requestTweetsHydration(tweetIds = []) {
         if (!isContextValid() || !Array.isArray(tweetIds) || tweetIds.length === 0) return;
-        const batch = tweetIds.filter(id => id && !inflightHydrateIds.has(id)).slice(0, 20);
+        const batch = tweetIds
+            .map(id => String(id || '').trim())
+            .filter(id => id && !inflightHydrateIds.has(id) && !isHydrationOnCooldown(id))
+            .slice(0, 20);
         if (batch.length === 0) return;
 
         batch.forEach(id => inflightHydrateIds.add(id));
+
+        const clearUnhydratedAttrForId = (tid) => {
+            const cards = document.querySelectorAll(`article.x-friend-tweet-card[data-tweet-id="${tid}"]`);
+            cards.forEach(c => c.removeAttribute('data-needs-hydration'));
+        };
 
         try {
             chrome.runtime.sendMessage({
@@ -473,10 +531,23 @@
                 payload: { tweetIds: batch }
             }, (response) => {
                 batch.forEach(id => inflightHydrateIds.delete(id));
-                if (safeHasError() || !response || !response.success || !response.hydrated) return;
+                if (safeHasError() || !response || !response.success || !response.hydrated) {
+                    batch.forEach(id => {
+                        markHydrationFailed(id);
+                        clearUnhydratedAttrForId(id);
+                    });
+                    return;
+                }
 
                 const hydrated = response.hydrated;
                 const unavailableIds = new Set();
+
+                batch.forEach(id => {
+                    if (!hydrated[id]) {
+                        markHydrationFailed(id);
+                        clearUnhydratedAttrForId(id);
+                    }
+                });
 
                 for (const [tid, meta] of Object.entries(hydrated)) {
                     if (meta && meta.isUnavailable) {
@@ -498,10 +569,12 @@
                     window.XLocationUI.updateHydratedCardsInDOM(hydrated);
                 }
                 observeTimelineArticles();
-                scanDOM();
             });
         } catch (err) {
-            batch.forEach(id => inflightHydrateIds.delete(id));
+            batch.forEach(id => {
+                inflightHydrateIds.delete(id);
+                markHydrationFailed(id);
+            });
         }
     }
 
@@ -1191,17 +1264,24 @@
         }
 
         ensureIntersectionObserver();
+        const nowMs = Date.now();
+        const homeTabList = findHomeTabList();
+        const onHomePage = isHomeTimelinePage(homeTabList);
+        const needsForcedFeedCheck = onHomePage &&
+            (nowMs - lastForcedFeedCheckMs) >= 1500 &&
+            cachedTimelineData &&
+            Array.isArray(cachedTimelineData.unseenForcedPosts) &&
+            cachedTimelineData.unseenForcedPosts.some(p => p && !p.isDismissed && !dismissedForcedLocalSet.has(String(p.tweetId))) &&
+            !document.getElementById('x-forced-home-feed') &&
+            ((typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0) <= 80;
+        if (needsForcedFeedCheck) {
+            lastForcedFeedCheckMs = nowMs;
+        }
         const needsTimelineSync = forceRecheck ||
             !hasLoadedTimelineOnce ||
-            (Date.now() - lastTimelineFetchMs) >= 6000 ||
-            !document.querySelector('[data-testid="x-friends-tab"]') ||
-            (
-                cachedTimelineData &&
-                Array.isArray(cachedTimelineData.unseenForcedPosts) &&
-                cachedTimelineData.unseenForcedPosts.some(p => p && !p.isDismissed && !dismissedForcedLocalSet.has(String(p.tweetId))) &&
-                !document.getElementById('x-forced-home-feed') &&
-                ((typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0) <= 80
-            );
+            (nowMs - lastTimelineFetchMs) >= 6000 ||
+            (onHomePage && Boolean(homeTabList) && !document.querySelector('[data-testid="x-friends-tab"]')) ||
+            needsForcedFeedCheck;
         if (needsTimelineSync) {
             syncFriendsTimelineUI(forceRecheck);
         }
@@ -1691,25 +1771,27 @@
         'isGlobalMasterSwitchEnabled',
         'blockedCountries',
         'blockedDeviceRegions',
-        'blockedNameFlags',
-        'x_location_cache_v4'
+        'blockedNameFlags'
     ];
 
     function hydrateLocalUserCacheFromStorage(rawCache) {
         if (!rawCache || typeof rawCache !== 'object') return;
-        for (const [k, v] of Object.entries(rawCache)) {
-            if (k && v && typeof v === 'object') {
+        const entries = Object.entries(rawCache);
+        const startIdx = Math.max(0, entries.length - MAX_LOCAL_USER_CACHE);
+        const boundedUsers = {};
+        for (let i = startIdx; i < entries.length; i++) {
+            const [k, v] = entries[i];
+            if (k && v && typeof v === 'object' && !v.error) {
                 const lower = k.toLowerCase();
-                if (!localUserCache.has(lower)) {
-                    localUserCache.set(lower, v);
-                }
+                setLocalUserCache(lower, v);
+                boundedUsers[lower] = v;
             }
         }
         try {
             if (typeof window !== 'undefined' && typeof window.postMessage === 'function') {
                 window.postMessage({
                     type: 'X_USER_LOCATION_RESOLVED',
-                    payload: { users: rawCache }
+                    payload: { users: boundedUsers }
                 }, '*');
             }
         } catch (e) {}
@@ -1737,7 +1819,7 @@
             broadcastResolvedUserLocation(screenNameLower, cached);
             return;
         }
-        if (inflightScreenNames.has(screenNameLower)) {
+        if (inflightScreenNames.has(screenNameLower) || isUserLookupOnCooldown(screenNameLower)) {
             return;
         }
         const waiters = [];
@@ -1749,16 +1831,23 @@
             }, (response) => {
                 inflightScreenNames.delete(screenNameLower);
                 const hasErr = safeHasError();
-                const userData = (!hasErr && response && response.success && response.data) ? response.data : null;
+                const userData = (!hasErr && response && response.success && response.data && !response.data.error) ? response.data : null;
                 if (userData) {
-                    localUserCache.set(screenNameLower, userData);
+                    failedUserLookupUntil.delete(screenNameLower);
+                    setLocalUserCache(screenNameLower, userData);
                     broadcastResolvedUserLocation(screenNameLower, userData);
+                } else {
+                    markUserLookupFailed(screenNameLower);
                 }
                 const activeSettings = cachedSettings;
                 for (let i = 0; i < waiters.length; i++) {
                     const w = waiters[i];
                     inflightElements.delete(w.elem);
-                    if (userData && w.elem) {
+                    if (userData && w.elem && w.elem.isConnected !== false) {
+                        const currentHandle = extractScreenNameFromUserCell(w.elem);
+                        if (currentHandle && currentHandle.toLowerCase() !== screenNameLower) {
+                            continue;
+                        }
                         processedElements.add(w.elem);
                         w.elem._xProcessedScreenName = screenNameLower;
                         if (window.XLocationUI) {
@@ -1773,6 +1862,7 @@
             });
         } catch (err) {
             inflightScreenNames.delete(screenNameLower);
+            markUserLookupFailed(screenNameLower);
             for (let i = 0; i < waiters.length; i++) {
                 inflightElements.delete(waiters[i].elem);
             }
@@ -1798,10 +1888,17 @@
             cb(cachedSettings);
             return;
         }
-        chrome.storage.local.get(SETTINGS_STORAGE_KEYS, (settings) => {
+        const keysToRead = hasHydratedStorageCache
+            ? SETTINGS_STORAGE_KEYS
+            : [...SETTINGS_STORAGE_KEYS, 'x_location_cache_v4'];
+        chrome.storage.local.get(keysToRead, (settings) => {
             if (safeHasError() || !settings) return;
-            if (settings.x_location_cache_v4) {
-                hydrateLocalUserCacheFromStorage(settings.x_location_cache_v4);
+            if (!hasHydratedStorageCache) {
+                hasHydratedStorageCache = true;
+                if (settings.x_location_cache_v4) {
+                    hydrateLocalUserCacheFromStorage(settings.x_location_cache_v4);
+                    delete settings.x_location_cache_v4;
+                }
             }
             cachedSettings = settings;
             cb(settings);
@@ -1871,6 +1968,10 @@
             applyTweetFilterForElement(filterTarget, filterTarget._xPrimaryLocationData || { screenName }, settings, elem);
         }
 
+        if (isUserLookupOnCooldown(screenNameLower)) {
+            return;
+        }
+
         // 3. Deduplicate in-flight IPC requests for the same screenName
         inflightElements.add(elem);
         elem._xInflightText = currentText;
@@ -1890,16 +1991,23 @@
             }, (response) => {
                 inflightScreenNames.delete(screenNameLower);
                 const hasErr = safeHasError();
-                const userData = (!hasErr && response && response.success && response.data) ? response.data : null;
+                const userData = (!hasErr && response && response.success && response.data && !response.data.error) ? response.data : null;
                 if (userData) {
-                    localUserCache.set(screenNameLower, userData);
+                    failedUserLookupUntil.delete(screenNameLower);
+                    setLocalUserCache(screenNameLower, userData);
                     broadcastResolvedUserLocation(screenNameLower, userData);
+                } else {
+                    markUserLookupFailed(screenNameLower);
                 }
                 const activeSettings = cachedSettings || settings;
                 for (let i = 0; i < waiters.length; i++) {
                     const w = waiters[i];
                     inflightElements.delete(w.elem);
-                    if (userData && w.elem) {
+                    if (userData && w.elem && w.elem.isConnected !== false) {
+                        const currentHandle = extractScreenNameFromUserCell(w.elem);
+                        if (currentHandle && currentHandle.toLowerCase() !== screenNameLower) {
+                            continue;
+                        }
                         processedElements.add(w.elem);
                         w.elem._xProcessedScreenName = screenNameLower;
                         if (window.XLocationUI) {
@@ -1914,6 +2022,7 @@
             });
         } catch (err) {
             inflightScreenNames.delete(screenNameLower);
+            markUserLookupFailed(screenNameLower);
             for (let i = 0; i < waiters.length; i++) {
                 inflightElements.delete(waiters[i].elem);
             }
@@ -2062,16 +2171,21 @@
 
     function isIgnoredExtensionNode(node) {
         if (!node || node.nodeType !== 1 || !node.classList) return false;
+        const testId = node.getAttribute ? node.getAttribute('data-testid') : '';
         return (
+            testId === 'app-text-transition-container' ||
             node.classList.contains('x-location-inline-badge') ||
             node.classList.contains('x-force-friend-btn-wrap') ||
             node.classList.contains('x-force-friend-btn') ||
             node.classList.contains('vsc-download-btn') ||
             node.classList.contains('x-tweet-filtered-placeholder') ||
             node.classList.contains('x-friend-seen-badge') ||
+            node.classList.contains('x-friends-tab-presentation') ||
+            node.classList.contains('x-card-badge') ||
             node.id === 'x-location-hovercard-root' ||
             node.id === 'x-414-floating-pill' ||
-            node.id === 'x-414-nav-trigger'
+            node.id === 'x-414-nav-trigger' ||
+            node.id === 'vsc-controller-host'
         );
     }
 
@@ -2105,7 +2219,7 @@
             if (
                 target &&
                 target.closest &&
-                target.closest('.x-location-inline-badge, .x-force-friend-btn-wrap, .vsc-download-btn, .x-tweet-filtered-placeholder, .x-friends-tab-badge, .x-friends-filter-pill, .x-forced-home-title, .x-friends-load-more-btn, #x-414-nav-trigger, #x-414-floating-pill')
+                target.closest('[data-testid="app-text-transition-container"], .x-location-inline-badge, .x-force-friend-btn-wrap, .vsc-download-btn, .x-tweet-filtered-placeholder, .x-friends-tab-badge, .x-friends-tab-presentation, .x-friends-filter-pill, .x-forced-home-title, .x-friends-load-more-btn, .x-card-badge, #x-414-nav-trigger, #x-414-floating-pill, #vsc-controller-host')
             ) {
                 continue;
             }

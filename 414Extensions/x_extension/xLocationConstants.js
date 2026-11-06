@@ -14,8 +14,8 @@ export const API_CONFIG = {
 
 export const CACHE_CONFIG = {
     EXPIRY_MS: 60 * 24 * 60 * 60 * 1000, // 60 days
-    MAX_ENTRIES: 50000,
-    SAVE_INTERVAL_MS: 60000
+    MAX_ENTRIES: 2000,
+    SAVE_INTERVAL_MS: 180000
 };
 
 export const CLOUD_CACHE_CONFIG = {

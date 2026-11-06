@@ -1090,10 +1090,10 @@
         }
 
         const isEmptyMeta = !meta || (!screenName && !displayText && !hasMedia && !embeddedTweet);
-        const needsHydration = !meta ||
-            !meta.isHydrated ||
-            meta.hydrationVersion !== 4 ||
-            (embeddedTweet && (!embeddedTweet.avatarUrl || !embeddedTweet.authorName));
+        const isFullyHydrated = Boolean(
+            meta && (meta.isUnavailable || (meta.isHydrated && meta.hydrationVersion === 4))
+        );
+        const needsHydration = !isFullyHydrated;
 
         const permalink = meta?.permalink || (screenName ? `https://x.com/${screenName}/status/${tweetId}` : `https://x.com/i/status/${tweetId}`);
         const timeStr = formatRelativeTime(snowflakeTimeMs, meta?.createdAt);
@@ -1309,11 +1309,13 @@
             rightCol.appendChild(body);
         }
 
+        const markNeedsHydration = isFullyHydrated ? null : () => {
+            card.setAttribute('data-needs-hydration', 'true');
+        };
+
         // 5. Media Attachments (Photos & Playable Videos)
         if (hasMedia) {
-            const mediaGrid = buildMediaGridElement(outerMedia, permalink, () => {
-                card.setAttribute('data-needs-hydration', 'true');
-            });
+            const mediaGrid = buildMediaGridElement(outerMedia, permalink, markNeedsHydration);
             if (mediaGrid) {
                 rightCol.appendChild(mediaGrid);
             }
@@ -1443,9 +1445,7 @@
             quoteBox.appendChild(quoteInner);
 
             if (Array.isArray(q.media) && q.media.length > 0) {
-                const qMediaGrid = buildMediaGridElement(q.media, qPermalink, () => {
-                    card.setAttribute('data-needs-hydration', 'true');
-                });
+                const qMediaGrid = buildMediaGridElement(q.media, qPermalink, markNeedsHydration);
                 if (qMediaGrid) {
                     qMediaGrid.classList.add('x-friend-card-quote-media');
                     quoteBox.appendChild(qMediaGrid);
@@ -1649,6 +1649,7 @@
             const cards = document.querySelectorAll(`article.x-friend-tweet-card[data-tweet-id="${tweetId}"]`);
             cards.forEach(oldCard => {
                 if (meta.isUnavailable) {
+                    oldCard.removeAttribute('data-needs-hydration');
                     const isForced = oldCard.classList.contains('is-forced-card') || Boolean(oldCard._xPostItem?.isForced);
                     if (!isForced && oldCard.parentNode) {
                         oldCard.parentNode.removeChild(oldCard);
@@ -1656,6 +1657,17 @@
                     return;
                 }
                 const prevItem = oldCard._xPostItem || { tweetId };
+                const prevMeta = prevItem.meta;
+                if (
+                    !oldCard.hasAttribute('data-needs-hydration') &&
+                    prevMeta &&
+                    prevMeta.isHydrated &&
+                    prevMeta.hydrationVersion === 4 &&
+                    prevMeta.updatedAt &&
+                    prevMeta.updatedAt === meta.updatedAt
+                ) {
+                    return;
+                }
                 const activeCbs = oldCard._xCallbacks || callbacks;
                 const wasSeen = Boolean(prevItem.isSeenByMe || oldCard.classList.contains('is-seen-by-me'));
                 const wasViewedInSession = oldCard.dataset?.xViewedInSession === 'true';
@@ -2025,8 +2037,12 @@
                 const currentScrollY = (typeof window !== 'undefined' && (window.scrollY || window.pageYOffset || 0)) || 0;
                 if (container._xWasMountedInCell) {
                     homeFeedScrolledPast = true;
+                    container._xCellUnmountCount = (container._xCellUnmountCount || 0) + 1;
                 }
-                if (homeFeedScrolledPast && !hasNewUnmountedPost && currentScrollY > 80) {
+                if (hasNewUnmountedPost) {
+                    container._xCellUnmountCount = 0;
+                }
+                if (homeFeedScrolledPast && !hasNewUnmountedPost && (currentScrollY > 80 || (container._xCellUnmountCount || 0) > 2)) {
                     return null;
                 }
 

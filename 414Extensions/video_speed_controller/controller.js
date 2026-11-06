@@ -197,6 +197,14 @@ const handleMouseEnter = (e) => {
 
 const handleGlobalKeyDownInternal = (e) => handleKeyDown(e); // Alias to existing function
 
+let lastViewportActivityMs = 0;
+const activeSyncWakeCallbacks = new Set();
+
+function handleViewportActivity() {
+    lastViewportActivityMs = Date.now();
+    activeSyncWakeCallbacks.forEach(wake => wake());
+}
+
 function init(savedSpeed) {
   if (isInitialized) return;
   isInitialized = true;
@@ -210,6 +218,10 @@ function init(savedSpeed) {
 
   // Keyboard
   document.addEventListener('keydown', handleGlobalKeyDownInternal);
+
+  // Passive scroll/resize activity wake for adaptive position sync
+  window.addEventListener('scroll', handleViewportActivity, { capture: true, passive: true });
+  window.addEventListener('resize', handleViewportActivity, { passive: true });
 }
 
 function deinit() {
@@ -226,6 +238,9 @@ function deinit() {
     // Remove Global Listeners
     document.removeEventListener('mouseenter', handleMouseEnter, true);
     document.removeEventListener('keydown', handleGlobalKeyDownInternal);
+    window.removeEventListener('scroll', handleViewportActivity, { capture: true });
+    window.removeEventListener('resize', handleViewportActivity);
+    activeSyncWakeCallbacks.clear();
 
     // Remove UI from all videos
     activeHosts.forEach(el => el.remove());
@@ -644,11 +659,55 @@ function attachController(video, initialSpeed) {
     let lastHostDisplay = '';
     let lastHostTop = '';
     let lastHostLeft = '';
+    let idleSyncTimer = null;
+    let rafPending = false;
+
+    function wakeSync() {
+        if (rafPending) return;
+        if (idleSyncTimer) {
+            clearTimeout(idleSyncTimer);
+            idleSyncTimer = null;
+        }
+        rafPending = true;
+        requestAnimationFrame(syncPosition);
+    }
+    activeSyncWakeCallbacks.add(wakeSync);
+
+    function scheduleNextSync() {
+        if (isGloballyDisabled || !video.isConnected) {
+            activeSyncWakeCallbacks.delete(wakeSync);
+            return;
+        }
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+            idleSyncTimer = setTimeout(() => {
+                idleSyncTimer = null;
+                syncPosition();
+            }, 1000);
+            if (typeof idleSyncTimer?.unref === 'function') idleSyncTimer.unref();
+            return;
+        }
+        if (isDragging || (Date.now() - lastViewportActivityMs) < 250) {
+            rafPending = true;
+            requestAnimationFrame(syncPosition);
+        } else {
+            idleSyncTimer = setTimeout(() => {
+                idleSyncTimer = null;
+                syncPosition();
+            }, 250);
+            if (typeof idleSyncTimer?.unref === 'function') idleSyncTimer.unref();
+        }
+    }
 
     // Position Sync Loop (Read-first, batched microtask DOM writes to prevent multi-video rAF layout thrashing)
     function syncPosition() {
+        rafPending = false;
         // If disabled or disconnected, remove and stop
         if (isGloballyDisabled || !video.isConnected) {
+            if (idleSyncTimer) {
+                clearTimeout(idleSyncTimer);
+                idleSyncTimer = null;
+            }
+            activeSyncWakeCallbacks.delete(wakeSync);
             host.remove();
             activeHosts.delete(host);
             attachedVideos.delete(video);
@@ -692,7 +751,7 @@ function attachController(video, initialSpeed) {
                 host.style.display = 'none';
                 lastHostDisplay = 'none';
             }
-            requestAnimationFrame(syncPosition);
+            scheduleNextSync();
             return;
         }
 
@@ -822,9 +881,10 @@ function attachController(video, initialSpeed) {
             });
         }
 
-        requestAnimationFrame(syncPosition);
+        scheduleNextSync();
     }
 
+    rafPending = true;
     requestAnimationFrame(syncPosition);
 }
 

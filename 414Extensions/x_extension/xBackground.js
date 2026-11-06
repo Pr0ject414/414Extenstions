@@ -140,6 +140,10 @@ export function handleMessage(request, sender, sendResponse) {
 
             // 3. Fallback to X GraphQL API
             apiClient.fetchUserInfo(screenName).then(data => {
+                if (!data || data.error) {
+                    sendResponse({ success: false, error: data?.error || data?.code || "Failed to fetch user info" });
+                    return;
+                }
                 locationCache.set(screenName, data);
                 cloudCache.contribute(screenName, data);
                 sendResponse({ success: true, data, fromCache: false });
@@ -149,6 +153,10 @@ export function handleMessage(request, sender, sendResponse) {
         }).catch(err => {
             // Fallback to X GraphQL API if cloud cache query fails
             apiClient.fetchUserInfo(screenName).then(data => {
+                if (!data || data.error) {
+                    sendResponse({ success: false, error: data?.error || data?.code || "Failed to fetch user info" });
+                    return;
+                }
                 locationCache.set(screenName, data);
                 cloudCache.contribute(screenName, data);
                 sendResponse({ success: true, data, fromCache: false });
