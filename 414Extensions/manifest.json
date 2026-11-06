@@ -146,10 +146,12 @@
         "*://*.google.com/*"
       ],
       "css": [
-        "misc_extension/content_scripts/googleImagesSaveHider.css"
+        "misc_extension/content_scripts/googleImagesSaveHider.css",
+        "misc_extension/content_scripts/geminiMarkdownExporter.css"
       ],
       "js": [
-        "misc_extension/content_scripts/googleImagesSaveHider.js"
+        "misc_extension/content_scripts/googleImagesSaveHider.js",
+        "misc_extension/content_scripts/geminiMarkdownExporter.js"
       ]
     }
   ],

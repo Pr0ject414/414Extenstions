@@ -1,0 +1,83 @@
+/* KylesChromeExtensions/misc_extension/content_scripts/geminiMarkdownExporter.css */
+
+.ext414-gemini-export-md-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 14px;
+    margin: 0 4px;
+    border-radius: 999px;
+    border: 1px solid rgba(138, 180, 248, 0.35);
+    background-color: rgba(138, 180, 248, 0.08);
+    color: inherit;
+    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    box-sizing: border-box;
+}
+
+.ext414-gemini-export-md-btn:hover {
+    background-color: rgba(138, 180, 248, 0.18);
+    border-color: rgba(138, 180, 248, 0.55);
+}
+
+.ext414-gemini-export-md-btn:active {
+    transform: scale(0.98);
+}
+
+.ext414-gemini-export-md-btn.ext414-md-downloaded {
+    border-color: rgba(129, 201, 149, 0.6);
+    background-color: rgba(129, 201, 149, 0.16);
+}
+
+.ext414-gemini-md-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.ext414-gemini-md-icon svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+}
+
+.ext414-gemini-export-md-menu-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 48px;
+    padding: 0 16px;
+    gap: 12px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 400;
+    text-align: left;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: background-color 0.15s ease;
+}
+
+.ext414-gemini-export-md-menu-item:hover,
+.ext414-gemini-export-md-menu-item:focus-visible {
+    background-color: rgba(138, 180, 248, 0.12);
+    outline: none;
+}
+
+.ext414-gemini-export-md-menu-item .mat-mdc-menu-item-text {
+    flex: 1;
+    white-space: nowrap;
+}

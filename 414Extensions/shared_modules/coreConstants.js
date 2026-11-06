@@ -40,6 +40,7 @@ export const CRUNCHYROLL_HIDE_CONTROLS_ON_SPEED_KEY = 'isCrunchyrollHideControls
 // Master On/Off Switch & Feature Keys for the Misc Module
 export const MISC_MODULE_ENABLED_KEY = 'isMiscModuleEnabled';
 export const GOOGLE_IMAGES_HIDE_SAVE_KEY = 'isGoogleImagesHideSaveEnabled';
+export const GEMINI_MARKDOWN_EXPORT_KEY = 'isGeminiMarkdownExportEnabled';
 
 // Global rate limiting
 export const RATE_LIMIT_COOL_DOWN_UNTIL_KEY = 'rateLimitCoolDownUntil';

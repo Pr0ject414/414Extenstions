@@ -204,11 +204,14 @@ describe('popup.js', () => {
 
         const miscPowerToggle = document.getElementById('miscModulePowerToggle');
         const hideSaveToggle = document.getElementById('googleImagesHideSaveToggle');
+        const geminiExportToggle = document.getElementById('geminiMarkdownExportToggle');
 
         expect(miscPowerToggle).not.toBeNull();
         expect(miscPowerToggle.checked).toBe(true);
         expect(hideSaveToggle).not.toBeNull();
         expect(hideSaveToggle.checked).toBe(false);
+        expect(geminiExportToggle).not.toBeNull();
+        expect(geminiExportToggle.checked).toBe(true);
 
         hideSaveToggle.checked = true;
         hideSaveToggle.dispatchEvent(new Event('change'));
@@ -217,5 +220,13 @@ describe('popup.js', () => {
         hideSaveToggle.checked = false;
         hideSaveToggle.dispatchEvent(new Event('change'));
         expect(mockStorageData.isGoogleImagesHideSaveEnabled).toBe(false);
+
+        geminiExportToggle.checked = false;
+        geminiExportToggle.dispatchEvent(new Event('change'));
+        expect(mockStorageData.isGeminiMarkdownExportEnabled).toBe(false);
+
+        geminiExportToggle.checked = true;
+        geminiExportToggle.dispatchEvent(new Event('change'));
+        expect(mockStorageData.isGeminiMarkdownExportEnabled).toBe(true);
     });
 });
